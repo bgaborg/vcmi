@@ -1,0 +1,556 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VCMI Quest 3 concept - war room / pop-up book / battle diorama</title>
+<style>
+body{margin:0;overflow:hidden;background:#000;font-family:Georgia,serif}
+#ui{position:fixed;top:10px;left:10px;z-index:10;display:flex;gap:6px}
+#ui button{padding:8px 12px;background:#3a2a14;color:#f3d48a;border:1px solid #c9a24a;cursor:pointer;font-family:inherit}
+#ui button.on{background:#c9a24a;color:#201406}
+#hint{position:fixed;bottom:70px;left:10px;color:#bbb;font-size:12px;line-height:1.5}
+.xrbox{position:fixed;bottom:0;width:0;height:0}
+</style>
+<script type="importmap">
+{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}
+</script>
+</head>
+<body>
+<div id="ui">
+  <button data-m="screen">1 War room screen</button>
+  <button data-m="table">2 Pop-up map</button>
+  <button data-m="battle">3 Battle diorama</button>
+</div>
+<div id="hint">Desktop: drag = orbit, wheel = zoom, keys 1/2/3 = mode<br>Quest: Enter VR (war room) or Enter AR (passthrough, your room) - grip = next mode, trigger = recenter table</div>
+<div class="xrbox" id="vrbox" style="left:35%"></div>
+<div class="xrbox" id="arbox" style="left:65%"></div>
+<script type="module">
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {VRButton} from 'three/addons/webxr/VRButton.js';
+import {ARButton} from 'three/addons/webxr/ARButton.js';
+
+// ---------- renderer / scene ----------
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local-floor');
+document.body.appendChild(renderer.domElement);
+document.getElementById('vrbox').appendChild(VRButton.createButton(renderer));
+document.getElementById('arbox').appendChild(ARButton.createButton(renderer, {optionalFeatures:['local-floor']}));
+
+const scene = new THREE.Scene();
+const BG = new THREE.Color(0x0a0806);
+scene.background = BG;
+const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.01, 50);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+const clock = new THREE.Clock();
+
+// ---------- helpers ----------
+const hash = (x,y,s=0) => { const v = Math.sin(x*127.1 + y*311.7 + s*74.7)*43758.5453; return v - Math.floor(v); };
+function tex(w,h,draw){
+  const c = document.createElement('canvas'); c.width=w; c.height=h;
+  draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+  return t;
+}
+const easeOutBack = k => 1 + 2.70158*Math.pow(k-1,3) + 1.70158*Math.pow(k-1,2);
+
+// ---------- 2D sprite primitives (unit coordinates) ----------
+const S = '#2a2015';
+function P(g,pts,fill,stroke=S){ g.beginPath(); pts.forEach(([x,y],i)=> i?g.lineTo(x,y):g.moveTo(x,y)); g.closePath();
+  if(fill){g.fillStyle=fill; g.fill();} if(stroke){g.strokeStyle=stroke; g.lineWidth=0.03; g.stroke();} }
+function R(g,x,y,w,h,fill){ P(g,[[x,y],[x+w,y],[x+w,y+h],[x,y+h]],fill); }
+function C(g,x,y,r,fill,stroke=S){ g.beginPath(); g.arc(x,y,r,0,Math.PI*2); g.fillStyle=fill; g.fill();
+  if(stroke){g.strokeStyle=stroke; g.lineWidth=0.03; g.stroke();} }
+function E(g,x,y,rx,ry,fill){ g.beginPath(); g.ellipse(x,y,rx,ry,0,0,Math.PI*2); g.fillStyle=fill; g.fill(); g.strokeStyle=S; g.lineWidth=0.03; g.stroke(); }
+function L(g,x1,y1,x2,y2,col,w=0.03){ g.beginPath(); g.moveTo(x1,y1); g.lineTo(x2,y2); g.strokeStyle=col; g.lineWidth=w; g.lineCap='round'; g.stroke(); }
+
+const heroDef = col => ({w:1,h:1.2,draw(g){
+  L(g,0.78,0.05,0.78,0.72,'#4a3015'); P(g,[[0.78,0.05],[1.0,0.12],[0.78,0.2]],col);
+  [0.22,0.32,0.58,0.68].forEach(x=>R(g,x,0.85,0.06,0.33,'#5a3818'));
+  E(g,0.45,0.8,0.32,0.15,'#7a4e28'); P(g,[[0.66,0.76],[0.84,0.5],[0.97,0.56],[0.84,0.84]],'#7a4e28');
+  P(g,[[0.36,0.75],[0.38,0.45],[0.55,0.45],[0.56,0.75]],col); C(g,0.47,0.37,0.08,'#e8c39e');
+  P(g,[[0.39,0.33],[0.47,0.24],[0.55,0.33]],'#c0c0c8');
+}});
+const mirror = d => ({w:d.w,h:d.h,draw(g){ g.translate(d.w,0); g.scale(-1,1); d.draw(g); }});
+
+const SPR = {
+  tree:{w:1,h:1.4,draw(g){ R(g,0.43,0.9,0.14,0.5,'#5b3a1e'); C(g,0.5,0.62,0.4,'#2f6b22'); C(g,0.3,0.78,0.24,'#3b7d2a'); C(g,0.7,0.76,0.25,'#3b7d2a'); C(g,0.48,0.4,0.22,'#4f9a36'); }},
+  pine:{w:0.8,h:1.5,draw(g){ R(g,0.35,1.2,0.1,0.3,'#5b3a1e'); P(g,[[0.4,0.55],[0.78,1.25],[0.02,1.25]],'#24552a'); P(g,[[0.4,0.3],[0.7,0.9],[0.1,0.9]],'#2d6633'); P(g,[[0.4,0.05],[0.6,0.55],[0.2,0.55]],'#367a3c'); }},
+  mountain:{w:2,h:1.1,draw(g){ P(g,[[0.02,1.08],[0.7,0.12],[1.15,0.65],[1.5,0.32],[1.98,1.08]],'#7d7466');
+    P(g,[[0.7,0.12],[1.15,0.65],[0.95,1.08],[0.72,1.08]],'rgba(0,0,0,0.2)',null);
+    P(g,[[0.54,0.35],[0.7,0.12],[0.87,0.37],[0.76,0.32],[0.66,0.4]],'#f4f4f4'); P(g,[[1.4,0.45],[1.5,0.32],[1.62,0.47]],'#f4f4f4'); }},
+  castle:{w:2,h:2,draw(g){
+    R(g,0.22,0.85,0.36,1.1,'#b3a68c'); R(g,1.42,0.85,0.36,1.1,'#b3a68c');
+    P(g,[[0.16,0.85],[0.4,0.45],[0.64,0.85]],'#a8322a'); P(g,[[1.36,0.85],[1.6,0.45],[1.84,0.85]],'#a8322a');
+    R(g,0.72,0.7,0.56,1.25,'#cfc3a9'); P(g,[[0.66,0.7],[1,0.25],[1.34,0.7]],'#b73a2f');
+    L(g,1,0.25,1,0.03,'#3a2a1a'); P(g,[[1,0.03],[1.28,0.09],[1,0.16]],'#2b5fd0');
+    R(g,0.08,1.3,1.84,0.68,'#c2b59b'); for(let i=0;i<10;i++) R(g,0.08+i*0.19,1.2,0.1,0.1,'#c2b59b');
+    g.fillStyle='#2a1c10'; g.beginPath(); g.moveTo(0.8,1.98); g.lineTo(0.8,1.68); g.arc(1,1.68,0.2,Math.PI,0); g.lineTo(1.2,1.98); g.fill();
+    [[0.33,1.0],[1.53,1.0],[0.92,0.9],[1.02,0.9],[0.4,1.5],[1.55,1.5]].forEach(([x,y])=>R(g,x,y,0.07,0.12,'#2a1c10')); }},
+  hero: heroDef('#2b5fd0'),
+  heroRed: mirror(heroDef('#c03030')),
+  mine:{w:1.4,h:1,draw(g){ P(g,[[0.02,0.98],[0.35,0.25],[0.7,0.1],[1.05,0.3],[1.38,0.98]],'#7a5c3a');
+    g.fillStyle='#120c06'; g.beginPath(); g.moveTo(0.5,0.98); g.lineTo(0.5,0.62); g.arc(0.7,0.62,0.2,Math.PI,0); g.lineTo(0.9,0.98); g.fill();
+    R(g,0.45,0.5,0.06,0.48,'#8a5a2a'); R(g,0.89,0.5,0.06,0.48,'#8a5a2a'); R(g,0.42,0.46,0.56,0.07,'#8a5a2a');
+    R(g,1.02,0.8,0.3,0.15,'#555'); C(g,1.1,0.78,0.06,'#999'); C(g,1.2,0.76,0.07,'#aaa'); C(g,1.28,0.79,0.05,'#888'); }},
+  gold:{w:0.7,h:0.42,draw(g){ [[0.15,0.32],[0.3,0.33],[0.45,0.32],[0.58,0.33],[0.22,0.22],[0.38,0.22],[0.52,0.23],[0.3,0.12],[0.45,0.12]].forEach(([x,y])=>C(g,x,y,0.09,'#f2c230','#8a6a10')); }},
+  chest:{w:0.7,h:0.55,draw(g){ R(g,0.05,0.25,0.6,0.28,'#7a4a20'); P(g,[[0.05,0.25],[0.1,0.08],[0.6,0.08],[0.65,0.25]],'#8f5a28');
+    R(g,0.12,0.08,0.06,0.45,'#e0b030'); R(g,0.52,0.08,0.06,0.45,'#e0b030'); R(g,0.31,0.24,0.08,0.1,'#e0b030'); }},
+  windmill:{w:1,h:1.6,draw(g){ P(g,[[0.32,1.58],[0.4,0.6],[0.6,0.6],[0.68,1.58]],'#e3d6b8'); P(g,[[0.35,0.62],[0.5,0.38],[0.65,0.62]],'#8a3a2a');
+    R(g,0.45,1.3,0.1,0.28,'#5b3a1e'); g.save(); g.translate(0.5,0.6); g.rotate(0.4);
+    for(let i=0;i<4;i++){ g.rotate(Math.PI/2); R(g,-0.04,0.05,0.08,0.42,'#d8c8a0'); } g.restore(); C(g,0.5,0.6,0.04,'#5b3a1e'); }},
+  dragon:{w:1.5,h:1.2,draw(g){ P(g,[[0.6,0.6],[0.4,0.05],[0.9,0.35]],'#7a1414'); P(g,[[0.8,0.6],[1.0,0.02],[1.25,0.4]],'#8a1a1a');
+    P(g,[[0.1,1.0],[0.3,0.85],[0.5,0.9]],'#b02020'); E(g,0.75,0.8,0.38,0.2,'#c42a20');
+    P(g,[[1.0,0.75],[1.2,0.45],[1.4,0.45],[1.45,0.55],[1.25,0.62],[1.1,0.85]],'#c42a20'); C(g,1.32,0.5,0.025,'#ffee55',null);
+    [0.5,0.65,0.9,1.0].forEach(x=>R(g,x,0.92,0.07,0.26,'#9a1c18')); }},
+  knight:{w:0.8,h:1.1,draw(g){ R(g,0.28,0.75,0.1,0.33,'#777'); R(g,0.44,0.75,0.1,0.33,'#777');
+    P(g,[[0.24,0.78],[0.26,0.38],[0.56,0.38],[0.58,0.78]],'#a0a4b0'); C(g,0.41,0.28,0.11,'#b8bcc8'); R(g,0.33,0.25,0.16,0.04,'#222');
+    L(g,0.66,0.2,0.62,0.75,'#ddd',0.04); L(g,0.56,0.55,0.72,0.55,'#8a6a20',0.04);
+    P(g,[[0.08,0.42],[0.32,0.42],[0.32,0.7],[0.2,0.82],[0.08,0.7]],'#2b5fd0'); L(g,0.2,0.45,0.2,0.75,'#f2c230',0.04); L(g,0.11,0.56,0.29,0.56,'#f2c230',0.04); }},
+  archer:{w:0.8,h:1.1,draw(g){ R(g,0.3,0.75,0.08,0.33,'#5a3818'); R(g,0.44,0.75,0.08,0.33,'#5a3818');
+    P(g,[[0.25,0.8],[0.28,0.4],[0.52,0.4],[0.56,0.8]],'#3c7a32'); C(g,0.4,0.3,0.1,'#e8c39e'); P(g,[[0.28,0.3],[0.4,0.14],[0.52,0.3]],'#2d5e25');
+    g.beginPath(); g.arc(0.5,0.55,0.28,-1.2,1.2); g.strokeStyle='#6b4423'; g.lineWidth=0.04; g.stroke();
+    L(g,0.6,0.29,0.6,0.81,'#eee',0.015); L(g,0.4,0.55,0.75,0.55,'#8a6a40',0.02); }},
+  griffin:{w:1.1,h:1,draw(g){ P(g,[[0.45,0.5],[0.2,0.0],[0.7,0.35]],'#c9a46a'); P(g,[[0.15,0.75],[0.0,0.6],[0.1,0.85]],'#b08850');
+    E(g,0.45,0.65,0.32,0.17,'#c9a46a'); [0.25,0.38,0.55,0.65].forEach(x=>R(g,x,0.75,0.06,0.23,'#a07840'));
+    P(g,[[0.7,0.6],[0.82,0.35],[0.95,0.33],[1.08,0.4],[0.95,0.45],[0.85,0.62]],'#f0eadc'); C(g,0.92,0.38,0.02,'#000',null); }},
+  skeleton: mirror({w:0.7,h:1.1,draw(g){ const b='#ece6d6'; L(g,0.3,0.75,0.25,1.08,b,0.05); L(g,0.4,0.75,0.45,1.08,b,0.05); L(g,0.35,0.4,0.35,0.75,b,0.05);
+    for(let i=0;i<4;i++) L(g,0.24,0.45+i*0.07,0.46,0.45+i*0.07,b,0.03);
+    C(g,0.35,0.3,0.1,b); C(g,0.31,0.29,0.025,'#222',null); C(g,0.39,0.29,0.025,'#222',null);
+    L(g,0.35,0.45,0.15,0.65,b,0.04); L(g,0.52,0.45,0.62,0.6,b,0.04); L(g,0.62,0.6,0.56,0.15,'#999',0.04); }}),
+  rock:{w:1,h:0.6,draw(g){ P(g,[[0.02,0.58],[0.1,0.25],[0.35,0.05],[0.65,0.1],[0.9,0.3],[0.98,0.58]],'#857d72');
+    P(g,[[0.35,0.05],[0.65,0.1],[0.55,0.58],[0.3,0.58]],'rgba(255,255,255,0.12)',null); }},
+};
+SPR.redDragon = mirror(SPR.dragon);
+
+// Sprite to canvas; border = white die-cut paper edge (pop-up book look)
+function spriteCanvas(def, ppu, border){
+  const pad = border ? 7 : 0;
+  const W = Math.ceil(def.w*ppu)+pad*2, H = Math.ceil(def.h*ppu)+pad*2;
+  const s = document.createElement('canvas'); s.width=W; s.height=H;
+  const sg = s.getContext('2d'); sg.translate(pad,pad); sg.scale(ppu,ppu); def.draw(sg);
+  if(!border) return s;
+  const w = document.createElement('canvas'); w.width=W; w.height=H;
+  const wg = w.getContext('2d'); wg.drawImage(s,0,0); wg.globalCompositeOperation='source-in'; wg.fillStyle='#f4ecd8'; wg.fillRect(0,0,W,H);
+  const c = document.createElement('canvas'); c.width=W; c.height=H;
+  const g = c.getContext('2d');
+  for(let a=0;a<16;a++) g.drawImage(w, Math.cos(a/16*Math.PI*2)*pad*0.8, Math.sin(a/16*Math.PI*2)*pad*0.8);
+  g.drawImage(s,0,0);
+  return c;
+}
+// Standing paper card, pivot at bottom edge
+function makeCard(def, widthM){
+  const c = spriteCanvas(def, Math.round(320/Math.max(def.w,def.h)), true);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+  const hM = widthM*c.height/c.width;
+  const geo = new THREE.PlaneGeometry(widthM, hM); geo.translate(0, hM/2, 0);
+  const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({map:t, alphaTest:0.5, side:THREE.DoubleSide, roughness:0.9}));
+  m.castShadow = true;
+  const pivot = new THREE.Group(); pivot.add(m);
+  return pivot;
+}
+
+// ---------- shared adventure map data (same map on screen and on table) ----------
+const COLS=24, ROWS=16;
+function terrainAt(x,y){
+  if(Math.hypot((x-4)/4.5,(y-4)/3.2)<1) return 'water';
+  if(Math.hypot((x-19)/4,(y-12)/3)<1) return 'swamp';
+  if(Math.hypot((x-13)/3,(y-3)/2.5)<1) return 'rough';
+  return 'grass';
+}
+const fogAt = (x,y) => x >= 19 + Math.floor(hash(7,y)*2) - (y<3?1:0);
+const RIVER = [[8.3,4.5],[9.5,5.5],[9,7],[10.5,8],[11,9.5],[10.2,11],[9.5,13],[10,16]];
+const ROAD  = [[5.5,10.0],[7,10.5],[9.5,10.5],[11.5,9.5],[12.5,8.5],[15.5,7.5],[15.5,6.2]];
+const PATH  = [[10,10],[11,9],[12,8],[13,8],[14,7],[15,7],[15,6]];
+const OBJ = [
+  ['castle',5,9,3.2],['hero',9,10,1.1],['mine',15,5,1.7],['windmill',11,12,1.1],['dragon',14,9,1.6],
+  ['gold',8,6,0.7],['gold',13,11,0.7],['chest',3,8,0.7],
+  ['mountain',12,2,2.6],['mountain',16,1,2.4],['mountain',18,5,2.2],
+  ...[[1,11,'tree'],[2,12,'pine'],[1,13,'tree'],[3,14,'pine'],[2,15,'tree'],[0,9,'pine'],[9,2,'tree'],[10,4,'pine'],[8,1,'pine'],
+      [20,8,'tree'],[21,10,'pine'],[22,7,'tree'],[17,13,'tree'],[16,14,'pine'],[18,15,'tree'],[10,14,'tree'],[11,15,'pine'],
+      [6,14,'tree'],[7,15,'pine'],[20,1,'pine'],[22,3,'tree'],[23,12,'pine'],[0,15,'pine'],[13,15,'tree']]
+     .map(([x,y,k])=>[k,x,y,k==='tree'?1.0:0.85]),
+].sort((a,b)=>a[2]-b[2]);
+
+function drawTerrain(g,cols,rows,tp){
+  const pal = {grass:['#4f8a2e','#58933a','#47812b'], water:['#1d5a92','#2163a0','#1b5288'], swamp:['#3d5838','#46613f','#38522f'], rough:['#8b6e45','#967a52','#7f6440']};
+  for(let y=0;y<rows;y++) for(let x=0;x<cols;x++){
+    const t = terrainAt(x,y), p = pal[t];
+    g.fillStyle = p[Math.floor(hash(x,y)*p.length)]; g.fillRect(x*tp, y*tp, tp+1, tp+1);
+    for(let i=0;i<4;i++){
+      const sx = x*tp + hash(x,y,i+1)*tp, sy = y*tp + hash(x,y,i+9)*tp;
+      if(t==='water'){ g.fillStyle='rgba(255,255,255,0.18)'; g.fillRect(sx,sy,tp*0.25,tp*0.04); }
+      else { g.fillStyle='rgba(0,0,0,0.12)'; g.beginPath(); g.arc(sx,sy,tp*0.06,0,7); g.fill(); }
+    }
+  }
+  g.fillStyle='#cdb67a'; const s = tp*0.14;
+  for(let y=0;y<rows;y++) for(let x=0;x<cols;x++){
+    if(terrainAt(x,y)==='water') continue;
+    if(terrainAt(x-1,y)==='water') g.fillRect(x*tp,y*tp,s,tp);
+    if(terrainAt(x+1,y)==='water') g.fillRect((x+1)*tp-s,y*tp,s,tp);
+    if(terrainAt(x,y-1)==='water') g.fillRect(x*tp,y*tp,tp,s);
+    if(terrainAt(x,y+1)==='water') g.fillRect(x*tp,(y+1)*tp-s,tp,s);
+  }
+  const line = (pts,col,w,dash)=>{ g.save(); g.strokeStyle=col; g.lineWidth=w; g.lineCap='round'; g.lineJoin='round'; if(dash) g.setLineDash(dash);
+    g.beginPath(); pts.forEach(([px,py],i)=> i?g.lineTo(px*tp,py*tp):g.moveTo(px*tp,py*tp)); g.stroke(); g.restore(); };
+  line(RIVER,'#2a6fb5',tp*0.32); line(RIVER,'#5aa0dd',tp*0.1,[tp*0.3,tp*0.4]);
+  line(ROAD,'#9c7b4c',tp*0.38); line(ROAD,'#c2a070',tp*0.22,[tp*0.2,tp*0.15]);
+}
+
+const RES = [['#8a5a2a','12'],['#c0c0d0','4'],['#707070','10'],['#e0d040','3'],['#e04040','5'],['#40a0e0','6'],['#f2c230','14 500']];
+function drawResources(g,W,H){
+  g.fillStyle='#2a1c0e'; g.fillRect(0,0,W,H); g.strokeStyle='#c9a24a'; g.lineWidth=4; g.strokeRect(3,3,W-6,H-6);
+  const date='Month 1, Week 2, Day 3', pad=16;
+  g.textBaseline='middle';
+  // shrink font until resources + date fit side by side
+  let f=Math.round(H*0.42), widths, total, dw;
+  for(;;){
+    g.font=`bold ${f}px Georgia`;
+    const icon=f*1.1, gap=f*0.9;
+    widths = RES.map(([,v])=>icon+g.measureText(v).width+gap);
+    total = widths.reduce((a,b)=>a+b,0); dw = g.measureText(date).width;
+    if(pad+total+dw+pad <= W || f<=8) break;
+    f--;
+  }
+  const r=f*0.42; let x=pad;
+  RES.forEach(([c,v],i)=>{ g.fillStyle=c; g.beginPath(); g.arc(x+r,H/2,r,0,7); g.fill();
+    g.fillStyle='#f3e3b0'; g.fillText(v,x+f*1.1,H/2); x+=widths[i]; });
+  g.fillStyle='#f3e3b0'; g.textAlign='right'; g.fillText(date,W-pad,H/2); g.textAlign='left';
+}
+
+// Classic flat adventure UI = what VCMI renders today
+function drawScreen(g,W,H){
+  g.fillStyle='#000'; g.fillRect(0,0,W,H);
+  g.save(); g.translate(8,8); g.beginPath(); g.rect(0,0,1024,672); g.clip();
+  drawTerrain(g,32,21,32);
+  for(const o of OBJ){ const d=SPR[o[0]], wpx=o[3]*32, c=spriteCanvas(d,wpx/d.w,false); g.drawImage(c,(o[1]+0.5)*32-wpx/2,(o[2]+1)*32-c.height); }
+  PATH.forEach(([x,y],i)=>{ g.fillStyle = i===PATH.length-1 ? '#d02020' : '#30d030'; g.beginPath(); g.arc((x+0.5)*32,(y+0.5)*32,5,0,7); g.fill(); });
+  g.fillStyle='#000'; for(let y=0;y<21;y++) for(let x=0;x<32;x++) if(fogAt(x,y)) g.fillRect(x*32,y*32,33,33);
+  g.restore();
+  const px=1040; g.fillStyle='#3a2a16'; g.fillRect(px,0,240,H); g.strokeStyle='#c9a24a'; g.lineWidth=3; g.strokeRect(px+4,4,232,H-8);
+  g.save(); g.translate(px+12,12); g.scale(216/32,144/21); drawTerrain(g,32,21,1);
+  g.fillStyle='#000'; for(let y=0;y<21;y++) for(let x=0;x<32;x++) if(fogAt(x,y)) g.fillRect(x,y,1.05,1.05);
+  g.strokeStyle='#fff'; g.lineWidth=0.3; g.strokeRect(2,3,14,10); g.restore();
+  const heroes=[['G','#4a6fb5'],['O','#b5704a'],['S','#7a4ab5']];
+  heroes.forEach(([n,c],i)=>{ const y=170+i*62; g.fillStyle=c; g.fillRect(px+14,y,56,56); g.strokeStyle='#c9a24a'; g.strokeRect(px+14,y,56,56);
+    g.fillStyle='#fff'; g.font='bold 28px Georgia'; g.fillText(n,px+32,y+38);
+    g.fillStyle='#2a8f2a'; g.fillRect(px+72,y+56*i*0.3,6,56*(1-i*0.3)); g.fillStyle='#2a5fd0'; g.fillRect(px+80,y+56*i*0.2,6,56*(1-i*0.2)); });
+  [0,1].forEach(i=>{ const y=170+i*62; g.fillStyle='#5a4428'; g.fillRect(px+150,y,72,56); g.drawImage(spriteCanvas(SPR.castle,26,false),px+160,y+2); });
+  const btns=['Kingdom','Under','Quests','Sleep','Move','Spells','Options','End turn'];
+  g.font='bold 15px Georgia'; g.textAlign='center';
+  btns.forEach((b,i)=>{ const x=px+14+(i%2)*108, y=380+Math.floor(i/2)*60; g.fillStyle='#4a3218'; g.fillRect(x,y,104,52); g.strokeStyle='#c9a24a'; g.strokeRect(x,y,104,52); g.fillStyle='#f3e3b0'; g.fillText(b,x+52,y+31); });
+  g.textAlign='left';
+  g.fillStyle='#120c06'; g.fillRect(px+14,628,212,80); g.fillStyle='#f3e3b0'; g.font='15px Georgia'; g.fillText('Gerwulf, Knight',px+24,654); g.fillText('Movement: 1400',px+24,678);
+  g.save(); g.translate(0,682); drawResources(g,1032,38); g.restore();
+}
+
+// ---------- room ----------
+const room = new THREE.Group(); scene.add(room);
+function stoneTex(rx,ry,bw,bh){
+  const t = tex(512,512,(g,w,h)=>{ g.fillStyle='#2a241e'; g.fillRect(0,0,w,h);
+    for(let r=0;r<h/bh;r++) for(let c=-1;c<w/bw+1;c++){ const x=c*bw-(r%2?bw/2:0), y=r*bh, v=55+hash(c,r)*30|0;
+      g.fillStyle=`rgb(${v+18},${v+10},${v})`; g.fillRect(x+3,y+3,bw-6,bh-6); } });
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rx,ry); return t;
+}
+const walls = new THREE.Mesh(new THREE.BoxGeometry(8,3.6,8), new THREE.MeshStandardMaterial({map:stoneTex(4,2,64,32), side:THREE.BackSide, roughness:0.95}));
+walls.position.set(0,1.8,-1); room.add(walls);
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(8,8), new THREE.MeshStandardMaterial({map:stoneTex(4,4,128,128), roughness:0.9}));
+floor.rotation.x=-Math.PI/2; floor.position.set(0,0.002,-1); floor.receiveShadow=true; room.add(floor);
+function banner(col,x,z,ry){
+  const t = tex(256,512,(g,w,h)=>{ g.fillStyle=col; g.fillRect(0,0,w,h-60);
+    g.beginPath(); g.moveTo(0,h-60); g.lineTo(w/2,h); g.lineTo(w,h-60); g.fill();
+    g.strokeStyle='#e0b040'; g.lineWidth=12; g.strokeRect(14,14,w-28,h-100);
+    g.fillStyle='#e0b040'; g.beginPath(); g.arc(w/2,200,70,0,7); g.fill(); g.fillStyle=col; g.font='bold 110px Georgia'; g.textAlign='center'; g.fillText('♜',w/2,240); });
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(0.8,1.6), new THREE.MeshStandardMaterial({map:t, transparent:true, side:THREE.DoubleSide}));
+  m.position.set(x,2.0,z); m.rotation.y=ry; room.add(m);
+}
+banner('#8a1c1c',-3.97,-1.6, Math.PI/2); banner('#1c3a8a',3.97,-1.6,-Math.PI/2);
+banner('#8a1c1c',-1.5,-4.97,0); banner('#1c3a8a',1.5,-4.97,0);
+const win = new THREE.Mesh(new THREE.PlaneGeometry(1.0,1.6), new THREE.MeshBasicMaterial({color:0xffe6b0}));
+win.position.set(-3.97,2.0,0.4); win.rotation.y=Math.PI/2; room.add(win);
+
+// lights
+scene.add(new THREE.HemisphereLight(0xffe2b0,0x302010,1.1));
+const sun = new THREE.DirectionalLight(0xfff0d0,2.2);
+sun.position.set(-1.6,3,0.4); sun.target.position.set(0,0.75,-0.75); scene.add(sun, sun.target);
+sun.castShadow=true; sun.shadow.mapSize.set(2048,2048);
+Object.assign(sun.shadow.camera,{left:-1.1,right:1.1,top:1.1,bottom:-1.1,near:0.5,far:6}); sun.shadow.bias=-0.0004;
+
+// ---------- table ----------
+const TABLE_Y=0.75, TABLE_Z=-0.75;
+const base = new THREE.Group(); base.position.set(0,TABLE_Y,TABLE_Z); scene.add(base);
+const woodTex = tex(512,256,(g,w,h)=>{ g.fillStyle='#5a3418'; g.fillRect(0,0,w,h);
+  for(let i=0;i<120;i++){ g.strokeStyle=`rgba(${30+hash(i,1)*40|0},${15+hash(i,2)*20|0},5,${0.3+hash(i,3)*0.4})`; g.lineWidth=1+hash(i,4)*2;
+    g.beginPath(); const y=hash(i,5)*h; g.moveTo(0,y); for(let x=0;x<=w;x+=32) g.lineTo(x,y+Math.sin(x*0.02+i)*3); g.stroke(); } });
+const woodMat = new THREE.MeshStandardMaterial({map:woodTex, roughness:0.75});
+const top = new THREE.Mesh(new THREE.BoxGeometry(1.7,0.06,1.15), woodMat); top.position.y=-0.03; top.castShadow=top.receiveShadow=true; base.add(top);
+const legs=[];
+for(const [x,z] of [[-0.78,-0.5],[0.78,-0.5],[-0.78,0.5],[0.78,0.5]]){
+  const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.04,0.05,0.72,12), woodMat); leg.position.set(x,-0.42,z); leg.castShadow=true; base.add(leg); legs.push(leg);
+}
+// Stretch legs from table top (-0.06) down to base-local y = bottom
+function setLegBottom(bottom){ const len=-0.06-bottom; for(const l of legs){ l.scale.y=len/0.72; l.position.y=-0.06-len/2; } }
+const flames=[];
+for(const x of [-0.76,0.76]){
+  const candle = new THREE.Mesh(new THREE.CylinderGeometry(0.02,0.022,0.14,16), new THREE.MeshStandardMaterial({color:0xefe6cc})); candle.position.set(x,0.07,-0.48); base.add(candle);
+  const flame = new THREE.Mesh(new THREE.SphereGeometry(0.012,12,8), new THREE.MeshBasicMaterial({color:0xffb040})); flame.scale.y=1.8; flame.position.set(x,0.16,-0.48); base.add(flame);
+  const pl = new THREE.PointLight(0xffa050,1.2,3,2); pl.position.set(x,0.2,-0.48); base.add(pl); flames.push({flame,pl});
+}
+
+// ---------- MODE 1: war room curved screen ----------
+const screenGroup = new THREE.Group(); scene.add(screenGroup);
+const R_SCR=2.4, SPAN=1.1, SH=R_SCR*SPAN/1.7778, SCR_Y=1.5;
+const scrTex = tex(1280,720,drawScreen); scrTex.wrapS=THREE.RepeatWrapping; scrTex.repeat.x=-1;
+const scr = new THREE.Mesh(new THREE.CylinderGeometry(R_SCR,R_SCR,SH,64,1,true,Math.PI-SPAN/2,SPAN), new THREE.MeshBasicMaterial({map:scrTex, side:THREE.DoubleSide}));
+scr.position.set(0,SCR_Y,0); screenGroup.add(scr);
+const frame = new THREE.Mesh(new THREE.CylinderGeometry(R_SCR+0.02,R_SCR+0.02,SH+0.08,64,1,true,Math.PI-SPAN/2-0.02,SPAN+0.04), new THREE.MeshStandardMaterial({color:0x2a1a0c, side:THREE.DoubleSide}));
+frame.position.copy(scr.position); screenGroup.add(frame);
+const closedBook = new THREE.Mesh(new THREE.BoxGeometry(0.34,0.06,0.26), new THREE.MeshStandardMaterial({color:0x5a1a14, roughness:0.7}));
+closedBook.position.set(-0.45,0.03,0.15); closedBook.rotation.y=0.3; closedBook.castShadow=true; base.add(closedBook);
+// fake controller + laser for desktop preview
+const ctrl = new THREE.Mesh(new THREE.CapsuleGeometry(0.018,0.07,4,12), new THREE.MeshStandardMaterial({color:0x222222}));
+ctrl.position.set(0.22,0.95,-0.2); ctrl.rotation.x=-1.2; screenGroup.add(ctrl);
+const laserGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+const laser = new THREE.Line(laserGeo, new THREE.LineBasicMaterial({color:0x9fd8ff}));
+const cursor = new THREE.Mesh(new THREE.SphereGeometry(0.014,12,8), new THREE.MeshBasicMaterial({color:0xffffff}));
+screenGroup.add(laser, cursor);
+
+// ---------- MODE 2: pop-up book adventure map ----------
+const tableGroup = new THREE.Group(); base.add(tableGroup);
+const T=0.05, MAP_Y=0.036;
+const tablePops=[];
+const cover = new THREE.Mesh(new THREE.BoxGeometry(1.32,0.02,0.92), new THREE.MeshStandardMaterial({color:0x5a1a14, roughness:0.7})); cover.position.y=0.01; cover.castShadow=true; tableGroup.add(cover);
+const pages = new THREE.Mesh(new THREE.BoxGeometry(1.26,0.014,0.86), new THREE.MeshStandardMaterial({color:0xefe4c8})); pages.position.y=0.027; tableGroup.add(pages);
+const mapTex = tex(COLS*48,ROWS*48,(g,w,h)=>{ drawTerrain(g,COLS,ROWS,48);
+  const gr=g.createLinearGradient(0,0,w,0); gr.addColorStop(0.46,'rgba(0,0,0,0)'); gr.addColorStop(0.5,'rgba(40,20,0,0.35)'); gr.addColorStop(0.54,'rgba(0,0,0,0)');
+  g.fillStyle=gr; g.fillRect(0,0,w,h); });
+const mapMesh = new THREE.Mesh(new THREE.PlaneGeometry(COLS*T,ROWS*T), new THREE.MeshStandardMaterial({map:mapTex, roughness:0.95}));
+mapMesh.rotation.x=-Math.PI/2; mapMesh.position.y=MAP_Y; mapMesh.receiveShadow=true; tableGroup.add(mapMesh);
+const tileBase = (x,y) => new THREE.Vector3((x+0.5-COLS/2)*T, MAP_Y, (y+1-ROWS/2)*T-0.006);
+const tileCenter = (x,y) => new THREE.Vector3((x+0.5-COLS/2)*T, MAP_Y, (y+0.5-ROWS/2)*T);
+let heroPivot=null;
+for(const o of OBJ){
+  if(o[1]>=COLS || o[2]>=ROWS) continue;
+  const pv = makeCard(SPR[o[0]], o[3]*T); pv.position.copy(tileBase(o[1],o[2])); tableGroup.add(pv);
+  tablePops.push({o:pv, d:0.2 + o[2]*0.05 + hash(o[1],o[2])*0.15});
+  if(o[0]==='hero') heroPivot=pv;
+}
+const fogTex = tex(64,64,(g,w,h)=>{ const gr=g.createRadialGradient(32,32,4,32,32,32); gr.addColorStop(0,'rgba(255,255,255,1)'); gr.addColorStop(1,'rgba(255,255,255,0)'); g.fillStyle=gr; g.fillRect(0,0,w,h); });
+const fogs=[];
+for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++) if(fogAt(x,y)){
+  const f = new THREE.Mesh(new THREE.PlaneGeometry(T*2.2,T*2.2), new THREE.MeshBasicMaterial({map:fogTex, color:0x1c1c26, transparent:true, opacity:0.95, depthWrite:false}));
+  f.rotation.x=-Math.PI/2; const c=tileCenter(x,y); f.position.set(c.x, MAP_Y+0.09+hash(x,y,3)*0.02, c.z); f.userData.ph=hash(x,y,5)*6;
+  tableGroup.add(f); fogs.push(f);
+}
+const pathDiscs = PATH.map(([x,y],i)=>{
+  const d = new THREE.Mesh(new THREE.CylinderGeometry(0.008,0.008,0.003,16), new THREE.MeshBasicMaterial({color: i===PATH.length-1?0xd02020:0x30e030}));
+  d.position.copy(tileCenter(x,y)).add(new THREE.Vector3(0,0.002,0)); tableGroup.add(d); return d;
+});
+function uiPanel(w,h,cw,ch,draw){ return new THREE.Mesh(new THREE.PlaneGeometry(w,h), new THREE.MeshBasicMaterial({map:tex(cw,ch,draw), transparent:true, side:THREE.DoubleSide})); }
+const resPanel = uiPanel(0.9,0.075,1024,85,drawResources); resPanel.position.set(0,0.05,0.53); resPanel.rotation.x=-0.7; tableGroup.add(resPanel);
+const heroPanel = uiPanel(0.22,0.44,256,512,(g,W,H)=>{
+  g.fillStyle='rgba(42,28,14,0.94)'; g.fillRect(0,0,W,H); g.strokeStyle='#c9a24a'; g.lineWidth=5; g.strokeRect(4,4,W-8,H-8);
+  g.fillStyle='#f3d48a'; g.font='bold 30px Georgia'; g.fillText('Heroes',20,44);
+  [['Gerwulf','#4a6fb5',0.8,0.6],['Orrin','#b5704a',0.3,0.9],['Sorsha','#7a4ab5',1,0.2]].forEach(([n,c,mv,mn],i)=>{ const y=64+i*100;
+    g.fillStyle=c; g.fillRect(20,y,84,84); g.fillStyle='#fff'; g.font='bold 44px Georgia'; g.fillText(n[0],46,y+58);
+    g.fillStyle='#f3e3b0'; g.font='22px Georgia'; g.fillText(n,114,y+28);
+    g.fillStyle='#2a8f2a'; g.fillRect(114,y+44,120*mv,12); g.fillStyle='#2a5fd0'; g.fillRect(114,y+64,120*mn,12); });
+  g.fillStyle='#f3d48a'; g.font='bold 30px Georgia'; g.fillText('Towns',20,396);
+  g.fillStyle='#5a4428'; g.fillRect(20,410,84,84); g.drawImage(spriteCanvas(SPR.castle,38,false),24,414);
+  g.fillStyle='#f3e3b0'; g.font='22px Georgia'; g.fillText('Steadwick',114,458); });
+heroPanel.position.set(-0.9,0.3,0.05); heroPanel.rotation.y=0.6; tableGroup.add(heroPanel);
+const miniPanel = uiPanel(0.24,0.16,384,256,(g,W,H)=>{ const tp=W/COLS; drawTerrain(g,COLS,ROWS,tp);
+  g.fillStyle='#000'; for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++) if(fogAt(x,y)) g.fillRect(x*tp,y*tp,tp+1,tp+1);
+  g.fillStyle='#2b5fd0'; g.fillRect(4.5*tp,8.5*tp,2.5*tp,1.5*tp); g.fillRect(9*tp,10*tp,tp,tp);
+  g.strokeStyle='#fff'; g.lineWidth=3; g.strokeRect(tp*3,tp*4,tp*12,tp*9); g.strokeStyle='#c9a24a'; g.lineWidth=10; g.strokeRect(0,0,W,H); });
+miniPanel.position.set(0.92,0.32,0.05); miniPanel.rotation.y=-0.6; tableGroup.add(miniPanel);
+// hourglass = end turn (flip gesture)
+const hg = new THREE.Group(); hg.position.set(0.76,0,0.25); tableGroup.add(hg);
+for(const y of [0.005,0.155]){ const d=new THREE.Mesh(new THREE.CylinderGeometry(0.045,0.045,0.01,24), woodMat); d.position.y=y; d.castShadow=true; hg.add(d); }
+for(let i=0;i<3;i++){ const r=new THREE.Mesh(new THREE.CylinderGeometry(0.004,0.004,0.15,8), woodMat); const a=i/3*Math.PI*2; r.position.set(Math.cos(a)*0.038,0.08,Math.sin(a)*0.038); hg.add(r); }
+const glassPts=[]; for(let i=0;i<=20;i++){ const y=i/20*0.14; const r=0.006+0.026*Math.abs(Math.sin((y/0.14)*Math.PI)); glassPts.push(new THREE.Vector2(r,y)); }
+const glass = new THREE.Mesh(new THREE.LatheGeometry(glassPts,24), new THREE.MeshStandardMaterial({color:0xddeeff, transparent:true, opacity:0.3, roughness:0.1})); glass.position.y=0.01; hg.add(glass);
+const sandMat = new THREE.MeshStandardMaterial({color:0xd8b060});
+const sandTop = new THREE.Mesh(new THREE.ConeGeometry(0.02,0.03,16), sandMat); sandTop.rotation.x=Math.PI; sandTop.position.y=0.11; hg.add(sandTop);
+const sandBot = new THREE.Mesh(new THREE.ConeGeometry(0.024,0.025,16), sandMat); sandBot.position.y=0.025; hg.add(sandBot);
+
+// ---------- MODE 3: battle diorama ----------
+const battleGroup = new THREE.Group(); base.add(battleGroup);
+const battlePops=[];
+const BOARD_Y=0.032;
+const hexC = (c,r) => [14+(r%2===0?22:0)+44*c+22, 42*r+26];   // BattleFieldController hex->pixel layout
+const hexW = (c,r) => { const [x,y]=hexC(c,r); return new THREE.Vector3((x/800-0.5)*1.2, BOARD_Y, (y/500-0.5)*0.75); };
+const tray = new THREE.Mesh(new THREE.BoxGeometry(1.28,0.03,0.83), woodMat); tray.position.y=0.015; tray.castShadow=tray.receiveShadow=true; battleGroup.add(tray);
+const boardTex = tex(1600,1000,(g)=>{ g.scale(2,2);
+  const gr=g.createLinearGradient(0,0,0,500); gr.addColorStop(0,'#5d8a35'); gr.addColorStop(1,'#4a7a2a'); g.fillStyle=gr; g.fillRect(0,0,800,500);
+  for(let i=0;i<300;i++){ g.fillStyle = hash(i,1)>0.5 ? 'rgba(30,50,10,0.15)' : 'rgba(120,100,50,0.15)'; g.beginPath();
+    g.ellipse(hash(i,2)*800,hash(i,3)*500,10+hash(i,4)*30,5+hash(i,5)*12,0,0,7); g.fill(); }
+  const hex = (c,r)=>{ const [x,y]=hexC(c,r); g.beginPath(); [[0,-26],[22,-13],[22,13],[0,26],[-22,13],[-22,-13]].forEach(([dx,dy],i)=> i?g.lineTo(x+dx,y+dy):g.moveTo(x+dx,y+dy)); g.closePath(); };
+  g.fillStyle='rgba(0,0,0,0.18)'; for(let r=3;r<=7;r++) for(let c=1;c<=4;c++){ hex(c,r); g.fill(); }
+  g.strokeStyle='rgba(0,0,0,0.35)'; g.lineWidth=1.5; for(let r=0;r<11;r++) for(let c=1;c<16;c++){ hex(c,r); g.stroke(); } });
+const board = new THREE.Mesh(new THREE.PlaneGeometry(1.2,0.75), new THREE.MeshStandardMaterial({map:boardTex, roughness:0.95}));
+board.rotation.x=-Math.PI/2; board.position.y=BOARD_Y; board.receiveShadow=true; battleGroup.add(board);
+// backdrop card
+{ const t = tex(1024,300,(g,W,H)=>{ const gr=g.createLinearGradient(0,0,0,H); gr.addColorStop(0,'#7fa9d8'); gr.addColorStop(0.7,'#e9dcb4'); gr.addColorStop(1,'#cbbf8f'); g.fillStyle=gr; g.fillRect(0,0,W,H);
+    g.fillStyle='rgba(255,255,255,0.6)'; for(let i=0;i<6;i++){ g.beginPath(); g.ellipse(hash(i,8)*W,40+hash(i,9)*60,60,16,0,0,7); g.fill(); }
+    const hills=(b,a,col)=>{ g.fillStyle=col; g.beginPath(); g.moveTo(0,H); for(let x=0;x<=W;x+=16) g.lineTo(x,b+Math.sin(x*0.01+a)*22+Math.sin(x*0.033+a)*10); g.lineTo(W,H); g.fill(); };
+    hills(H*0.55,1,'#6f8a68'); hills(H*0.72,4,'#4a6a3d');
+    g.fillStyle='#55504a'; g.fillRect(80,120,140,90); for(let i=0;i<4;i++) g.fillRect(70+i*45,100,24,30); g.fillRect(130,70,40,60);
+    g.fillStyle='#2f4a26'; for(let x=0;x<W;x+=26){ const h=30+hash(x,1)*40; g.beginPath(); g.moveTo(x,H); g.lineTo(x+13,H-h); g.lineTo(x+26,H); g.fill(); } });
+  const geo = new THREE.PlaneGeometry(1.25,0.37); geo.translate(0,0.185,0);
+  const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({map:t, side:THREE.DoubleSide}));
+  const pv = new THREE.Group(); pv.add(m); pv.position.set(0,BOARD_Y,-0.39); battleGroup.add(pv); battlePops.push({o:pv, d:0.05}); }
+function badge(n){ const t=tex(128,64,(g,W,H)=>{ g.fillStyle='#5a2a7a'; g.fillRect(0,0,W,H); g.strokeStyle='#e0b040'; g.lineWidth=6; g.strokeRect(3,3,W-6,H-6);
+  g.fillStyle='#fff'; g.font='bold 40px Georgia'; g.textAlign='center'; g.textBaseline='middle'; g.fillText(n,W/2,H/2+2); });
+  return new THREE.Mesh(new THREE.PlaneGeometry(0.036,0.018), new THREE.MeshBasicMaterial({map:t})); }
+const UNITS = [ // [sprite, col, row, count, side, width m]
+  ['knight',1,2,'24',1,0.06],['archer',1,5,'38',1,0.06],['griffin',2,8,'16',1,0.075],
+  ['skeleton',15,1,'60',-1,0.055],['skeleton',15,4,'45',-1,0.055],['redDragon',14,7,'3',-1,0.13] ];
+for(const [k,c,r,n,side,w] of UNITS){
+  const p = hexW(c,r); const pv = makeCard(SPR[k], w); pv.position.copy(p).add(new THREE.Vector3(0,0,0.012)); battleGroup.add(pv);
+  battlePops.push({o:pv, d:0.3 + c*0.05 + r*0.02});
+  const b = badge(n); b.position.copy(p).add(new THREE.Vector3(0.028*side,0.006,0.03)); b.rotation.x=-1.1; battleGroup.add(b);
+}
+for(const [c,r] of [[7,3],[8,7]]){ const pv=makeCard(SPR.rock,0.09); pv.position.copy(hexW(c,r)).add(new THREE.Vector3(0,0,0.01)); battleGroup.add(pv); battlePops.push({o:pv,d:0.4}); }
+{ const corpse = makeCard(SPR.skeleton,0.05); corpse.position.copy(hexW(11,5)).add(new THREE.Vector3(0,0.001,-0.02)); corpse.rotation.x=-Math.PI/2; battleGroup.add(corpse); }
+for(const [k,x] of [['hero',-0.74],['heroRed',0.74]]){ const pv=makeCard(SPR[k],0.13); pv.position.set(x,0,-0.25); battleGroup.add(pv); battlePops.push({o:pv,d:0.2}); }
+const activeRing = new THREE.Mesh(new THREE.RingGeometry(0.032,0.038,6,1,Math.PI/6), new THREE.MeshBasicMaterial({color:0xffe040, transparent:true}));
+activeRing.rotation.x=-Math.PI/2; activeRing.position.copy(hexW(1,5)).add(new THREE.Vector3(0,0.002,0)); battleGroup.add(activeRing);
+const targetRing = new THREE.Mesh(new THREE.RingGeometry(0.032,0.038,6,1,Math.PI/6), new THREE.MeshBasicMaterial({color:0xff4040, transparent:true}));
+targetRing.rotation.x=-Math.PI/2; targetRing.position.copy(hexW(15,4)).add(new THREE.Vector3(0,0.002,0)); battleGroup.add(targetRing);
+const arrow = new THREE.Group(); { const shaft=new THREE.Mesh(new THREE.CylinderGeometry(0.0015,0.0015,0.05,6), new THREE.MeshStandardMaterial({color:0x6b4423})); shaft.rotation.x=Math.PI/2; arrow.add(shaft);
+  const tip=new THREE.Mesh(new THREE.ConeGeometry(0.004,0.01,6), new THREE.MeshStandardMaterial({color:0xcccccc})); tip.rotation.x=Math.PI/2; tip.position.z=0.028; arrow.add(tip); }
+battleGroup.add(arrow);
+const arrowA = hexW(1,5).add(new THREE.Vector3(0.02,0.05,0)), arrowB = hexW(15,4).add(new THREE.Vector3(0,0.04,0));
+const boomTex = tex(128,128,(g)=>{ const gr=g.createRadialGradient(64,64,4,64,64,64); gr.addColorStop(0,'rgba(255,255,200,1)'); gr.addColorStop(0.4,'rgba(255,140,30,0.9)'); gr.addColorStop(1,'rgba(255,40,0,0)'); g.fillStyle=gr; g.fillRect(0,0,128,128); });
+const boom = new THREE.Sprite(new THREE.SpriteMaterial({map:boomTex, blending:THREE.AdditiveBlending, transparent:true, depthWrite:false}));
+boom.position.copy(hexW(14,7)).add(new THREE.Vector3(0,0.06,0)); battleGroup.add(boom);
+const battleBar = uiPanel(0.9,0.075,1024,85,(g,W,H)=>{ g.fillStyle='#2a1c0e'; g.fillRect(0,0,W,H); g.strokeStyle='#c9a24a'; g.lineWidth=4; g.strokeRect(3,3,W-6,H-6);
+  g.textBaseline='middle'; const btn=(x,w,t)=>{ g.fillStyle='#4a3218'; g.fillRect(x,12,w,H-24); g.strokeStyle='#c9a24a'; g.lineWidth=2; g.strokeRect(x,12,w,H-24);
+    g.fillStyle='#f3e3b0'; let fs=Math.round(H*0.26); do { g.font=`bold ${fs--}px Georgia`; } while(g.measureText(t).width > w-10 && fs>8);
+    g.textAlign='center'; g.fillText(t,x+w/2,H/2); };
+  ['Options','Surrender','Flee','Auto'].forEach((t,i)=>btn(12+i*86,80,t));
+  g.fillStyle='#120c06'; g.fillRect(360,12,380,H-24); g.fillStyle='#f3e3b0'; g.textAlign='left'; g.font=`${Math.round(H*0.24)}px Georgia`;
+  g.fillText('Archers shoot Skeletons. 7 perish.',372,H*0.36); g.fillText('Red Dragon is hit by Fireball.',372,H*0.66);
+  ['Spells','Wait','Defend'].forEach((t,i)=>btn(752+i*88,82,t)); });
+battleBar.position.set(0,0.05,0.53); battleBar.rotation.x=-0.7; battleGroup.add(battleBar);
+const spellbook = uiPanel(0.2,0.125,512,320,(g,W,H)=>{ g.fillStyle='#e8d8b0'; g.fillRect(0,0,W,H);
+  const gr=g.createLinearGradient(W/2-30,0,W/2+30,0); gr.addColorStop(0,'rgba(0,0,0,0)'); gr.addColorStop(0.5,'rgba(60,30,0,0.5)'); gr.addColorStop(1,'rgba(0,0,0,0)'); g.fillStyle=gr; g.fillRect(W/2-30,0,60,H);
+  g.strokeStyle='#5a1a14'; g.lineWidth=12; g.strokeRect(0,0,W,H);
+  [['Fireball','#e05020'],['Haste','#40a0e0'],['Bless','#f2c230'],['Slow','#8060c0'],['Lightning','#a0c0ff'],['Cure','#40c060']].forEach(([n,c],i)=>{
+    const x = i<3 ? 30 : W/2+30, y = 40+(i%3)*90; g.fillStyle=c; g.beginPath(); g.arc(x+30,y+30,28,0,7); g.fill(); g.strokeStyle='#3a2a1a'; g.lineWidth=3; g.stroke();
+    g.fillStyle='#3a2a1a'; g.font='24px Georgia'; g.fillText(n,x+68,y+38); }); });
+spellbook.position.set(0.86,0.14,0.28); spellbook.rotation.set(-0.6,-0.5,0,'YXZ'); battleGroup.add(spellbook);
+
+// ---------- world anchor: table follows the head in VR and AR ----------
+const world = new THREE.Group(); scene.add(world);
+world.add(room, base, screenGroup, sun, sun.target);
+const EYE = new THREE.Vector3(0,1.2,0);   // design eye point, looking -z
+let recenterIn = -1;
+// Table top 0.45 m below eyes, facing head yaw. Room floor and legs stay on the
+// real floor only if the runtime floor looks valid (seated or standing eye height).
+function recenter(){
+  const xrCam = renderer.xr.getCamera();
+  const p = new THREE.Vector3(), q = new THREE.Quaternion();
+  xrCam.matrixWorld.decompose(p, q, new THREE.Vector3());
+  const dir = new THREE.Vector3(0,0,-1).applyQuaternion(q);
+  world.rotation.set(0, Math.atan2(-dir.x,-dir.z), 0);
+  world.position.copy(p).sub(EYE);
+  const dy = world.position.y, floorOk = p.y >= 1.0 && p.y <= 2.1;
+  room.position.y = floorOk ? -dy : 0;
+  setLegBottom(floorOk ? -TABLE_Y-dy : -0.78);
+}
+function resetWorld(){ world.position.set(0,0,0); world.rotation.set(0,0,0); room.position.y=0; setLegBottom(-0.78); }
+
+// ---------- XR controllers ----------
+for(let i=0;i<2;i++){
+  const c = renderer.xr.getController(i);
+  c.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0,0,-3)]), new THREE.LineBasicMaterial({color:0xffe08a})));
+  c.addEventListener('squeezestart', ()=>cycleMode());
+  c.addEventListener('selectstart', ()=>recenter());
+  scene.add(c);
+}
+renderer.xr.addEventListener('sessionstart', ()=>{
+  const s = renderer.xr.getSession();
+  if(s.environmentBlendMode && s.environmentBlendMode !== 'opaque'){ room.visible=false; scene.background=null; }
+  recenterIn=10;
+  renderer.xr.getReferenceSpace()?.addEventListener('reset', ()=>{ recenterIn=5; });   // Meta button long-press recenter
+  ctrl.visible=laser.visible=cursor.visible=false;
+});
+renderer.xr.addEventListener('sessionend', ()=>{
+  recenterIn=-1; resetWorld();
+  room.visible=true; scene.background=BG; ctrl.visible=laser.visible=cursor.visible=true;
+});
+
+// ---------- modes ----------
+const MODES=['screen','table','battle'];
+let mode='table', modeStart=0;
+const VIEWS = { screen:[[0,1.25,0.6],[0,1.4,-2.0]], table:[[0,1.5,0.15],[0,0.78,-0.8]], battle:[[0,1.45,0.1],[0,0.78,-0.8]] };
+function setMode(m){
+  mode=m; modeStart=clock.getElapsedTime();
+  screenGroup.visible = closedBook.visible = m==='screen';
+  tableGroup.visible = m==='table'; battleGroup.visible = m==='battle';
+  for(const p of [...tablePops,...battlePops]) p.o.rotation.x=-Math.PI/2;
+  document.querySelectorAll('#ui button').forEach(b=>b.classList.toggle('on', b.dataset.m===m));
+  if(!renderer.xr.isPresenting){ camera.position.set(...VIEWS[m][0]); controls.target.set(...VIEWS[m][1]); }
+}
+const cycleMode = () => setMode(MODES[(MODES.indexOf(mode)+1)%MODES.length]);
+document.querySelectorAll('#ui button').forEach(b=>b.onclick=()=>setMode(b.dataset.m));
+addEventListener('keydown', e=>{ const i='123'.indexOf(e.key); if(i>=0) setMode(MODES[i]); });
+addEventListener('resize', ()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); });
+const qm = new URLSearchParams(location.search).get('mode');   // ?mode=screen|table|battle
+setMode(MODES.includes(qm) ? qm : 'table');
+
+// ---------- loop ----------
+const heroRoute = [[9,10],...PATH];
+const tmp = new THREE.Vector3();
+renderer.setAnimationLoop(()=>{
+  const t = clock.getElapsedTime(), lt = t - modeStart;
+  if(recenterIn > 0 && --recenterIn === 0) recenter();   // wait for a valid head pose
+  for(const {flame,pl} of flames){ const f = 0.85 + 0.15*Math.sin(t*13+pl.position.x*9)*Math.sin(t*7.3); pl.intensity=1.2*f; flame.scale.set(1,1.8*f,1); }
+
+  const pops = mode==='table' ? tablePops : mode==='battle' ? battlePops : [];
+  for(const p of pops){ const k=Math.min(1,Math.max(0,(lt-p.d)/0.7)); p.o.rotation.x = -Math.PI/2*(1-easeOutBack(k)); }
+
+  if(mode==='screen'){
+    const th = Math.PI + 0.3*Math.sin(t*0.6), y = SCR_Y + 0.3*Math.sin(t*0.9), r = R_SCR-0.02;
+    cursor.position.set(r*Math.sin(th), y, r*Math.cos(th));
+    const a = laserGeo.attributes.position; a.setXYZ(0, ctrl.position.x, ctrl.position.y, ctrl.position.z); a.setXYZ(1, cursor.position.x, cursor.position.y, cursor.position.z); a.needsUpdate=true;
+  }
+  if(mode==='table'){
+    for(const f of fogs) f.position.y = MAP_Y + 0.09 + 0.006*Math.sin(t*0.7+f.userData.ph);
+    const walk = lt-2.5; let passed=0;
+    if(walk>0 && heroPivot){
+      const u = Math.min(1,(walk%8)/6), f = u*(heroRoute.length-1), i = Math.min(heroRoute.length-2,Math.floor(f)), fr = f-i;
+      const a = tileBase(...heroRoute[i]), b = tileBase(...heroRoute[i+1]);
+      heroPivot.position.lerpVectors(a,b,fr); heroPivot.position.y += Math.abs(Math.sin(fr*Math.PI))*0.006*(u<1?1:0);
+      passed = Math.floor(f);
+    }
+    pathDiscs.forEach((d,i)=>{ d.visible = i>=passed; d.scale.setScalar(1+0.25*Math.max(0,Math.sin(t*4-i*0.7))); });
+    sandTop.scale.setScalar(0.6+0.4*((Math.sin(t*0.3)+1)/2)); sandBot.scale.setScalar(1.4-0.4*((Math.sin(t*0.3)+1)/2));
+  }
+  if(mode==='battle'){
+    activeRing.material.opacity = 0.5+0.5*Math.sin(t*5); targetRing.material.opacity = 0.5+0.5*Math.sin(t*5+Math.PI);
+    const s = ((t%2.6)-0.3)/1.4;
+    arrow.visible = s>=0 && s<=1 && lt>1.5;
+    if(arrow.visible){
+      const pos = (q)=> tmp.lerpVectors(arrowA,arrowB,q).add(new THREE.Vector3(0,Math.sin(Math.PI*q)*0.18,0)).clone();
+      arrow.position.copy(pos(s)); arrow.lookAt(battleGroup.localToWorld(pos(Math.min(1,s+0.02))));
+    }
+    const bt = (t%3.2)/0.9; boom.visible = bt<1 && lt>1.5;
+    if(boom.visible){ boom.scale.setScalar(0.05+0.2*bt); boom.material.opacity = 1-bt; }
+  }
+  if(!renderer.xr.isPresenting) controls.update();
+  renderer.render(scene,camera);
+});
+</script>
+</body>
+</html>
