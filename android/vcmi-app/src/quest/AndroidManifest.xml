@@ -1,6 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Horizon OS additions for the Meta Quest build, merged over ../../../AndroidManifest.xml by quest.gradle -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+	xmlns:metavr="http://schemas.meta.com/metavr-sdk">
+
+	<!-- required for hybrid apps: https://developers.meta.com/horizon/documentation/spatial-sdk/hybrid-apps-overview -->
+	<metavr:uses-metavr-sdk
+		metavr:minSdkVersion="69"
+		metavr:targetSdkVersion="207" />
+
+	<!-- as in other hybrid apps (Steam Link VR) -->
+	<uses-feature
+		android:name="android.hardware.vr.headtracking"
+		android:required="true"
+		android:version="1" />
+	<uses-feature
+		android:name="oculus.software.vr.app.hybrid"
+		android:required="true" />
 
 	<application>
 		<meta-data
@@ -15,6 +30,13 @@
 				android:defaultHeight="720dp"
 				android:minWidth="800dp"
 				android:minHeight="600dp" />
+
+			<!-- hybrid app: the launcher stays a panel, the game runs immersive -->
+			<intent-filter>
+				<action android:name="android.intent.action.MAIN" />
+				<category android:name="android.intent.category.DEFAULT" />
+				<category android:name="com.oculus.intent.category.2D" />
+			</intent-filter>
 		</activity>
 
 		<activity android:name="eu.vcmi.vcmi.ActivityMapEditor">
@@ -25,12 +47,38 @@
 				android:minHeight="600dp" />
 		</activity>
 
-		<activity android:name="eu.vcmi.vcmi.VcmiSDLActivity">
+		<!-- The game as a panel: started when the immersive activity does not resolve, or by quest/tools/quest.sh start-panel -->
+		<activity
+			android:name="eu.vcmi.vcmi.VcmiSDLActivity"
+			android:exported="true">
 			<layout
 				android:defaultWidth="1280dp"
 				android:defaultHeight="720dp"
 				android:minWidth="800dp"
 				android:minHeight="600dp" />
+		</activity>
+
+		<!-- The game as an immersive OpenXR activity; ActivityLauncher starts it when it exists, quest/tools/quest.sh start-xr without the launcher.
+			 Attributes as in Meta's native manifest: not resizeable, landscape, no layout -->
+		<activity
+			android:name="eu.vcmi.vcmi.VcmiXrActivity"
+			android:exported="true"
+			android:taskAffinity="${applicationId}.xr"
+			android:launchMode="singleTask"
+			android:resizeableActivity="false"
+			android:screenOrientation="landscape"
+			android:configChanges="density|keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|uiMode"
+			android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen">
+			<intent-filter>
+				<action android:name="android.intent.action.MAIN" />
+				<category android:name="android.intent.category.DEFAULT" />
+				<category android:name="com.oculus.intent.category.VR" />
+				<category android:name="org.khronos.openxr.intent.category.IMMERSIVE_HMD" />
+			</intent-filter>
+			<!-- keeps the session running, unfocused, while the system menu is open -->
+			<meta-data
+				android:name="com.oculus.vr.focusaware"
+				android:value="true" />
 		</activity>
 	</application>
 

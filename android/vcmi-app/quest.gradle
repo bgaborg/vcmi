@@ -6,6 +6,7 @@
 if (project.findProperty('vcmiQuest') == 'true') {
 	android.buildTypes.each { buildType ->
 		android.sourceSets.getByName(buildType.name).manifest.srcFile 'src/quest/AndroidManifest.xml'
+		android.sourceSets.getByName(buildType.name).java.srcDir 'src/quest/java'
 	}
 
 	// the loader AAR requires API 24; every Quest runs a newer Android

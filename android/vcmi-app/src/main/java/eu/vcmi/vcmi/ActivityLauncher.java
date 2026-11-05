@@ -170,7 +170,22 @@ public class ActivityLauncher extends org.qtproject.qt5.android.bindings.QtActiv
 
     public void onLaunchGameBtnPressed()
     {
-        startActivity(new Intent(ActivityLauncher.this, VcmiSDLActivity.class));
+        // Horizon OS runs an activity with this category immersive; it must start in a task of its own
+        final Intent immersive = new Intent(Intent.ACTION_MAIN)
+            .addCategory("com.oculus.intent.category.VR")
+            .setPackage(getPackageName())
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+        if (getPackageManager().resolveActivity(immersive, 0) == null)
+        {
+            startActivity(new Intent(ActivityLauncher.this, VcmiSDLActivity.class));
+            return;
+        }
+
+        startActivity(immersive);
+        // Horizon OS hybrid apps: a running panel activity keeps the shell in panel mode
+        // shortcut: QtActivity.onDestroy exits the process, Android starts the game again in a new one before it initialises; move the game to its own process if that restart ever cuts into its start-up
+        finishAndRemoveTask();
     }
 
     public void openMapEditor()

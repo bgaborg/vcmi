@@ -36,6 +36,8 @@ Usage: quest.sh <command> [args]
   start                   launch the app (refuses if it is already running)
   stop                    force-stop the app
   restart                 force-stop and launch the app
+  start-xr                launch the game activity directly, immersive (OpenXR)
+  start-panel             launch the game activity directly, as a panel (no immersive category)
   logcat                  follow logcat for the running app
   pull-logs [dir]         copy VCMI logs from the device (default: quest/out/logs-<timestamp>)
   sample <seconds> [csv]  sample PSS memory, CPU and battery temperature once per second
@@ -71,6 +73,20 @@ case "$cmd" in
 		fi
 		adb_shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
 		echo "started $PKG"
+		;;
+	start-xr)
+		if [ -n "$(app_pid)" ]; then
+			echo "$PKG is already running; stop it first" >&2
+			exit 1
+		fi
+		adb_shell am start -a android.intent.action.MAIN -c com.oculus.intent.category.VR -n "$PKG/eu.vcmi.vcmi.VcmiXrActivity"
+		;;
+	start-panel)
+		if [ -n "$(app_pid)" ]; then
+			echo "$PKG is already running; stop it first" >&2
+			exit 1
+		fi
+		adb_shell am start -n "$PKG/eu.vcmi.vcmi.VcmiSDLActivity"
 		;;
 	stop)
 		adb_shell am force-stop "$PKG"

@@ -25,11 +25,13 @@ if(NOT EXISTS "${openxrDir}/prefab/modules/headers/include/openxr/openxr.h")
 endif()
 
 set(vcmiXr_SRCS
-	session/XrRuntimeProbe.cpp
+	session/XrDisplay.cpp
+	session/XrLoader.cpp
 )
 
 set(vcmiXr_HEADERS
-	session/XrRuntimeProbe.h
+	session/XrDisplay.h
+	session/XrLoader.h
 )
 
 assign_source_group(${vcmiXr_SRCS} ${vcmiXr_HEADERS})
@@ -40,8 +42,7 @@ target_include_directories(vcmiXr PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(vcmiXr SYSTEM PRIVATE "${openxrDir}/prefab/modules/headers/include")
 # no link-time dependency on the loader: functions are resolved through xrGetInstanceProcAddr
 target_compile_definitions(vcmiXr PRIVATE XR_NO_PROTOTYPES XR_USE_PLATFORM_ANDROID)
-target_link_libraries(vcmiXr PRIVATE vcmi ${CMAKE_DL_LIBS})
+target_link_libraries(vcmiXr PRIVATE vcmi ${SDL3_CORE_TARGET} EGL GLESv3 ${CMAKE_DL_LIBS})
 
-target_link_libraries(vcmiclient PRIVATE vcmiXr)
-target_compile_definitions(vcmiclient PRIVATE VCMI_OPENXR)
+target_link_libraries(vcmisdl3 PRIVATE vcmiXr)
 target_compile_definitions(vcmisdl3 PRIVATE VCMI_OPENXR)
