@@ -20,7 +20,7 @@ The Quest build is the normal Android release build plus these Gradle properties
 vcmiQuest=true;applicationIdSuffix=.quest;applicationLabel=VCMI Quest;applicationVariant=quest;signingConfig=dailySigning
 ```
 
-Local build: configure the `android-conan-ninja-release` preset with `-DANDROID_GRADLE_PROPERTIES="<properties above>"`.
+Local build (Linux or WSL Ubuntu 24.04, from a Linux checkout - not `/mnt/c`): [`tools/make-apk.sh`](tools/make-apk.sh). The first run installs the toolchain without sudo into `~/vcmi-tools` (uv, Conan, CMake, Ninja, JDK 17, Android SDK 35) and restores the prebuilt Conan dependencies; set `SDK_LICENSES` to the licenses folder of an SDK where the Android SDK license is already accepted. Output: `quest/out/vcmi-quest-release.apk`. First build ~15 min on 20 cores, incremental ~2 min.
 
 `vcmiQuest=true` makes [`quest.gradle`](../android/vcmi-app/quest.gradle) merge [`src/quest/AndroidManifest.xml`](../android/vcmi-app/src/quest/AndroidManifest.xml) into every build type. The overlay adds:
 
