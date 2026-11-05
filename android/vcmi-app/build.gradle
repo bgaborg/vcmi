@@ -101,6 +101,8 @@ android {
 	}
 }
 
+apply from: 'quest.gradle'
+
 base.archivesName = "vcmi"
 shortcutHelper.filePath = "../shortcuts.xml"
 

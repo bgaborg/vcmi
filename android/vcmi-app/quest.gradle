@@ -1,0 +1,10 @@
+// Meta Quest build: enabled by the Gradle property `vcmiQuest=true`
+// (CMake: -DANDROID_GRADLE_PROPERTIES="vcmiQuest=true;...").
+// Merges the Horizon OS manifest overlay into every build type.
+// A build type source set is used instead of a product flavor, so Gradle task names stay unchanged.
+
+if (project.findProperty('vcmiQuest') == 'true') {
+	android.buildTypes.each { buildType ->
+		android.sourceSets.getByName(buildType.name).manifest.srcFile 'src/quest/AndroidManifest.xml'
+	}
+}

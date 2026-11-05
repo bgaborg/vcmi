@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Horizon OS additions for the Meta Quest build, merged over ../../../AndroidManifest.xml by quest.gradle -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+	<application>
+		<meta-data
+			android:name="com.oculus.supportedDevices"
+			android:value="quest3|quest3s" />
+
+		<!-- Initial panel size; the user can resize the panel. The minimum is the H3 resolution, 800x600 -->
+
+		<activity android:name="eu.vcmi.vcmi.ActivityLauncher">
+			<layout
+				android:defaultWidth="1280dp"
+				android:defaultHeight="720dp"
+				android:minWidth="800dp"
+				android:minHeight="600dp" />
+		</activity>
+
+		<activity android:name="eu.vcmi.vcmi.ActivityMapEditor">
+			<layout
+				android:defaultWidth="1280dp"
+				android:defaultHeight="720dp"
+				android:minWidth="800dp"
+				android:minHeight="600dp" />
+		</activity>
+
+		<activity android:name="eu.vcmi.vcmi.VcmiSDLActivity">
+			<layout
+				android:defaultWidth="1280dp"
+				android:defaultHeight="720dp"
+				android:minWidth="800dp"
+				android:minHeight="600dp" />
+		</activity>
+	</application>
+
+</manifest>
