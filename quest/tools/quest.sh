@@ -3,6 +3,9 @@
 
 set -euo pipefail
 
+# Git Bash would rewrite device paths such as /sdcard/... into Windows paths
+export MSYS_NO_PATHCONV=1
+
 PKG="${VCMI_QUEST_PKG:-is.xyz.vcmi.quest}"
 DATA_DIR="/sdcard/Android/data/$PKG/files/vcmi-data"
 LOG_DIR="$DATA_DIR/cache"
