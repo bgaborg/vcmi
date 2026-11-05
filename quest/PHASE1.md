@@ -1,7 +1,7 @@
 # Phase 1 - Foundation
 
 Status of [phase 1](PROJECT_PLAN.md#phase-1---foundation): the Quest build runs as a 2D panel app.
-This file has the build setup, the on-device test checklist, the baseline results and the SoD_SP gap analysis.
+This file has the build setup, the open follow-ups, the on-device test checklist, the baseline results and the SoD_SP gap analysis.
 
 ## Build
 
@@ -11,7 +11,7 @@ This file has the build setup, the on-device test checklist, the baseline result
 | Label | VCMI Quest |
 | ABI | arm64-v8a |
 | Signing | daily key from `CI/android` (public, no secrets needed) |
-| CI | [`.github/workflows/quest.yml`](../.github/workflows/quest.yml): manual dispatch only during phase 1 (builds are local); push trigger in a later phase |
+| CI | [`.github/workflows/quest.yml`](../.github/workflows/quest.yml): manual dispatch only during phase 1 (builds are local); push trigger in a later phase. First run: [42025537281](https://github.com/bgaborg/vcmi/actions/runs/42025537281), `56962aa52`, success |
 | Artifact | `<run>-vcmi-branch-quest-<commit>-quest-arm64-v8a.apk` |
 
 The Quest build is the normal Android release build plus these Gradle properties:
@@ -40,6 +40,19 @@ All other files are new. Upstream `github.yml` is unchanged; the fork does not r
 - **Product flavor (`quest` / `standard`).** Phase 1 does not need it: the Gradle properties above give the separate ID, label and manifest overlay without renaming Gradle tasks (`assembleRelease` -> `assembleQuestRelease` would change upstream CI and `aab-from-build.yml`). Add the flavor when the Quest build needs its own Java sources, dependencies (OpenXR loader AAR) or native build options that the build-type overlay cannot express - expected in phase 2.
 - **VR manifest entries** (`com.oculus.intent.category.VR`, `android.hardware.vr.headtracking`, OpenXR loader). These turn the app into an immersive app, which phase 1 is not. Phase 2.
 - **CMake preset `android-quest-release`.** Not added, to keep `CMakePresets.json` unchanged. Add it if local Quest builds become frequent.
+
+## Follow-ups
+
+Open phase 1 work, all on the headset. Phase 1 exits when these are done.
+
+- [ ] Mod preset: install `hota` and `vcmi-extras` from the launcher (checklist 1.5, 4.1, 4.2), then the rest of the preset (4.3-4.8). The 128 HotA maps in `Maps/` fail to load until `hota` is installed.
+- [ ] Baseline, every row, 30 min each with the FPS counter on (`video.performanceOverlay`). First: xBRZ off (`video.upscalingFilter` = `none`); repeat xBRZ 2x for 30 min to confirm the memory plateau.
+- [ ] Input (checklist 2.x): check that A / B / X / Y reach VCMI as gamepad buttons; if so, map A to right click (`mouseClickRight`) as a Quest-only override. Today right click is a 1 s trigger hold (`general.longTouchTimeMilliseconds`).
+- [ ] Data import through the system file picker (checklist 1.3); data was copied with adb so far.
+- [ ] Panel size in pixels at the default 1280x720 dp.
+- [ ] SoD_SP gap analysis: play through the "verify" rows.
+- [ ] Lifecycle (checklist 3.3-3.5): Meta menu focus loss, sleep / wake, 10 min background, portrait panel.
+- [ ] A full game, start to end (exit criterion).
 
 ## Device helper
 
