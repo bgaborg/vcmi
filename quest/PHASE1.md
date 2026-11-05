@@ -112,8 +112,8 @@ Measure 5 minutes of play with `quest.sh sample 300`, and the AI turn time from 
 
 | Config | Panel px | Load time to main menu (s) | Map load (s) | FPS adventure (avg / min) | FPS battle (avg / min) | PSS peak (MB) | CPU avg (%) | AI turn (s) | Battery temp after 30 min (C) |
 |---|---|---|---|---|---|---|---|---|---|
-| SoD, xBRZ off (partial, see notes) | | 1.4 | 0.7 | | | 1368, still rising | 22 (max 155) | 2.1 (day 1) | 38 after 3 min |
-| SoD, xBRZ 2x | | | | | | | | | |
+| SoD, xBRZ off (`video.upscalingFilter` = `none`) | | | | | | | | | |
+| SoD, xBRZ 2x (`auto`, partial, see notes) | | 1.4 | 0.7 | | | 1368 | 22 (max 155) | 2.1 (day 1) | 38 after 3 min |
 | SoD, xBRZ 4x | | | | | | | | | |
 | HD Edition data | | | | | | | | | |
 | HD mod pack 2x | | | | | | | | | |
@@ -123,10 +123,13 @@ Measure 5 minutes of play with `quest.sh sample 300`, and the AI turn time from 
 
 CPU is percent of one core (`top`); 100 = one full core.
 
-Notes on the first row (2026-11-05, `quest/out/baseline-sod-xbrz-off.csv`, logs in `quest/out/logs-baseline1`):
+Notes on the xBRZ 2x row (2026-11-05, `quest/out/baseline-sod-xbrz2-auto.csv`, logs in `quest/out/logs-baseline1`):
+- Recorded as "xBRZ off", but the default `upscalingFilter` = `auto` selected xBRZ 2x (log: `Selected upscaling filter 2`): the panel renders above the logical resolution and the device has more than 4 GB RAM (`ScreenHandler::loadUpscalingFilter`).
 - Map `Myth and Legend` (144x144 + underground, 8 players: 1 human, 7 AI). Run stopped after 3 min of a planned 5, on day 1 to 2: one human turn, one round of AI turns.
 - Samples are 1.7 s apart (adb round trips), 106 samples.
-- PSS rose from 811 MB to 1368 MB and did not level off. Repeat for 30 min to see whether it stops at the asset cache budget (484 MiB) or keeps growing.
+- PSS: 811 MB on the adventure map, +330 MB while the town, fort and recruitment screens were opened for the first time (each image gets an xBRZ 2x copy: 4x the pixels, plus its GPU texture), +125 MB at end of turn and AI turn, then flat at 1350-1368 MB for the last 80 s with small drops (cache eviction). No sign of a leak. The code estimates xBRZ 2x at 1.0-1.5 GB (`ScreenHandler::loadUpscalingFilter`).
+- Asset cache budget 484 MiB (1/16 of RAM, `RenderHandler.cpp`). It counts surfaces and textures of images that nothing else uses; images in use by open windows and the map are outside the budget.
+- Repeat the run with `upscalingFilter` = `none` for the xBRZ off row, and for 30 min to confirm the plateau.
 - CPU peak 155% (1.5 cores) during the AI turn; 15-20% while idle on the adventure map.
 - AI turn: all 7 AI players took 2.1 s on day 1, including 2 AI-vs-neutral battles. Not representative yet: early turns are short.
 - Not measured: FPS (enable `video.performanceOverlay`), panel size in pixels.
