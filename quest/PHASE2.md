@@ -26,6 +26,28 @@ Status of [phase 2](PROJECT_PLAN.md#phase-2---xr-spike). The app still runs as a
    Expected: runtime name and version, system `Meta Quest 3`, and yes / no for `XR_KHR_opengl_es_enable`, `XR_KHR_vulkan_enable2`, `XR_KHR_composition_layer_cylinder`, `XR_FB_passthrough`, `XR_FB_display_refresh_rate`. A warning instead means instance creation does not work from a panel app; record the `XrResult`.
 3. Compare colour banding with the phase 1 build (RGB565), for example on the main menu background.
 
+### Probe results (2026-11-05, Quest 3, installed over adb Wi-Fi)
+
+The panel app creates an `XrInstance` and gets the HMD system; the probe takes about 30 ms at start-up.
+
+| Item | Result |
+|---|---|
+| Runtime | `Oculus` 209.166.0 |
+| System | `Meta Quest 3`, vendor 10291, orientation and position tracking |
+| Max swapchain | 8192x8192 |
+| Max layers | 32 |
+| Instance extensions | 75 |
+| `XR_KHR_android_create_instance` | yes |
+| `XR_KHR_opengl_es_enable` | yes |
+| `XR_KHR_vulkan_enable2` | yes |
+| `XR_KHR_composition_layer_cylinder` | yes |
+| `XR_FB_passthrough` | no - possibly hidden from apps without the VR manifest entries; check again in the spike |
+| `XR_FB_display_refresh_rate` | yes |
+
+Both graphics APIs are available, so the choice is not forced by the runtime. The SDL3 client already renders through an EGL/GLES context, so the spike starts with `XR_KHR_opengl_es_enable`.
+
+Play check with the RGB888 build: started a map, moved a hero, quit the game; no crash, no new warnings in the client log, and the picture looked fine. A side-by-side banding comparison with the RGB565 build was not done.
+
 ## Then: the spike itself
 
 - XR session on the SDL EGL context (`XR_KHR_opengl_es_enable`), VR manifest entries, session lifecycle.
