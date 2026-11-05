@@ -325,7 +325,15 @@ ScreenHandler::ScreenHandler()
 
 	SDL_SetLogOutputFunction(logCallback, nullptr);
 
-#ifdef VCMI_ANDROID
+#if defined(VCMI_ANDROID) && defined(VCMI_OPENXR)
+	// Quest: 8 bits per channel, RGB565 bands visibly on the large panel. No alpha: the panel
+	// compositor would blend the window with the room behind it.
+	SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
+	SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
+	SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
+	SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 0);
+	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 0);
+#elif defined(VCMI_ANDROID)
 	// manually setting egl pixel format, as a possible solution for sdl2<->android problem
 	// https://bugzilla.libsdl.org/show_bug.cgi?id=2291
 	SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 5);

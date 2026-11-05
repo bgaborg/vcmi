@@ -1,10 +1,23 @@
 // Meta Quest build: enabled by the Gradle property `vcmiQuest=true`
-// (CMake: -DANDROID_GRADLE_PROPERTIES="vcmiQuest=true;...").
-// Merges the Horizon OS manifest overlay into every build type.
+// (CMake: -DANDROID_GRADLE_PROPERTIES="vcmiQuest=true;...", together with -DENABLE_OPENXR=ON).
+// Merges the Horizon OS manifest overlay into every build type and adds the OpenXR loader.
 // A build type source set is used instead of a product flavor, so Gradle task names stay unchanged.
 
 if (project.findProperty('vcmiQuest') == 'true') {
 	android.buildTypes.each { buildType ->
 		android.sourceSets.getByName(buildType.name).manifest.srcFile 'src/quest/AndroidManifest.xml'
+	}
+
+	// the loader AAR requires API 24; every Quest runs a newer Android
+	if (android.defaultConfig.minSdk < 24) {
+		android.defaultConfig.minSdk = 24
+	}
+
+	// the loader AAR ships all ABIs; Quest is arm64 only, and so is the native part of this build
+	android.defaultConfig.ndk.abiFilters 'arm64-v8a'
+
+	dependencies {
+		// keep equal to OPENXR_LOADER_VERSION in clientxr/CMakeLists.txt, which takes the headers from the same AAR
+		implementation 'org.khronos.openxr:openxr_loader_for_android:1.1.65'
 	}
 }

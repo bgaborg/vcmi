@@ -32,13 +32,16 @@ Local build (Linux or WSL Ubuntu 24.04, from a Linux checkout - not `/mnt/c`): [
 | File | Change |
 |---|---|
 | `android/vcmi-app/build.gradle` | one line: `apply from: 'quest.gradle'` |
+| `CMakeLists.txt` | option `ENABLE_OPENXR` (Android, off by default); `add_subdirectory(clientxr)` after `clientapp` (phase 2 prep) |
+| `clientapp/EntryPoint.cpp` | calls the OpenXR runtime probe after `GameEngine` is created, `VCMI_OPENXR` only (phase 2 prep) |
+| `clientsdl3/render/ScreenHandler.cpp` | RGB888 EGL config instead of RGB565, `VCMI_OPENXR` only (phase 2 prep) |
 
 All other files are new. Upstream `github.yml` is unchanged; the fork does not run it on `quest` pushes.
 
 ### Deferred to later phases
 
-- **Product flavor (`quest` / `standard`).** Phase 1 does not need it: the Gradle properties above give the separate ID, label and manifest overlay without renaming Gradle tasks (`assembleRelease` -> `assembleQuestRelease` would change upstream CI and `aab-from-build.yml`). Add the flavor when the Quest build needs its own Java sources, dependencies (OpenXR loader AAR) or native build options that the build-type overlay cannot express - expected in phase 2.
-- **VR manifest entries** (`com.oculus.intent.category.VR`, `android.hardware.vr.headtracking`, OpenXR loader). These turn the app into an immersive app, which phase 1 is not. Phase 2.
+- **Product flavor (`quest` / `standard`).** Still not needed: the Gradle properties above give the separate ID, label and manifest overlay, and `quest.gradle` adds the OpenXR loader dependency, minSdk 24 and the arm64 ABI filter, all without renaming Gradle tasks (`assembleRelease` -> `assembleQuestRelease` would change upstream CI and `aab-from-build.yml`). Add the flavor when the Quest build needs its own Java sources.
+- **VR manifest entries** (`com.oculus.intent.category.VR`, `android.hardware.vr.headtracking`). These turn the app into an immersive app. Phase 2, with the first XR session. The OpenXR permissions and runtime broker queries are already merged from the loader AAR.
 - **CMake preset `android-quest-release`.** Not added, to keep `CMakePresets.json` unchanged. Add it if local Quest builds become frequent.
 
 ## Follow-ups

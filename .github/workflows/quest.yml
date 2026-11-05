@@ -94,6 +94,7 @@ jobs:
           -DENABLE_CCACHE:BOOL=ON \
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+          -DENABLE_OPENXR=ON \
           "-DANDROID_GRADLE_PROPERTIES=$GRADLE_PROPERTIES"
 
     - name: Build

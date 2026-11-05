@@ -74,6 +74,25 @@
 #endif
 #endif
 
+#ifdef VCMI_OPENXR
+#include "session/XrRuntimeProbe.h"
+
+static void probeOpenXrRuntime()
+{
+	auto * env = static_cast<JNIEnv *>(SDL_GetAndroidJNIEnv());
+	JavaVM * javaVm = nullptr;
+	if(env->GetJavaVM(&javaVm) != JNI_OK)
+	{
+		logGlobal->warn("OpenXR: JavaVM not available");
+		return;
+	}
+
+	auto activity = static_cast<jobject>(SDL_GetAndroidActivity());
+	XrRuntimeProbe::logRuntime(javaVm, activity);
+	env->DeleteLocalRef(activity);
+}
+#endif
+
 #if __MINGW32__
 #undef main
 #endif
@@ -336,6 +355,9 @@ int main(int argc, char * argv[])
 				handleFatalError("Heroes III: Restoration of Erathia (including HD Edition) data files are not supported!", false);
 
 			ENGINE = std::make_unique<GameEngine>();
+#ifdef VCMI_OPENXR
+			probeOpenXrRuntime();
+#endif
 		}
 
 		GAME = std::make_unique<GameInstance>();
