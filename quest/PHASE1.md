@@ -112,7 +112,7 @@ Measure 5 minutes of play with `quest.sh sample 300`, and the AI turn time from 
 
 | Config | Panel px | Load time to main menu (s) | Map load (s) | FPS adventure (avg / min) | FPS battle (avg / min) | PSS peak (MB) | CPU avg (%) | AI turn (s) | Battery temp after 30 min (C) |
 |---|---|---|---|---|---|---|---|---|---|
-| SoD, xBRZ off | | | | | | | | | |
+| SoD, xBRZ off (partial, see notes) | | 1.4 | 0.7 | | | 1368, still rising | 22 (max 155) | 2.1 (day 1) | 38 after 3 min |
 | SoD, xBRZ 2x | | | | | | | | | |
 | SoD, xBRZ 4x | | | | | | | | | |
 | HD Edition data | | | | | | | | | |
@@ -120,6 +120,16 @@ Measure 5 minutes of play with `quest.sh sample 300`, and the AI turn time from 
 | HD mod pack 3x | | | | | | | | | |
 | HD mod pack 4x | | | | | | | | | |
 | + `hota` + `vcmi-extras` | | | | | | | | | |
+
+CPU is percent of one core (`top`); 100 = one full core.
+
+Notes on the first row (2026-11-05, `quest/out/baseline-sod-xbrz-off.csv`, logs in `quest/out/logs-baseline1`):
+- Map `Myth and Legend` (144x144 + underground, 8 players: 1 human, 7 AI). Run stopped after 3 min of a planned 5, on day 1 to 2: one human turn, one round of AI turns.
+- Samples are 1.7 s apart (adb round trips), 106 samples.
+- PSS rose from 811 MB to 1368 MB and did not level off. Repeat for 30 min to see whether it stops at the asset cache budget (484 MiB) or keeps growing.
+- CPU peak 155% (1.5 cores) during the AI turn; 15-20% while idle on the adventure map.
+- AI turn: all 7 AI players took 2.1 s on day 1, including 2 AI-vs-neutral battles. Not representative yet: early turns are short.
+- Not measured: FPS (enable `video.performanceOverlay`), panel size in pixels.
 
 **Exit criterion:** a full game is playable in the 2D panel and every row above is filled.
 
