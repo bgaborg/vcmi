@@ -33,8 +33,9 @@ Usage: quest.sh <command> [args]
   devices                 list connected devices
   info                    device model, OS build, refresh rate, installed app version
   install <apk>           install or update the APK (keeps app data)
-  start                   launch the app
+  start                   launch the app (refuses if it is already running)
   stop                    force-stop the app
+  restart                 force-stop and launch the app
   logcat                  follow logcat for the running app
   pull-logs [dir]         copy VCMI logs from the device (default: quest/out/logs-<timestamp>)
   sample <seconds> [csv]  sample PSS memory, CPU and battery temperature once per second
@@ -63,11 +64,21 @@ case "$cmd" in
 		"$ADB" install -r "$1"
 		;;
 	start)
-		adb_shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null
+		# A second launcher intent into a running game hangs ActivityLauncher (ANR) and the process gets killed
+		if [ -n "$(app_pid)" ]; then
+			echo "$PKG is already running; use restart" >&2
+			exit 1
+		fi
+		adb_shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
 		echo "started $PKG"
 		;;
 	stop)
 		adb_shell am force-stop "$PKG"
+		;;
+	restart)
+		adb_shell am force-stop "$PKG"
+		adb_shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+		echo "restarted $PKG"
 		;;
 	logcat)
 		pid="$(app_pid)"
