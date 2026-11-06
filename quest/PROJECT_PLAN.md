@@ -261,7 +261,7 @@ python3 serve_https.py 8443
 - `VcmiXrActivity` hosts Godot (`GodotActivity` or `GodotFragment`). When the layer surface exists, it creates a private `VirtualDisplay` on it and starts `VcmiSDLActivity` on that display (`allowEmbedded`, `setLaunchDisplayId`).
 - Input bridge: ray hit on the cylinder -> `MotionEvent` hover / buttons and `KeyEvent`s, dispatched to the game activity.
 - **Exit:** the game plays on a curved screen with the real controller models and ray, 72 Hz with no judder while the game loads, clean exit; no change to VCMI C++.
-- **Check early (day 1):** the virtual display launch on Horizon OS; SDL surface size and density on the display; text input (system keyboard) from a game on a virtual display; game pause / resume when the Godot activity pauses.
+- **Check early (day 1):** the virtual display launch on Horizon OS; SDL surface size and density on the display; text input (system keyboard) from a game on a virtual display.
 
 ### Phase 3 - War room MVP, release v0.1
 

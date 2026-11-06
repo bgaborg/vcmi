@@ -105,6 +105,7 @@ Status of [phase 2b](PROJECT_PLAN.md#phase-2b---godot-host-spike), 2026-11-06, Q
 - Pointer: the game's cursor is not drawn into the virtual display; Godot draws a dot where the ray hits (no VCMI change). Once the gamepad is used, the game also shows its own cursor.
 - Haptics: Godot pulses the controller on a click on the screen (amplitude 0.5) and on gamepad buttons (0.25), 30 ms. The game's `hapticFeedback()` runs for touch input only, so it is not routed to the controllers.
 - Controllers as an SDL gamepad (`org.libsdl.app.QuestGamepad`, SDL's own Android joystick entry points): right A/B = accept/cancel, left X/Y = next hero/town, left menu = options, stick clicks = map level/grid, right thumbstick = map scroll. The game binds them in `config/keyBindingsConfig.json` ("joystickButtons", "joystickAxes"); no VCMI change. The gamepad is registered on the first pointer move: SDL sends buttons of a gamepad the game has not opened yet as keyboard keys.
+- Pause: the game activity stays resumed on its virtual display when the host pauses (Meta menu, headset off, Guardian dialog), so `VcmiBridge` runs SDL's own pause (`org.libsdl.app.QuestPause`): the game loop and audio stop until the host resumes. Checked with HOME and with sleep / wake into the Guardian dialog: logcat `VcmiBridge: game paused` / `game resumed`, the game's players in `dumpsys audio` go paused / started.
 
 ## Testing without the headset
 

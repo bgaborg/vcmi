@@ -24,6 +24,7 @@ import org.godotengine.godot.plugin.GodotPlugin;
 import org.godotengine.godot.plugin.SignalInfo;
 import org.godotengine.godot.plugin.UsedByGodot;
 import org.libsdl.app.QuestGamepad;
+import org.libsdl.app.QuestPause;
 import org.libsdl.app.SDLActivity;
 
 import eu.vcmi.vcmi.util.FileUtil;
@@ -63,6 +64,7 @@ public class VcmiBridge extends GodotPlugin
     private float pointerY;
     private long hapticSettingTime = -1;
     private boolean hapticSetting = true;
+    private boolean hostPaused;
 
     public VcmiBridge(final Godot godot)
     {
@@ -184,6 +186,27 @@ public class VcmiBridge extends GodotPlugin
     }
 
     @Override
+    public void onMainPause()
+    {
+        setGamePaused(true);
+    }
+
+    @Override
+    public void onMainResume()
+    {
+        setGamePaused(false);
+    }
+
+    private void setGamePaused(final boolean paused)
+    {
+        hostPaused = paused;
+        runOnGame(() -> {
+            QuestPause.set((SDLActivity) game, paused);
+            Log.i(TAG, paused ? "game paused" : "game resumed");
+        });
+    }
+
+    @Override
     public void onMainDestroy()
     {
         getActivity().getApplication().unregisterActivityLifecycleCallbacks(gameLifecycle);
@@ -220,6 +243,14 @@ public class VcmiBridge extends GodotPlugin
         {
             if (activity instanceof VcmiSDLActivity)
                 game = activity;
+        }
+
+        /** SDL's onStart resumes the game, also on wake while the host is still paused (Meta menu, Guardian): pause it again */
+        @Override
+        public void onActivityPostStarted(@NonNull final Activity activity)
+        {
+            if (activity == game && hostPaused)
+                setGamePaused(true);
         }
 
         @Override
