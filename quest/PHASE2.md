@@ -109,7 +109,7 @@ Status of [phase 2b](PROJECT_PLAN.md#phase-2b---godot-host-spike), 2026-11-06, Q
 
 ## Testing without the headset
 
-Test commands drive the same code paths as the controllers: `pad keycode`, `stick x y`, `head yaw pitch height` (a simulated head pose; the origin moves by its inverse and the screen stays world-locked), `head_off`, `recenter`, `aim yaw pitch` (degrees from the screen centre), `aim_off`, `click`, `rclick`, `probe`. Each logs `VCMI XR test: <cmd> -> screen <position> heading <deg>, pointer (<x>, <y>)`.
+Test commands drive the same code paths as the controllers: `pad keycode`, `stick x y` (right thumbstick), `lstick x y` (left thumbstick: screen distance and width; `lstick 0 0` releases it and saves), `screen distance width` (sets the screen in metres until the next launch; `xr-smoke.sh` sets `2 2.4`), `head yaw pitch height` (a simulated head pose; the origin moves by its inverse and the screen stays world-locked), `head_off`, `recenter`, `aim yaw pitch` (degrees from the screen centre), `aim_off`, `click`, `rclick`, `probe`. Each logs `VCMI XR test: <cmd> -> screen <position> heading <deg> distance <m> width <m>, pointer (<x>, <y>)`.
 
 On the headset (on a desk, nobody wearing it): `quest/tools/quest.sh awake`, `start-xr`, `test <cmd>`, `screenshot`, `panel`. This covers the whole Android path: the virtual display, the Android surface layer, SDL input. Comfort, stereo depth and how the controllers feel still need a person.
 

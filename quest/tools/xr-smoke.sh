@@ -34,6 +34,8 @@ MARK="$mark" "$Q" wait-log "Initialization of VCMI \(together\)" 60 >/dev/null
 # a standing head looking ahead, screen recentred in front of it
 "$Q" test head 0 0 1.6 >/dev/null
 "$Q" test recenter >/dev/null
+# the aim angles below fit the default screen; not saved, the next launch has the size set by hand
+"$Q" test screen 2 2.4 >/dev/null
 "$Q" test aim 0 0 >/dev/null
 shot 1-intro
 # clicks skip the intro videos until the main menu music starts

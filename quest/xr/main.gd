@@ -2,8 +2,11 @@ extends Node3D
 ## Shows the VCMI game activity on a curved layer and passes the controller ray to it as a mouse.
 ## Test commands from adb (VcmiBridge `test_command`, quest/tools/quest.sh test) simulate the head, the aim and clicks.
 
-const SCREEN_DISTANCE := 2.0 ## metres from the head; the cylinder radius
-const SCREEN_WIDTH := 2.4 ## metres of arc
+const SCREEN_DISTANCE := Vector2(1.0, 4.0) ## metres from the head, min and max; the cylinder radius, so a nearer screen curves more
+const SCREEN_WIDTH := Vector2(1.0, 4.0) ## metres of arc, min and max
+const SCREEN_MAX_ANGLE := 2.0 ## radians of arc, about the headset field of view: a near screen does not wrap around the head
+const SCREEN_SPEED := 0.8 ## metres per second at full left thumbstick
+const SETTINGS_PATH := "user://screen.cfg"
 const SURFACE_SIZE := Vector2i(2560, 1440) ## pixels of the game window
 const BUTTON_LEFT := 1 ## MotionEvent.BUTTON_PRIMARY
 const BUTTON_RIGHT := 2 ## MotionEvent.BUTTON_SECONDARY
@@ -34,6 +37,9 @@ var screen_placed := false
 var game_started := false
 var surface_pending := true ## the layer creates a new Android surface for each OpenXR session
 var last_pointer := Vector2i(-1, -1) ## last pointer position sent to the game, in game pixels
+var screen_distance := 2.0
+var screen_width := 2.4
+var screen_stick := Vector2.ZERO ## left thumbstick: y = distance, x = width
 var test_head: Variant = null ## Transform3D: simulated head pose in the world, null for the tracked head
 var test_head_start: Variant = null ## Transform3D: tracked head when the simulated head was set
 var test_aim: Variant = null ## Vector2: simulated aim of the active hand from the head, yaw and pitch in degrees from the screen centre
@@ -48,6 +54,8 @@ func _ready() -> void:
 	get_viewport().use_xr = true
 	xr.pose_recentered.connect(func(): screen_placed = false)
 	xr.session_begun.connect(func(): surface_pending = true)
+	# the stick may not report its release while the system menu has focus
+	xr.session_visible.connect(func(): _on_stick("primary", Vector2.ZERO, 0))
 
 	# the controller models have lit glTF materials
 	var light := DirectionalLight3D.new()
@@ -71,8 +79,11 @@ func _ready() -> void:
 	layer.use_android_surface = true
 	layer.android_surface_size = SURFACE_SIZE
 	bridge.connect("test_command", _on_test_command)
-	layer.radius = SCREEN_DISTANCE
-	layer.central_angle = SCREEN_WIDTH / SCREEN_DISTANCE
+	var settings := ConfigFile.new()
+	if settings.load(SETTINGS_PATH) == OK:
+		_size_screen(settings.get_value("screen", "distance", screen_distance), settings.get_value("screen", "width", screen_width))
+	else:
+		_size_screen(screen_distance, screen_width)
 	layer.aspect_ratio = float(SURFACE_SIZE.x) / SURFACE_SIZE.y # width / height, as in XrCompositionLayerCylinderKHR
 	# behind the Godot frame, so the controllers and the ray draw over the game
 	layer.sort_order = -1
@@ -132,7 +143,7 @@ func _ready() -> void:
 		pointer_dot.add_child(dot)
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	var tracked: Variant = _tracked_head()
 	if test_head != null and tracked != null:
 		if test_head_start == null:
@@ -143,6 +154,12 @@ func _process(_delta: float) -> void:
 			_end_test_head()
 	if test_head != null and tracked != null:
 		origin.transform = test_head * tracked.affine_inverse()
+	if screen_stick != Vector2.ZERO:
+		var width := screen_width
+		if screen_stick.x != 0.0:
+			# widening stops at the arc limit; the width is kept when only the distance changes
+			width = minf(width + screen_stick.x * SCREEN_SPEED * delta, maxf(screen_width, screen_distance * SCREEN_MAX_ANGLE))
+		_size_screen(screen_distance + screen_stick.y * SCREEN_SPEED * delta, width)
 	if not screen_placed:
 		_place_screen()
 	layer.transform = origin.transform.affine_inverse() * screen_world
@@ -192,6 +209,16 @@ func _tracked_head() -> Variant:
 	if pose == null or not pose.has_tracking_data or pose.transform.origin.is_zero_approx():
 		return null
 	return pose.get_adjusted_transform()
+
+
+## Values from the settings file may be of any type or range
+func _size_screen(distance: Variant, width: Variant) -> void:
+	if typeof(distance) in [TYPE_FLOAT, TYPE_INT]:
+		screen_distance = clampf(distance, SCREEN_DISTANCE.x, SCREEN_DISTANCE.y)
+	if typeof(width) in [TYPE_FLOAT, TYPE_INT]:
+		screen_width = clampf(width, SCREEN_WIDTH.x, SCREEN_WIDTH.y)
+	layer.radius = screen_distance
+	layer.central_angle = minf(screen_width / screen_distance, SCREEN_MAX_ANGLE)
 
 
 ## Centres the cylinder on the head, facing the head heading (yaw only)
@@ -272,9 +299,25 @@ func _on_button(button_name: String, hand: int, pressed: bool) -> void:
 
 
 func _on_stick(input_name: String, value: Vector2, hand: int) -> void:
-	if input_name == "primary" and hand == 1:
+	if input_name != "primary":
+		return
+	if hand == 1:
 		bridge.gamepadAxis(PAD_RIGHT_X, value.x)
 		bridge.gamepadAxis(PAD_RIGHT_Y, -value.y)
+		return
+	# dead zone per axis: a resting stick does not drift, pushing up does not also change the width
+	var stick := Vector2(value.x if absf(value.x) > 0.2 else 0.0, value.y if absf(value.y) > 0.2 else 0.0)
+	if stick == Vector2.ZERO and screen_stick != Vector2.ZERO:
+		_save_screen()
+	screen_stick = stick
+
+
+func _save_screen() -> void:
+	var settings := ConfigFile.new()
+	settings.set_value("screen", "distance", screen_distance)
+	settings.set_value("screen", "width", screen_width)
+	settings.save(SETTINGS_PATH)
+	print("VCMI XR: screen distance ", screen_distance, " width ", screen_width)
 
 
 func _press(button: int, hand: int, pressed: bool) -> void:
@@ -297,8 +340,8 @@ func _pulse(hand: int, amplitude: float) -> void:
 	print("VCMI XR: haptic pulse ", hand, " ", amplitude)
 
 
-## head yaw pitch height | head_off | recenter | aim yaw pitch | aim_off | click | rclick | pad keycode | stick x y | probe;
-## angles in degrees, height in metres, stick values -1..1 with y up, as the right thumbstick
+## head yaw pitch height | head_off | recenter | aim yaw pitch | aim_off | click | rclick | pad keycode | stick x y | lstick x y | screen distance width | probe;
+## angles in degrees, height in metres, stick values -1..1 with y up, as the right (stick) and left (lstick) thumbstick
 func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 	match command:
 		"head":
@@ -325,6 +368,11 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 			bridge.gamepadButton(int(a), false)
 		"stick":
 			_on_stick("primary", Vector2(a, b), 1)
+		"lstick":
+			_on_stick("primary", Vector2(a, b), 0)
+		"screen":
+			# not saved: a test run keeps the size the user chose for the next launch
+			_size_screen(a, b)
 		"probe":
 			pass
 		_:
@@ -334,6 +382,6 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 	var hit := _pointer_hit(active_hand)
-	print("VCMI XR test: ", command, " -> screen ", screen_world.origin, " heading ", rad_to_deg(screen_world.basis.get_euler().y),
+	print("VCMI XR test: ", command, " -> screen ", screen_world.origin, " heading ", rad_to_deg(screen_world.basis.get_euler().y), " distance ", screen_distance, " width ", screen_width,
 			", pointer ", Vector2i(hit * Vector2(SURFACE_SIZE)) if hit != NO_HIT else "off screen",
 			", controllers tracked ", aims.map(func(aim): return aim.get_has_tracking_data()))
