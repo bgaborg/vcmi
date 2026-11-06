@@ -284,6 +284,8 @@ Phases 4 and 5 need game data, not pixels: terrain, object list, battle hexes an
 
 Pick the option with the fewest changes to upstream files; prototype it on the minimap first.
 
+Plan: [`DATA_BRIDGE.md`](DATA_BRIDGE.md) compares both with a third option and recommends it: a quest-only library compiled into the game's `.so` fills plain buffers under the game's own lock, and a thin GDExtension reads them by pointer. It sets performance and memory budgets and the milestones, starting with a baseline measurement and the minimap.
+
 ### Phase 4 - Tabletop adventure map
 
 - The 3D scene is a Godot scene in `quest/xr/`; the data comes through the data bridge.
