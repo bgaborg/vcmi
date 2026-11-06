@@ -272,18 +272,18 @@ func _tracked_head() -> Variant:
 func _set_environment(choice: Variant) -> void:
 	if not choice in ENVIRONMENTS:
 		choice = ENVIRONMENTS[0]
-	var enabled: bool = choice == "passthrough"
+	var passthrough: bool = choice == "passthrough"
 	var xr := XRServer.find_interface("OpenXR")
-	var mode := XRInterface.XR_ENV_BLEND_MODE_ALPHA_BLEND if enabled else XRInterface.XR_ENV_BLEND_MODE_OPAQUE
-	if enabled and not mode in xr.get_supported_environment_blend_modes():
+	var mode := XRInterface.XR_ENV_BLEND_MODE_ALPHA_BLEND if passthrough else XRInterface.XR_ENV_BLEND_MODE_OPAQUE
+	if passthrough and not mode in xr.get_supported_environment_blend_modes():
 		print("VCMI XR: passthrough not supported")
 		choice = "black" # not the war room: the next long press must still reach black
-		enabled = false
+		passthrough = false
 		mode = XRInterface.XR_ENV_BLEND_MODE_OPAQUE
 	xr.environment_blend_mode = mode
 	# the clear colour shows where nothing is drawn: transparent lets the passthrough through
-	get_viewport().transparent_bg = enabled
-	environment.background_mode = Environment.BG_CLEAR_COLOR if enabled else Environment.BG_COLOR
+	get_viewport().transparent_bg = passthrough
+	environment.background_mode = Environment.BG_CLEAR_COLOR if passthrough else Environment.BG_COLOR
 	room.visible = choice == "war room"
 	environment_name = choice
 	print("VCMI XR: environment ", choice)
@@ -331,7 +331,8 @@ func _update_hotkey_panel() -> void:
 	else:
 		if not test_wrist:
 			hotkey_panel.transform = HOTKEY_PANEL_POSE
-		hotkey_panel.visible = grips[0].get_has_tracking_data() and tracked != null and 				hotkey_panel.global_basis.z.dot(((origin.transform * tracked).origin - hotkey_panel.global_position).normalized()) > 0.6
+		# hidden with a simulated head, like the controller models: the real controller may lie in front of the eyes
+		hotkey_panel.visible = test_head == null and grips[0].get_has_tracking_data() and tracked != null and 				hotkey_panel.global_basis.z.dot(((origin.transform * tracked).origin - hotkey_panel.global_position).normalized()) > 0.6
 	if hotkey_panel.visible:
 		var ray := _aim_ray(1)
 		if not ray.is_empty():
@@ -345,14 +346,17 @@ func _update_hotkey_panel() -> void:
 					if absf(offset.x) <= HOTKEY_SIZE.x / 2.0 and absf(offset.y) <= HOTKEY_SIZE.y / 2.0:
 						hotkey_hover = i
 				if hotkey_hover >= 0:
-					var end: Vector3 = hotkey_panel.global_transform * hit
-					var length: float = ray[0].distance_to(end)
-					rays[1].visible = true
-					rays[1].global_transform = Transform3D(Basis.looking_at(ray[1].normalized(), Vector3.UP), ray[0] + ray[1].normalized() * length / 2.0)
-					rays[1].scale = Vector3(1.0, 1.0, length)
+					_show_ray(1, ray[0], ray[1].normalized(), ray[0].distance_to(hotkey_panel.global_transform * hit))
 	for i in hotkey_buttons.size():
 		var material: StandardMaterial3D = hotkey_buttons[i].mesh.material
 		material.albedo_color = Color(0.85, 0.6, 0.15) if i == hotkey_hover else Color(0.2, 0.15, 0.1)
+
+
+## Draws the ray of `hand` from `from` along the unit vector `direction` for `length` metres
+func _show_ray(hand: int, from: Vector3, direction: Vector3, length: float) -> void:
+	rays[hand].visible = true
+	rays[hand].global_transform = Transform3D(Basis.looking_at(direction, Vector3.UP), from + direction * length / 2.0)
+	rays[hand].scale = Vector3(1.0, 1.0, length)
 
 
 ## Values from the settings file may be of any type or range
@@ -423,9 +427,7 @@ func _pointer_hit(hand: int) -> Vector2:
 		return NO_HIT
 
 	var world_direction: Vector3 = ray[1].normalized()
-	rays[hand].visible = true
-	rays[hand].global_transform = Transform3D(Basis.looking_at(world_direction, Vector3.UP), ray[0] + world_direction * length / 2.0)
-	rays[hand].scale = Vector3(1.0, 1.0, length)
+	_show_ray(hand, ray[0], world_direction, length)
 	if hand == active_hand:
 		# a little in front of the screen, towards the ray origin
 		pointer_dot.global_position = ray[0] + world_direction * (length - 0.02)
@@ -511,7 +513,7 @@ func _pulse(hand: int, amplitude: float) -> void:
 	print("VCMI XR: haptic pulse ", hand, " ", amplitude)
 
 
-## head yaw pitch height | head_off | recenter | aim yaw pitch | aim_off | click | rclick | pad keycode | stick x y | lstick x y | screen distance width | lmenu seconds | wrist 1/0 | probe;
+## head yaw pitch height | head_off | recenter | aim yaw pitch | aim_off | click | rclick | pad keycode | stick x y | lstick x y | screen distance width | env index | lmenu seconds | wrist 1/0 | probe;
 ## angles in degrees, height in metres, stick values -1..1 with y up, as the right (stick) and left (lstick) thumbstick
 func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 	match command:
@@ -547,9 +549,12 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 			_on_button("menu_button", 0, true)
 			await get_tree().create_timer(a).timeout
 			_on_button("menu_button", 0, false)
-		"screen":
-			# not saved: a test run keeps the size the user chose for the next launch
-			_size_screen(a, b)
+		"screen", "env":
+			# shortcut: not saved, so a test run keeps the user's choice for the next launch; a later stick release or long menu press saves the test values, reset by hand if that matters
+			if command == "screen":
+				_size_screen(a, b)
+			else:
+				_set_environment(ENVIRONMENTS[clampi(int(a), 0, ENVIRONMENTS.size() - 1)])
 		"probe":
 			pass
 		_:

@@ -36,6 +36,8 @@ MARK="$mark" "$Q" wait-log "Initialization of VCMI \(together\)" 60 >/dev/null
 "$Q" test recenter >/dev/null
 # the aim angles below fit the default screen; not saved, the next launch has the size set by hand
 "$Q" test screen 2 2.4 >/dev/null
+# screenshots in the war room, whatever environment was saved
+"$Q" test env 0 >/dev/null
 "$Q" test aim 0 0 >/dev/null
 shot 1-intro
 # clicks skip the intro videos until the main menu music starts

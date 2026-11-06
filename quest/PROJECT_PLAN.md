@@ -266,11 +266,11 @@ python3 serve_https.py 8443
 ### Phase 3 - War room MVP, release v0.1
 
 All in Godot and the input bridge; no change to VCMI C++.
-- Input: trigger = left click, grip = right click, thumbstick = arrow keys (map scroll), A/B/X/Y = keys from `config/shortcutsConfig.json`.
+- Input: trigger = left click, grip = right click; the controllers are one SDL gamepad bound in `config/keyBindingsConfig.json` ("joystickButtons", "joystickAxes"): A/B accept / cancel, X/Y next hero / town, left menu options, stick clicks map level / grid, right thumbstick map scroll. The left thumbstick sizes the screen, a long left menu press switches the environment, the wrist panel sends keyboard keys.
 - Haptics: Godot pulses the controller on clicks and gamepad buttons and follows the game's "Haptic feedback" option (the game's own `hapticFeedback()` runs for touch input only, so no hook).
 - QoL hotkeys on controllers: radial menu or a wrist hotkey panel in Godot that sends keys (section 4). Done: a wrist panel above the left controller, shown when it is turned to the eyes; the right ray and trigger press end turn, spells, kingdom, quests, sleep, dig, quick save and quick load, sent as the game's own keys (`config/keyBindingsConfig.json`). Godot does not know which screen is open, so the labels name the key: in battle D is defend.
 - Popups stay on the main screen. The bridge sees clicks, not dialogs: haptics on click only until the data bridge exists.
-- Environment: a low-poly war room (glTF scene in Godot) or passthrough, selected in settings. Done: a war room built from primitives in `quest/xr/room.gd` (stone floor, beams, banners, two torches; no assets), passthrough (XR_FB_passthrough, alpha blend) and black. Holding the left menu button for 0.6 s goes to the next one, saved in `user://screen.cfg`; a short press stays the game's options button. Godot's hole punch writes no depth, so the room would draw over the screen: its mesh gets a depth-writing transparent material and the room draws after it in the transparent pass. Later: textures or a glTF room.
+- Environment: done: a low-poly war room built from primitives in `quest/xr/room.gd` (stone floor, beams, banners, two torches; no assets), passthrough (XR_FB_passthrough, alpha blend) and black. Holding the left menu button for 0.6 s goes to the next one, saved in `user://screen.cfg`; a short press stays the game's options button. Godot's hole punch writes no depth, so the room would draw over the screen: its mesh gets a depth-writing transparent material and the room draws after it in the transparent pass. Later: textures or a glTF room.
 - Recenter (Godot follows the runtime recenter event), screen distance, size and curvature settings (stored by Godot). Done: the left thumbstick sets distance (up / down, 1-4 m; the screen is a cylinder around the head, so a nearer screen curves more) and width (left / right, 1-4 m, at most 115° of arc), saved in `user://screen.cfg`; recenter works. No seated / standing mode: recenter puts the screen at the current eye height either way.
 - Text readability: virtual display 2560x1440 or higher, cylinder compositor layer.
 - HD: 2x assets for the screen and UI panels; XR graphics presets.
@@ -362,7 +362,7 @@ Out of scope until phase 7 is done:
 ## 8. Open decisions
 
 1. Data bridge for phases 4-5 (section 6): JNI export hook or GDExtension on `libvcmi`.
-2. Passthrough or war room as the default environment.
+2. Decided 2026-11-06: the war room is the default environment; passthrough and black are a long left menu press away.
 3. Separate package ID (`is.xyz.vcmi.quest`) to install next to the normal Android build: recommended.
 4. HD pack builder upscaler: AI model (quality, licence of the model) or xBRZ + sharpen (fast, no licence issue).
 5. Upstream strategy: which hooks to propose to VCMI. The contributor opens the PRs (see [`AGENTS.md`](../AGENTS.md)).
