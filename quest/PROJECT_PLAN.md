@@ -273,7 +273,7 @@ All in Godot and the input bridge; no change to VCMI C++.
 - Environment: done: a low-poly war room built from primitives in `quest/xr/room.gd` (stone floor, beams, banners, two torches; no assets), passthrough (XR_FB_passthrough, alpha blend) and black. Holding the left menu button for 0.6 s goes to the next one, saved in `user://screen.cfg`; a short press stays the game's options button. Godot's hole punch writes no depth, so the room would draw over the screen: its mesh gets a depth-writing transparent material and the room draws after it in the transparent pass. Later: textures or a glTF room.
 - Recenter (Godot follows the runtime recenter event), screen distance, size and curvature settings (stored by Godot). Done: the left thumbstick sets distance (up / down, 1-4 m; the screen is a cylinder around the head, so a nearer screen curves more) and width (left / right, 1-4 m, at most 115° of arc), saved in `user://screen.cfg`; recenter works. No seated / standing mode: recenter puts the screen at the current eye height either way.
 - Text readability: virtual display 2560x1440 or higher, cylinder compositor layer.
-- HD: 2x assets for the screen and UI panels; XR graphics presets.
+- HD: 2x assets for the screen and UI panels. Done by the game's defaults, no change: on the 2560x1440 display it picks 200% interface scaling and xBRZ 2x upscaling (`video.upscalingFilter` auto, log "Selected upscaling filter 2"), and `video.useHdTextures` uses HD mod packs where installed. XR graphics presets moved to phase 4 (and used again for the phase 5 battle stacks): they set a scale per asset class, and the flat screen has one class, covered by the game's own options.
 - **Exit:** a full campaign map is playable start to end in VR with no comfort complaints. Sideload release v0.1.
 
 ### Data bridge (decision before phase 4)
@@ -299,7 +299,7 @@ Pick the option with the fewest changes to upstream files; prototype it on the m
 - Seated / standing mode: the table height follows it (moved from phase 3, where recenter covers the flat screen).
 - Card metadata (height, anchor, fold style) from JSON, so mods can tune it. Include HotA objects.
 - Army management gestures: grab / drop / split stacks.
-- HD: 4x object cards and 3x-4x terrain page; Godot mipmaps and ASTC compression.
+- HD: 4x object cards and 3x-4x terrain page; Godot mipmaps and ASTC compression; XR graphics presets (moved from phase 3).
 - **Exit:** the adventure map is fully playable on the table; the 2D screen fallback is available with one button.
 
 ### Phase 5 - Battle diorama
