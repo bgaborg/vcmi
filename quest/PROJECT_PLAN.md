@@ -266,7 +266,7 @@ python3 serve_https.py 8443
 ### Phase 3 - War room MVP, release v0.1
 
 All in Godot and the input bridge; no change to VCMI C++.
-- Input: trigger = left click, grip = right click, thumbstick = arrow keys (map scroll), A/B/X/Y = keys from `config/shortcutsConfig.json`; hand tracking pinch as a second input method.
+- Input: trigger = left click, grip = right click, thumbstick = arrow keys (map scroll), A/B/X/Y = keys from `config/shortcutsConfig.json`.
 - Haptics: Godot pulses the controller on clicks and gamepad buttons and follows the game's "Haptic feedback" option (the game's own `hapticFeedback()` runs for touch input only, so no hook).
 - QoL hotkeys on controllers: radial menu or a wrist hotkey panel in Godot that sends keys (section 4). Done: a wrist panel above the left controller, shown when it is turned to the eyes; the right ray and trigger press end turn, spells, kingdom, quests, sleep, dig, quick save and quick load, sent as the game's own keys (`config/keyBindingsConfig.json`). Godot does not know which screen is open, so the labels name the key: in battle D is defend.
 - Popups stay on the main screen. The bridge sees clicks, not dialogs: haptics on click only until the data bridge exists.
@@ -332,6 +332,11 @@ Pick the option with the fewest changes to upstream files; prototype it on the m
 - Performance pass: frame time, thermal, memory with 4x HD assets.
 - Store or sideload decision; GPL compliance check; user data import flow on headset.
 - Docs: build guide for the `quest` flavor, settings, comfort options.
+
+### After the roadmap
+
+Out of scope until phase 7 is done:
+- Hand tracking: pinch as a second input method next to the controllers (ray from the hand, pinch = click).
 
 ## 7. Risks
 
