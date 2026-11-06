@@ -22,6 +22,17 @@ const PAD_BUTTONS := {
 	"1:primary_click": 107, # right stick click -> right stick: grid
 }
 const MENU_HOLD_MS := 600 ## holding the left menu button this long switches passthrough instead of opening the game options
+## the wrist panel: label and Android KeyEvent.KEYCODE_*, the game's own keys from config/keyBindingsConfig.json "keyboard";
+## the labels name the key because other screens bind it to something else (in battle D is defend)
+const HOTKEYS := [
+	["End turn (E)", 33], ["Spells (C)", 31],
+	["Kingdom (K)", 39], ["Quests (Q)", 45],
+	["Sleep (Z)", 54], ["Dig (D)", 32],
+	["Quick save (F8)", 138], ["Quick load (F9)", 139],
+]
+const HOTKEY_SIZE := Vector2(0.08, 0.025) ## metres per button
+## above the back of the left controller, tilted towards the eyes like a watch face
+const HOTKEY_PANEL_POSE := Transform3D(Basis(Vector3.RIGHT, deg_to_rad(-45.0)), Vector3(0.0, 0.05, 0.07))
 const PAD_RIGHT_X := 2 ## the right thumbstick is the gamepad right stick: the game scrolls the map with it ("mouseSwipe")
 const PAD_RIGHT_Y := 3
 
@@ -29,7 +40,8 @@ var bridge: Object
 var origin: XROrigin3D
 var layer: OpenXRCompositionLayerCylinder
 var aims: Array[XRController3D] = []
-var grips: Array[XRController3D] = [] ## carry the controller models
+var grips: Array[XRController3D] = [] ## carry the controller models and the hotkey panel
+var models: Array[Node3D] = []
 var rays: Array[MeshInstance3D] = []
 var pointer_dot: Node3D ## where the active ray hits the screen
 var active_hand := 1
@@ -44,6 +56,11 @@ var screen_stick := Vector2.ZERO ## left thumbstick: y = distance, x = width
 var passthrough := false ## the room around the screen instead of black
 var menu_pressed_at := -1 ## Time.get_ticks_msec() of a left menu press not yet handled, or -1
 var environment: Environment
+var hotkey_panel: Node3D ## on the left controller, shown when it faces the head; the right ray presses its buttons
+var hotkey_buttons: Array[MeshInstance3D] = []
+var hotkey_hover := -1 ## HOTKEYS index the right ray points at, or -1
+var hotkey_pressed := false ## the right trigger went down on the panel: its release goes there too
+var test_wrist := false ## the panel held in front of the head instead of on the controller
 var test_head: Variant = null ## Transform3D: simulated head pose in the world, null for the tracked head
 var test_head_start: Variant = null ## Transform3D: tracked head when the simulated head was set
 var test_aim: Variant = null ## Vector2: simulated aim of the active hand from the head, yaw and pitch in degrees from the screen centre
@@ -111,6 +128,7 @@ func _ready() -> void:
 		model.connect("openxr_fb_render_model_loaded", func(): print("VCMI XR: controller model loaded: ", tracker))
 		grip.add_child(model)
 		grips.append(grip)
+		models.append(model)
 
 		var aim := XRController3D.new()
 		aim.tracker = tracker
@@ -130,6 +148,8 @@ func _ready() -> void:
 		ray.visible = false
 		add_child(ray)
 		rays.append(ray)
+
+	_build_hotkey_panel()
 
 	# the game's own cursor is not drawn into the virtual display; a dot marks the pointer instead of changing VCMI
 	pointer_dot = Node3D.new()
@@ -185,6 +205,10 @@ func _process(delta: float) -> void:
 
 	for ray in rays:
 		ray.visible = false
+	_update_hotkey_panel()
+	if hotkey_hover >= 0 and active_hand == 1:
+		pointer_dot.visible = false
+		return
 	var hit := _pointer_hit(active_hand)
 	pointer_dot.visible = hit != NO_HIT
 	if hit != NO_HIT:
@@ -209,8 +233,8 @@ func _end_test_head() -> void:
 	test_head_start = null
 	test_aim = null
 	origin.transform = Transform3D()
-	for grip in grips:
-		grip.visible = true
+	for model in models:
+		model.visible = true
 	screen_placed = false
 
 
@@ -235,6 +259,72 @@ func _set_passthrough(enabled: bool) -> void:
 	environment.background_mode = Environment.BG_CLEAR_COLOR if enabled else Environment.BG_COLOR
 	passthrough = enabled
 	print("VCMI XR: passthrough ", "on" if enabled else "off")
+
+
+func _build_hotkey_panel() -> void:
+	hotkey_panel = Node3D.new()
+	hotkey_panel.transform = HOTKEY_PANEL_POSE
+	hotkey_panel.visible = false
+	grips[0].add_child(hotkey_panel)
+	for i in HOTKEYS.size():
+		var quad := QuadMesh.new()
+		quad.size = HOTKEY_SIZE * 0.92
+		var material := StandardMaterial3D.new()
+		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		quad.material = material
+		var button := MeshInstance3D.new()
+		button.mesh = quad
+		button.position = _hotkey_centre(i)
+		hotkey_panel.add_child(button)
+		hotkey_buttons.append(button)
+		var label := Label3D.new()
+		label.text = HOTKEYS[i][0]
+		label.pixel_size = 0.0002
+		label.font_size = 40
+		label.position.z = 0.001
+		button.add_child(label)
+
+
+## Button `i` centre in the panel: two columns, rows from the top
+@warning_ignore("integer_division")
+func _hotkey_centre(i: int) -> Vector3:
+	var rows := HOTKEYS.size() / 2
+	return Vector3((i % 2 - 0.5) * HOTKEY_SIZE.x, ((rows - 1) / 2.0 - i / 2) * HOTKEY_SIZE.y, 0.0)
+
+
+## Shows the panel when the left controller turns it to the head, and finds the button under the right ray
+func _update_hotkey_panel() -> void:
+	hotkey_hover = -1
+	var tracked: Variant = _tracked_head()
+	hotkey_panel.top_level = test_wrist
+	if test_wrist and tracked != null:
+		hotkey_panel.global_transform = origin.transform * tracked * Transform3D(Basis(), Vector3(0.0, -0.1, -0.35))
+		hotkey_panel.visible = true
+	else:
+		if not test_wrist:
+			hotkey_panel.transform = HOTKEY_PANEL_POSE
+		hotkey_panel.visible = grips[0].get_has_tracking_data() and tracked != null and 				hotkey_panel.global_basis.z.dot(((origin.transform * tracked).origin - hotkey_panel.global_position).normalized()) > 0.6
+	if hotkey_panel.visible:
+		var ray := _aim_ray(1)
+		if not ray.is_empty():
+			var to_panel := hotkey_panel.global_transform.affine_inverse()
+			var from: Vector3 = to_panel * ray[0]
+			var direction: Vector3 = to_panel.basis * ray[1]
+			if direction.z < -0.0001 and from.z > 0.0:
+				var hit := from + direction * (-from.z / direction.z)
+				for i in HOTKEYS.size():
+					var offset := hit - _hotkey_centre(i)
+					if absf(offset.x) <= HOTKEY_SIZE.x / 2.0 and absf(offset.y) <= HOTKEY_SIZE.y / 2.0:
+						hotkey_hover = i
+				if hotkey_hover >= 0:
+					var end: Vector3 = hotkey_panel.global_transform * hit
+					var length: float = ray[0].distance_to(end)
+					rays[1].visible = true
+					rays[1].global_transform = Transform3D(Basis.looking_at(ray[1].normalized(), Vector3.UP), ray[0] + ray[1].normalized() * length / 2.0)
+					rays[1].scale = Vector3(1.0, 1.0, length)
+	for i in hotkey_buttons.size():
+		var material: StandardMaterial3D = hotkey_buttons[i].mesh.material
+		material.albedo_color = Color(0.85, 0.6, 0.15) if i == hotkey_hover else Color(0.2, 0.15, 0.1)
 
 
 ## Values from the settings file may be of any type or range
@@ -359,6 +449,19 @@ func _save_screen() -> void:
 
 
 func _press(button: int, hand: int, pressed: bool) -> void:
+	var on_panel := hotkey_hover >= 0 if pressed else hotkey_pressed
+	if hand == 1 and button == BUTTON_LEFT and on_panel:
+		# a press on the wrist panel sends its key instead of a click on the screen
+		hotkey_pressed = pressed
+		if pressed:
+			active_hand = hand
+			var keycode: int = HOTKEYS[hotkey_hover][1]
+			print("VCMI XR: hotkey ", HOTKEYS[hotkey_hover][0])
+			bridge.key(keycode, true)
+			_pulse(hand, 0.25)
+			await get_tree().create_timer(0.1).timeout
+			bridge.key(keycode, false)
+		return
 	if pressed:
 		active_hand = hand
 		var hit := _pointer_hit(hand)
@@ -378,7 +481,7 @@ func _pulse(hand: int, amplitude: float) -> void:
 	print("VCMI XR: haptic pulse ", hand, " ", amplitude)
 
 
-## head yaw pitch height | head_off | recenter | aim yaw pitch | aim_off | click | rclick | pad keycode | stick x y | lstick x y | screen distance width | lmenu seconds | probe;
+## head yaw pitch height | head_off | recenter | aim yaw pitch | aim_off | click | rclick | pad keycode | stick x y | lstick x y | screen distance width | lmenu seconds | wrist 1/0 | probe;
 ## angles in degrees, height in metres, stick values -1..1 with y up, as the right (stick) and left (lstick) thumbstick
 func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 	match command:
@@ -386,8 +489,8 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 			test_head = Transform3D(Basis.from_euler(Vector3(deg_to_rad(b), deg_to_rad(a), 0.0)), Vector3(0.0, c if c > 0.0 else 1.6, 0.0))
 			test_head_start = null
 			# the real controllers lie next to the real headset; moved with a simulated head they can end up in front of the eyes
-			for grip in grips:
-				grip.visible = false
+			for model in models:
+				model.visible = false
 		"head_off":
 			_end_test_head()
 		"recenter":
@@ -408,6 +511,8 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 			_on_stick("primary", Vector2(a, b), 1)
 		"lstick":
 			_on_stick("primary", Vector2(a, b), 0)
+		"wrist":
+			test_wrist = a != 0.0
 		"lmenu":
 			_on_button("menu_button", 0, true)
 			await get_tree().create_timer(a).timeout
@@ -426,4 +531,4 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 	var hit := _pointer_hit(active_hand)
 	print("VCMI XR test: ", command, " -> screen ", screen_world.origin, " heading ", rad_to_deg(screen_world.basis.get_euler().y), " distance ", screen_distance, " width ", screen_width, " passthrough ", passthrough,
 			", pointer ", Vector2i(hit * Vector2(SURFACE_SIZE)) if hit != NO_HIT else "off screen",
-			", controllers tracked ", aims.map(func(aim): return aim.get_has_tracking_data()))
+			", hotkey ", HOTKEYS[hotkey_hover][0] if hotkey_hover >= 0 else "none", ", controllers tracked ", aims.map(func(aim): return aim.get_has_tracking_data()))

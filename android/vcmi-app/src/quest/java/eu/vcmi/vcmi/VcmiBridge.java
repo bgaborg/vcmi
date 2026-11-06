@@ -150,6 +150,18 @@ public class VcmiBridge extends GodotPlugin
         runOnGame(() -> QuestGamepad.button(keycode, pressed));
     }
 
+    /** `keycode` is a KeyEvent.KEYCODE_* value; the game maps keys to actions in config/keyBindingsConfig.json "keyboard" */
+    @UsedByGodot
+    public void key(final int keycode, final boolean pressed)
+    {
+        runOnGame(() -> {
+            if (pressed)
+                SDLActivity.onNativeKeyDown(keycode);
+            else
+                SDLActivity.onNativeKeyUp(keycode);
+        });
+    }
+
     /** `axis` 0..3 is leftx, lefty, rightx, righty; `value` -1..1, positive y points down */
     @UsedByGodot
     public void gamepadAxis(final int axis, final float value)
