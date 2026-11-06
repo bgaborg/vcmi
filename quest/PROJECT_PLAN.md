@@ -3,43 +3,68 @@
 Native Quest 3 app (Android arm64, OpenXR). No PC streaming.
 Goal: the most immersive way to play Heroes 3 on Quest 3, with no motion sickness.
 
-## 1. Repository layout
+## 1. Architecture and repository layout
 
-A fork of [vcmi/vcmi](https://github.com/vcmi/vcmi): [bgaborg/vcmi](https://github.com/bgaborg/vcmi), branch `quest`. It is not one subdirectory only.
-The XR code is a new top-level module, plus small gated hooks in existing code.
+A fork of [vcmi/vcmi](https://github.com/vcmi/vcmi): [bgaborg/vcmi](https://github.com/bgaborg/vcmi), branch `quest`.
+The XR part is a [Godot](https://godotengine.org) 4 project. VCMI itself stays unchanged: no XR code in the VCMI C++ tree.
+
+### How the two fit together
 
 ```
-vcmi/                        fork bgaborg/vcmi, branch `quest` (tracks upstream `develop`)
-  quest/                     project docs and prototypes (this file)
+one APK, one Android process (is.xyz.vcmi.quest)
+  ActivityLauncher (Qt, 2D panel)        upstream, unchanged except the Play hook
+        | Play
+        v
+  VcmiXrActivity (Godot host)            NEW, quest flavor only
+    Godot engine (godot-lib AAR) + godot_openxr_vendors (Meta)
+      OpenXR session, 72/90 Hz, room, controller models, ray, recenter, haptics
+      OpenXRCompositionLayerCylinder, use_android_surface = true
+            | android.view.Surface
+            v
+    VirtualDisplay (private, owned by the app)
+      VcmiSDLActivity                    upstream, unchanged: SDL + GLES draw the game into the display
+            ^
+            | MotionEvent / KeyEvent, dispatched directly (same process)
+    Input bridge (Java, quest flavor)    ray hit -> hover / click / keys
+```
+
+- The game draws into an Android `Surface` that the OpenXR runtime owns (`XR_KHR_android_surface_swapchain`, used by Godot's `OpenXRCompositionLayer.use_android_surface`). No copy, no shared GL context, no XR code inside VCMI.
+- Android allows an app to start its own activities on a private virtual display it created (`ActivityOptions.setLaunchDisplayId`). Meta's Spatial SDK shows Android activities in VR panels the same way.
+- The compositor keeps 72/90 Hz even when the game draws nothing or stalls: Godot submits the frames, the game only updates the surface.
+- Input: the bridge turns the ray hit into `MotionEvent`s (`SOURCE_MOUSE`, hover, buttons) and `KeyEvent`s and dispatches them to the game activity. SDL turns them into the same mouse and key events as on a phone with a mouse.
+
+### Layout
+
+```
+vcmi/                        fork bgaborg/vcmi, branch `quest` (rebased on upstream `develop`)
+  quest/                     project docs and tools (this file)
     concept/                 WebXR prototype (done, phase 0)
+    xr/                      NEW  Godot project: scenes, GDScript; exported to a .pck at build time
     hdpack/                  NEW  PC tool: builds a VCMI HD mod from the user's own H3 data
-  clientxr/                  NEW  static lib `vcmiXr`: OpenXR session, layers, input, 3D scene
-    session/                 XrInstance, XrSession, state machine, frame loop
-    layers/                  quad / cylinder / projection layers, swapchains
-    input/                   OpenXR actions -> VCMI input events, haptics
-    scene/                   GLES3 renderer: room, table, cards, fog, effects
-    tabletop/                adventure map + battle diorama (consumes layer exports)
-  android/vcmi-app/          `quest` product flavor, VR manifest, OpenXR loader
-  config/xr/                 NEW  default XR settings + JSON schema
-  config/widgets/            NEW  `adventureMapXR.json` layout
+    tools/                   build, install, log scripts
+  android/vcmi-app/
+    quest.gradle             NEW  flavor: godot-lib AAR, godot_openxr_vendors AAR, .pck as asset
+    src/quest/               NEW  manifest, VcmiXrActivity (Godot host), virtual display, input bridge
+  .github/workflows/quest.yml NEW  build + scheduled rebase check
 ```
 
-Why a separate `clientxr/` module and not a fork-wide rewrite:
-- The client already links one backend (`client/CMakeLists.txt` -> `clientsdl3`). XR sits next to it, the same way.
-- Upstream rebases stay cheap if the changes to upstream files are only small hooks.
-- Hooks are gated by one CMake option `ENABLE_OPENXR` (Android only). With the option off, the build is identical to upstream.
+### Rebase rules
+
+The goal: `git rebase upstream/develop` has no conflicts in normal weeks.
+
+1. New code goes only into new files: `quest/`, `android/vcmi-app/src/quest/`, `android/vcmi-app/quest.gradle`, `.github/workflows/quest.yml`.
+2. No changes to VCMI C++ (`client/`, `clientsdl3/`, `lib/`, ...) for phases 1-3. A later phase that needs one adds a small generic hook and proposes it upstream first.
+3. Every change to an upstream file is listed in the table below, is a few lines, and lives in one commit `quest: upstream hooks` at the bottom of the series, so conflicts can only land there.
+4. A scheduled CI job rebases `quest` on `upstream/develop` every week and builds the APK; a failure is the signal to rebase by hand.
 
 ### Changes to upstream files (keep this list short)
 
-| File | Hook |
-|---|---|
-| `CMakeLists.txt` | `option(ENABLE_OPENXR ...)`, `add_subdirectory(clientxr)` |
-| `clientsdl3/render/ScreenHandler.cpp` | RGBA8888 EGL config (today RGB565, line ~328); present composed frame to XR layer instead of `SDL_RenderPresent` |
-| `client/GameEngine.cpp` (`mainLoop`) | frame pacing from `xrWaitFrame` |
-| `clientsdl3/events/InputHandler.cpp` | inject XR pointer / button events; route `hapticFeedback()` to controllers |
-| `client/mapView/` | layer export: terrain texture + object instance list (phase 4) |
-| `client/battle/BattleRenderer.cpp` | object export with hex + layer (phase 5) |
-| `android/` | `quest` flavor, `com.oculus.intent.category.VR`, head tracking feature, loader |
+| File | Hook | Why it cannot live in the flavor |
+|---|---|---|
+| `android/vcmi-app/build.gradle` | `apply from: 'quest.gradle'` (2 lines) | Gradle reads only this file |
+| `ActivityLauncher.java` | Play starts the immersive activity if the flavor declares one (~15 lines) | the launcher starts `VcmiSDLActivity` by class |
+
+To remove (phase 2 GLES spike, superseded): `clientxr/`, `ENABLE_OPENXR` in `CMakeLists.txt`, the XR code and the RGB888 / GLES 3.0 changes in `clientsdl3/render/ScreenHandler.cpp`, `VCMI_OPENXR`.
 
 Remotes:
 
@@ -50,12 +75,21 @@ git remote -v
 git fetch upstream develop && git rebase upstream/develop
 ```
 
+### Why Godot and not own OpenXR code
+
+The phase 2 spike drew the game through OpenXR from inside VCMI (`clientxr/`). It worked, but:
+- each basic VR feature (controller models with a glTF loader, depth, lighting, recenter, cylinder layer, frame pacing) was new C++ and GL state handling inside the SDL renderer;
+- it touched `ScreenHandler.cpp` and the game loop, which upstream changes often;
+- days went into Horizon OS launch and layer problems with no engine to compare against.
+
+Godot (MIT licence, GPL compatible) has these as nodes: OpenXR session and lifecycle, Meta controller models (`OpenXRFbRenderModel`), passthrough, hand tracking, cylinder composition layers, glTF scenes, spatial audio. Meta and W4 Games maintain the Quest support.
+
 ## 2. Constraints
 
 - **License:** VCMI is GPL (see `license.txt`). The fork and the APK source must stay public under GPL.
 - **Game data:** never ship H3 files. The user imports their own SoD / Complete / HD Edition data (existing launcher flow).
 - **HD content:** see section 3. Never ship upscaled H3 art; ship only tools.
-- **Threading:** all rendering is on the main GUI thread. The XR frame loop must run there too.
+- **Threading:** VCMI renders on its own SDL thread into the virtual display; Godot renders the XR frame on its own thread. They share no GL context.
 - **Comfort rules (acceptance criteria for every phase):**
   - The user's viewpoint never moves without the user's own head movement. No artificial locomotion and no camera glide.
   - World-locked content only. No head-locked UI except short system toasts.
@@ -99,7 +133,7 @@ Quest 3 shows about 25 pixels per degree at the centre of the view.
 
 ### XR-specific HD work
 
-- **Mipmaps:** SDL_Renderer textures have no mipmaps. The XR scene renderer builds mipmaps for cards and pages, so that distant objects do not shimmer.
+- **Mipmaps:** SDL_Renderer textures have no mipmaps. Godot builds mipmaps for the textures of the tabletop scene, so that distant objects do not shimmer.
 - **GPU texture format:** the Quest 3 GPU (Adreno 740) supports ASTC and ETC2. It does not support BC / DXT. HD Edition DXT data is decoded to RGBA on the CPU today (`client/render/hdEdition/DdsFormat.cpp`, squish). For the 3D scene, transcode HD textures to ASTC one time and cache them on the device.
 - **Memory budget per asset class:**
   - adventure objects at 4x
@@ -177,8 +211,9 @@ All windows go through `WindowHandler::pushWindow` / `popWindow` (`client/gui/Wi
 
 ### Implementation
 
-- `WindowHandler` hook: each top-level window draws into its own offscreen target (`createOffscreenCanvas` exists) and gets its own quad layer.
-- Placement class per window type comes from `config/xr/windows.json`. Unknown windows (for example from mods) fall back to the front panel.
+- Phase 3 shows every window on the one game surface; no hook.
+- Phase 4+: a `WindowHandler` hook draws each top-level window into its own offscreen target (`createOffscreenCanvas` exists), sent to Godot through the data bridge (phase 4). This is a change to VCMI C++, so it goes upstream first (section 1, rebase rule 2).
+- Placement class per window type comes from a JSON file in the Godot project (`quest/xr/`). Unknown windows (for example from mods) fall back to the front panel.
 - Input routing: the ray hits the panel; panel coordinates map to the window rect in logical screen coordinates; the existing event dispatch handles the rest.
 
 ## 6. Phases
@@ -213,57 +248,64 @@ python3 serve_https.py 8443
 - HD check: install one VCMI HD mod pack and HD Edition data on Quest. Measure RAM, load time and frame time at 2x / 3x / 4x and with xBRZ only.
 - **Exit:** a full game is playable in a 2D panel; a baseline is measured (FPS, RAM, AI turn time).
 
-### Phase 2 - XR spike
+### Phase 2 - XR spike (done, superseded)
 
-- OpenXR session on the SDL EGL context (`XR_KHR_opengl_es_enable`).
-- Render `composeFrame()` to a texture, then copy it to an XR swapchain and show it on a cylinder layer.
-- Handle the session lifecycle (focus, visibility, pause, Meta system menu).
-- **Decision:** stay on GLES (shared SDL context) or move to Vulkan (SDL Vulkan renderer + `XR_KHR_vulkan_enable2`). Measure GL state conflicts between SDL_Renderer and the custom GL code.
-- **Exit:** a stable 72/90 Hz compositor with the game frame on a curved layer, and a written decision on GLES vs Vulkan.
+- Own OpenXR code in `clientxr/` on the SDL EGL context: the game on a quad layer, controller ray and boxes, clean exit, Horizon hybrid launch. Details in [`PHASE2.md`](PHASE2.md).
+- **Result:** works, but every VR feature is new engine code inside VCMI, and the hooks sit in files upstream changes often. Decision: move to Godot (section 1). Keep the Android launch findings (real activity, not an alias; hybrid app categories).
+
+### Phase 2b - Godot host spike
+
+- Remove the spike code (section 1, "To remove"); the VCMI C++ tree is upstream again.
+- Godot project `quest/xr/`: XR origin, camera, two controllers with `OpenXRFbRenderModel`, ray, `OpenXRCompositionLayerCylinder` with `use_android_surface`.
+- `quest.gradle`: godot-lib AAR and godot_openxr_vendors AAR, both pinned; `make-apk.sh` and CI export the Godot project to a .pck with the Godot editor in headless mode and put it into the flavor assets.
+- `VcmiXrActivity` hosts Godot (`GodotActivity` or `GodotFragment`). When the layer surface exists, it creates a private `VirtualDisplay` on it and starts `VcmiSDLActivity` on that display (`allowEmbedded`, `setLaunchDisplayId`).
+- Input bridge: ray hit on the cylinder -> `MotionEvent` hover / buttons and `KeyEvent`s, dispatched to the game activity.
+- **Exit:** the game plays on a curved screen with the real controller models and ray, 72 Hz with no judder while the game loads, clean exit; no change to VCMI C++.
+- **Check early (day 1):** the virtual display launch on Horizon OS; SDL surface size and density on the display; text input (system keyboard) from a game on a virtual display; game pause / resume when the Godot activity pauses.
 
 ### Phase 3 - War room MVP, release v0.1
 
-- Input bridge:
-  - Laser ray hits the layer and gives logical coordinates, which feed `setCursorPosition`.
-  - Trigger = left click, grip = right click, thumbstick = map scroll, A/B = keyboard shortcuts.
-  - Hand tracking pinch as a second input method.
-- Haptics through the existing `hapticFeedback()` calls.
-- QoL hotkeys on controllers: radial menu, wrist hotkey panel (section 4).
-- Popups stay on the main screen; dim the room and pulse haptics when a dialog opens.
-- Environment: a low-poly war room (glTF) or passthrough, selected in settings.
-- Seated / standing mode, recenter (trigger and the Meta button long-press), screen distance and size settings.
-- Text readability: logical 1280x720 or higher, rendered at 2x, cylinder compositor layer.
+All in Godot and the input bridge; no change to VCMI C++.
+- Input: trigger = left click, grip = right click, thumbstick = arrow keys (map scroll), A/B/X/Y = keys from `config/shortcutsConfig.json`; hand tracking pinch as a second input method.
+- Haptics: Godot pulses the controller on clicks and gamepad buttons and follows the game's "Haptic feedback" option (the game's own `hapticFeedback()` runs for touch input only, so no hook).
+- QoL hotkeys on controllers: radial menu or a wrist hotkey panel in Godot that sends keys (section 4).
+- Popups stay on the main screen. The bridge sees clicks, not dialogs: haptics on click only until the data bridge exists.
+- Environment: a low-poly war room (glTF scene in Godot) or passthrough, selected in settings.
+- Seated / standing mode, recenter (Godot follows the runtime recenter event), screen distance, size and curvature settings (stored by Godot).
+- Text readability: virtual display 2560x1440 or higher, cylinder compositor layer.
 - HD: 2x assets for the screen and UI panels; XR graphics presets.
 - **Exit:** a full campaign map is playable start to end in VR with no comfort complaints. Sideload release v0.1.
 
+### Data bridge (decision before phase 4)
+
+Phases 4 and 5 need game data, not pixels: terrain, object list, battle hexes and stacks. Options:
+1. A small generic export hook in the VCMI client (`client/mapView/`, `client/battle/`) that passes the data through JNI to Godot. Proposed upstream first, so the fork carries it only until it is merged.
+2. A GDExtension linked against `libvcmi` that reads the client game state through the existing callback interfaces (`CGameInfoCallback`), with one hook to get the callback.
+
+Pick the option with the fewest changes to upstream files; prototype it on the minimap first.
+
 ### Phase 4 - Tabletop adventure map
 
-- Layer export from `client/mapView/`:
-  - terrain + river + road rendered into a texture per region (no objects, no fog)
-  - an object instance list: tile, sprite frame, animation, owner flag, z-order
-- The 3D scene in `clientxr/tabletop/` draws:
-  - the map page as a flat texture
+- The 3D scene is a Godot scene in `quest/xr/`; the data comes through the data bridge.
+- Terrain + river + road as a texture per region (no objects, no fog), drawn by VCMI into an offscreen target and passed to Godot.
+- An object instance list: tile, sprite frame, animation, owner flag, z-order.
+- Godot draws:
+  - the map page as a flat textured mesh
   - objects as instanced paper cards (pop-up animation)
   - fog as a cloud layer, the path as discs
-- Picking: the ray hits the table plane, then a tile, then the existing MapView hover / click handlers.
-- Panel routing: VCMI windows draw to separate targets, so they can show on separate quad layers:
-  - the resource bar at the table edge
-  - hero / town lists on the left wrist panel
-  - the minimap as a small tablet
-  - dialogs as a panel in front of the table
-- Controls: grab-drag the map, two-hand pinch zoom (zoom range 4-256 px per tile already exists).
+- Picking: the ray hits the table plane, then a tile; the tile goes to VCMI through the bridge (hover / click).
+- Panel routing (section 5): resource bar at the table edge, hero / town lists on the left wrist, minimap as a small tablet, dialogs in front of the table.
+- Controls: grab-drag the map, two-hand pinch zoom.
 - Card metadata (height, anchor, fold style) from JSON, so mods can tune it. Include HotA objects.
-- `adventureMapXR.json` layout; test with UI mods.
-- Popup and window routing (section 5): hold popups above objects, dialogs in front of the table, large windows behind it.
 - Army management gestures: grab / drop / split stacks.
-- HD: 4x object cards and 3x-4x terrain page, mipmaps, ASTC cache on the device.
+- HD: 4x object cards and 3x-4x terrain page; Godot mipmaps and ASTC compression.
 - **Exit:** the adventure map is fully playable on the table; the 2D screen fallback is available with one button.
 
 ### Phase 5 - Battle diorama
 
-- Export from `BattleRenderer`: object, hex, `EBattleFieldLayer`, animation frame.
-- Hex to world mapping (today hex to pixel is hard-coded in `BattleFieldController.cpp` ~924).
-- Cards for stacks, obstacles, heroes. Corpses lie flat. Projectiles fly in 3D arcs. Effects are billboards.
+- Export through the data bridge: object, hex, `EBattleFieldLayer`, animation frame.
+- Hex to world mapping in Godot (today hex to pixel is hard-coded in `BattleFieldController.cpp` ~924).
+- Cards for stacks, obstacles, heroes. Corpses lie flat. Projectiles fly in 3D arcs. Effects are billboards (Godot particles).
 - Battle UI on the table edge. Spellbook as a book panel in the hand.
 - Battle popups above stacks (section 5).
 - HotA creatures and battlefields (`hota`, battlefield mods) work as cards and backdrops.
@@ -279,8 +321,8 @@ python3 serve_https.py 8443
 
 ### Phase 6 - Immersion
 
-- Spatial audio: map ambient sources and battle sounds positioned on the table (check SDL3_mixer 3D support first).
-- MR: snap the board to a real table (OpenXR scene / plane extensions).
+- Spatial audio: map ambient sources and battle sounds positioned on the table (Godot `AudioStreamPlayer3D`; needs the sound events through the data bridge).
+- MR: snap the board to a real table (Meta scene and anchors through godot_openxr_vendors).
 - Gestures: flip the hourglass to end a turn, grab a stack to split it.
 - Town screen as a diorama or a wide curved panel.
 - Co-located hot-seat / multiplayer with shared spatial anchors.
@@ -295,25 +337,27 @@ python3 serve_https.py 8443
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| SDL_Renderer and custom GL share one context and break each other's state | rendering bugs | phase 2 spike; fallback to the Vulkan path |
-| Game loop skips frames, XR needs a frame every vsync | judder | resubmit the last layer image; the compositor reprojects it |
-| CPU budget: AI (TBB) + server process + XR runtime | AI turns stall frames | limit AI threads; keep the XR loop on the main thread at a fixed rate |
+| Horizon OS refuses or mishandles the game activity on a private virtual display | no picture | check on day 1 of phase 2b; Spatial SDK activity panels use the same Android mechanism; fallback: SDL draws into a `Surface` handed over by JNI (needs a VCMI hook) |
+| Input dispatched to an activity on a virtual display: focus, hover, IME | missing hover, no text input | test in phase 2b; events dispatched directly in the same process; system keyboard check |
+| Two engines in one process: RAM and CPU (Godot + SDL + server + AI) | slower AI turns, crashes with HD | measure in phase 2b against the phase 1 baseline; keep the Godot scene light |
+| Godot XR APIs marked experimental (`use_android_surface`) change between versions | build breaks on a Godot update | pin the Godot and plugin versions; update on purpose |
+| Pixels only until the data bridge exists | no tabletop before phase 4 | phase 3 is the full game on a screen; the bridge is a separate decision |
+| CPU budget: AI (TBB) + server process + XR runtime | AI turns stall frames | limit AI threads; the Godot frame rate is independent of the game |
 | RAM with HD assets and xBRZ | crashes | prefer pre-made HD assets; cap scale per asset class |
-| Text readability | eye strain | compositor layers, 2x rendering, minimum font size setting |
-| Upstream drift | rebase cost | keep the hooks small; rebase often; propose generic hooks upstream (layer export, input injection) |
-| Map layer export changes `MapViewCache` behavior | regressions in 2D | separate export path; 2D path unchanged |
-| Windows assume one screen (centered, positioned at the cursor) | popups in wrong place or size | per-window offscreen target; fallback placement |
-| UI mods change the adventure widgets | XR layout breaks | data-driven `adventureMapXR.json`; test with UI mods |
+| Text readability | eye strain | compositor layer, high virtual display resolution, minimum font size setting |
+| Upstream drift | rebase cost | rebase rules in section 1; weekly rebase CI; hooks proposed upstream |
+| UI mods change the adventure widgets | XR layout breaks | phase 3 shows the 2D layout as is; data-driven layout from phase 4 |
 | `hota` updates change content | missing card metadata | default card metadata for unknown objects |
 | Store policy and GPL | no store release | sideload first; check policy before phase 7 |
-| Quest GPU has no DXT support; RGBA HD textures use a lot of RAM | crashes, long loads | ASTC transcode cache; scale per asset class |
+| Quest GPU has no DXT support; RGBA HD textures use a lot of RAM | crashes, long loads | ASTC through Godot import; scale per asset class |
 | HD packs cover only part of the art; xBRZ runs on the CPU | hitches at first use | preload the xBRZ cache; HD pack builder covers the gaps |
 | Distributing upscaled H3 art violates copyright | legal | ship the builder tool only; the user runs it on their own data |
 
 ## 8. Open decisions
 
-1. GLES vs Vulkan (end of phase 2).
+1. Data bridge for phases 4-5 (section 6): JNI export hook or GDExtension on `libvcmi`.
 2. Passthrough or war room as the default environment.
 3. Separate package ID (`is.xyz.vcmi.quest`) to install next to the normal Android build: recommended.
 4. HD pack builder upscaler: AI model (quality, licence of the model) or xBRZ + sharpen (fast, no licence issue).
 5. Upstream strategy: which hooks to propose to VCMI. The contributor opens the PRs (see [`AGENTS.md`](../AGENTS.md)).
+6. Decided 2026-11-06: Godot hosts the XR part. The GLES vs Vulkan question of phase 2 is gone: the game keeps its own renderer.

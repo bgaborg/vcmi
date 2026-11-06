@@ -88,13 +88,15 @@ jobs:
         echo VCMI_PACKAGE_GOLDMASTER="$VCMI_PACKAGE_GOLDMASTER" >> $GITHUB_ENV
         echo VCMI_PACKAGE_UPDATE_CHANNEL="$VCMI_PACKAGE_UPDATE_CHANNEL" >> $GITHUB_ENV
 
+    - name: Export Godot XR host
+      run: quest/tools/export-xr.sh
+
     - name: Configure
       run: |
         cmake --preset "$PRESET" \
           -DENABLE_CCACHE:BOOL=ON \
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-          -DENABLE_OPENXR=ON \
           "-DANDROID_GRADLE_PROPERTIES=$GRADLE_PROPERTIES"
 
     - name: Build

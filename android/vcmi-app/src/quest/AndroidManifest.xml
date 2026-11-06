@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Horizon OS additions for the Meta Quest build, merged over ../../../AndroidManifest.xml by quest.gradle -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+	xmlns:tools="http://schemas.android.com/tools"
 	xmlns:metavr="http://schemas.meta.com/metavr-sdk">
 
 	<!-- required for hybrid apps: https://developers.meta.com/horizon/documentation/spatial-sdk/hybrid-apps-overview -->
@@ -8,19 +9,37 @@
 		metavr:minSdkVersion="69"
 		metavr:targetSdkVersion="207" />
 
-	<!-- as in other hybrid apps (Steam Link VR) -->
+	<!-- as in other hybrid apps (Steam Link VR); the OpenXR vendor AAR declares it optional -->
 	<uses-feature
 		android:name="android.hardware.vr.headtracking"
 		android:required="true"
-		android:version="1" />
+		android:version="1"
+		tools:replace="android:required" />
 	<uses-feature
 		android:name="oculus.software.vr.app.hybrid"
 		android:required="true" />
 
+	<!-- controller models (XR_FB_render_model) -->
+	<uses-feature
+		android:name="com.oculus.feature.RENDER_MODEL"
+		android:required="false" />
+	<uses-permission android:name="com.oculus.permission.RENDER_MODEL" />
+
 	<application>
 		<meta-data
 			android:name="com.oculus.supportedDevices"
-			android:value="quest3|quest3s" />
+			android:value="quest3|quest3s"
+			tools:replace="android:value" />
+
+		<!-- the Godot library declares the same FileProvider for its own file sharing, which the XR host does not use -->
+		<provider
+			android:name="androidx.core.content.FileProvider"
+			android:authorities="${applicationId}.fileprovider">
+			<meta-data
+				android:name="android.support.FILE_PROVIDER_PATHS"
+				android:resource="@xml/file_paths"
+				tools:replace="android:resource" />
+		</provider>
 
 		<!-- Initial panel size; the user can resize the panel. The minimum is the H3 resolution, 800x600 -->
 
@@ -47,10 +66,10 @@
 				android:minHeight="600dp" />
 		</activity>
 
-		<!-- The game as a panel: started when the immersive activity does not resolve, or by quest/tools/quest.sh start-panel -->
+		<!-- VcmiXrActivity starts it on its own virtual display (allowEmbedded); without the immersive activity it runs as a panel -->
 		<activity
 			android:name="eu.vcmi.vcmi.VcmiSDLActivity"
-			android:exported="true">
+			android:allowEmbedded="true">
 			<layout
 				android:defaultWidth="1280dp"
 				android:defaultHeight="720dp"
@@ -58,8 +77,8 @@
 				android:minHeight="600dp" />
 		</activity>
 
-		<!-- The game as an immersive OpenXR activity; ActivityLauncher starts it when it exists, quest/tools/quest.sh start-xr without the launcher.
-			 Attributes as in Meta's native manifest: not resizeable, landscape, no layout -->
+		<!-- The Godot XR host (quest/xr); ActivityLauncher starts it when it exists, quest/tools/quest.sh start-xr without the launcher.
+			 Not resizeable, landscape, no layout: Horizon runs an activity with a layout or an activity-alias as a panel -->
 		<activity
 			android:name="eu.vcmi.vcmi.VcmiXrActivity"
 			android:exported="true"
@@ -67,7 +86,7 @@
 			android:launchMode="singleTask"
 			android:resizeableActivity="false"
 			android:screenOrientation="landscape"
-			android:configChanges="density|keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|uiMode"
+			android:configChanges="density|keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
 			android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen">
 			<intent-filter>
 				<action android:name="android.intent.action.MAIN" />

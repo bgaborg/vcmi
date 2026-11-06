@@ -1,24 +1,30 @@
 // Meta Quest build: enabled by the Gradle property `vcmiQuest=true`
-// (CMake: -DANDROID_GRADLE_PROPERTIES="vcmiQuest=true;...", together with -DENABLE_OPENXR=ON).
-// Merges the Horizon OS manifest overlay into every build type and adds the OpenXR loader.
+// (CMake: -DANDROID_GRADLE_PROPERTIES="vcmiQuest=true;...").
+// Merges the Horizon OS manifest overlay into every build type and adds the Godot XR host (quest/xr).
 // A build type source set is used instead of a product flavor, so Gradle task names stay unchanged.
 
 if (project.findProperty('vcmiQuest') == 'true') {
 	android.buildTypes.each { buildType ->
-		android.sourceSets.getByName(buildType.name).manifest.srcFile 'src/quest/AndroidManifest.xml'
-		android.sourceSets.getByName(buildType.name).java.srcDir 'src/quest/java'
+		def sources = android.sourceSets.getByName(buildType.name)
+		sources.manifest.srcFile 'src/quest/AndroidManifest.xml'
+		sources.java.srcDir 'src/quest/java'
+		// vcmi-xr.pck, exported by quest/tools/export-xr.sh
+		sources.assets.srcDir 'src/quest/assets'
 	}
 
-	// the loader AAR requires API 24; every Quest runs a newer Android
+	// the Godot and OpenXR vendor AARs require API 24; every Quest runs a newer Android
 	if (android.defaultConfig.minSdk < 24) {
 		android.defaultConfig.minSdk = 24
 	}
 
-	// the loader AAR ships all ABIs; Quest is arm64 only, and so is the native part of this build
+	// the AARs ship x86_64 too; Quest is arm64 only, and so is the native part of this build
 	android.defaultConfig.ndk.abiFilters 'arm64-v8a'
 
 	dependencies {
-		// keep equal to OPENXR_LOADER_VERSION in clientxr/CMakeLists.txt, which takes the headers from the same AAR
+		// keep equal to GODOT_VERSION and VENDORS_VERSION in quest/tools/export-xr.sh, which exports the project with the same versions
+		implementation 'org.godotengine:godot:4.7.2.stable'
+		implementation 'org.godotengine:godot-openxr-vendors-meta:5.1.0-stable'
+		// Godot loads libopenxr_loader.so at runtime but does not ship it; its own export adds this AAR
 		implementation 'org.khronos.openxr:openxr_loader_for_android:1.1.65'
 	}
 }

@@ -22,9 +22,31 @@ else
 	exit 1
 fi
 
+# Several entries for one headset (wireless debugging and `adb tcpip 5555`) make plain adb calls fail: pick one, port 5555 first
+if [ -z "${ANDROID_SERIAL:-}" ]; then
+	devices="$("$ADB" devices | tr -d '\r' | awk '$2 == "device" { print $1 }')"
+	ANDROID_SERIAL="$(echo "$devices" | grep ':5555$' | head -1 || true)"
+	[ -n "$ANDROID_SERIAL" ] || ANDROID_SERIAL="$(echo "$devices" | head -1)"
+	# none listed: leave it unset, so adb reports the missing device itself
+	if [ -n "$ANDROID_SERIAL" ]; then export ANDROID_SERIAL; else unset ANDROID_SERIAL; fi
+fi
+
 adb_shell() { "$ADB" shell "$@" | tr -d '\r'; }
 
 app_pid() { adb_shell pidof "$PKG" || true; }
+
+# epoch seconds with milliseconds: logcat -T takes them, and they have no space to quote
+device_time() { adb_shell date +%s.%3N; }
+
+# lines in the game log; the game starts a new log on each start
+game_lines() { adb_shell "wc -l < '$LOG_DIR/VCMI_Client_log.txt' 2>/dev/null || echo 0"; }
+
+# wait_on_device <source command> <regex> <seconds>: prints the first matching line of the source, fails on timeout.
+# The loop runs on the headset: one adb call, and no logcat stream that adb.exe would keep open after grep exits.
+wait_on_device() {
+	local pattern="${2//\'/\'\\\'\'}"
+	adb_shell "for i in \$(seq $(( $3 * 4 ))); do $1 | grep -m1 -E '$pattern' && exit 0; sleep 0.25; done; echo 'timed out' >&2; exit 1"
+}
 
 usage() {
 	cat <<EOF
@@ -36,12 +58,21 @@ Usage: quest.sh <command> [args]
   start                   launch the app (refuses if it is already running)
   stop                    force-stop the app
   restart                 force-stop and launch the app
-  start-xr                launch the game activity directly, immersive (OpenXR)
-  start-panel             launch the game activity directly, as a panel (no immersive category)
+  start-xr                launch the immersive Godot host directly, without the launcher
   logcat                  follow logcat for the running app
   pull-logs [dir]         copy VCMI logs from the device (default: quest/out/logs-<timestamp>)
   sample <seconds> [csv]  sample PSS memory, CPU and battery temperature once per second
-  screenshot [png]        capture the headset view
+  screenshot [jpg]        capture the headset view (works for immersive apps; black while the headset sleeps)
+  panel [png]             capture the display panel as shown (both eyes, lens-distorted); the metacam screenshot can draw
+                          layers wrong (a black block over the cylinder layer), the panel cannot
+  awake                   keep the headset awake and rendering without being worn (until reboot)
+  sleep-normal            undo awake: the proximity sensor controls sleep again
+  wait-log <regex> [s]    wait until a new logcat line matches (default 60 s); prints it, fails on timeout
+  wait-game <regex> [s]   the same for a new line of the game log (VCMI_Client_log.txt, more detail than logcat)
+  mark-log, mark-game     print the current position; MARK=<it> wait-log|wait-game then also matches lines after it,
+                          for events that can happen before the wait starts
+  test <cmd> [a] [b] [c]  send a test command to the Godot XR host (quest/xr/main.gd): head yaw pitch height,
+                          head_off, recenter, aim yaw pitch, aim_off, click, rclick, pad keycode, stick x y, probe; the result is in logcat as "VCMI XR test:"
 
 Package: $PKG (override with VCMI_QUEST_PKG)
 EOF
@@ -80,13 +111,6 @@ case "$cmd" in
 			exit 1
 		fi
 		adb_shell am start -a android.intent.action.MAIN -c com.oculus.intent.category.VR -n "$PKG/eu.vcmi.vcmi.VcmiXrActivity"
-		;;
-	start-panel)
-		if [ -n "$(app_pid)" ]; then
-			echo "$PKG is already running; stop it first" >&2
-			exit 1
-		fi
-		adb_shell am start -n "$PKG/eu.vcmi.vcmi.VcmiSDLActivity"
 		;;
 	stop)
 		adb_shell am force-stop "$PKG"
@@ -135,10 +159,60 @@ case "$cmd" in
 		echo "saved $csv"
 		;;
 	screenshot)
+		# screencap is empty for immersive apps; the Meta capture service composites all layers
 		mkdir -p "$OUT_DIR"
-		png="${1:-$OUT_DIR/screenshot-$(date +%Y%m%d-%H%M%S).png}"
-		"$ADB" exec-out screencap -p > "$png"
+		jpg="${1:-$OUT_DIR/screenshot-$(date +%Y%m%d-%H%M%S).jpg}"
+		# Git Bash: adb.exe needs a Windows path (path conversion is off for the device paths)
+		command -v cygpath >/dev/null && jpg="$(cygpath -m "$jpg")"
+		before="$(adb_shell ls -t /sdcard/Oculus/Screenshots | head -1)"
+		adb_shell am startservice -n com.oculus.metacam/.capture.CaptureService -a TAKE_SCREENSHOT >/dev/null
+		for _ in $(seq 20); do
+			latest="$(adb_shell ls -t /sdcard/Oculus/Screenshots | head -1)"
+			[ -n "$latest" ] && [ "$latest" != "$before" ] && break
+			adb_shell sleep 0.5
+		done
+		[ "$latest" != "$before" ] || { echo "no new screenshot" >&2; exit 1; }
+		adb_shell sleep 1 # the file is written after it is listed
+		"$ADB" pull "/sdcard/Oculus/Screenshots/$latest" "$jpg" >/dev/null
+		echo "$jpg"
+		;;
+	panel)
+		mkdir -p "$OUT_DIR"
+		png="${1:-$OUT_DIR/panel-$(date +%Y%m%d-%H%M%S).png}"
+		command -v cygpath >/dev/null && png="$(cygpath -m "$png")"
+		adb_shell screencap -p /sdcard/vcmi-panel.png
+		"$ADB" pull /sdcard/vcmi-panel.png "$png" >/dev/null
+		adb_shell rm /sdcard/vcmi-panel.png
 		echo "$png"
+		;;
+	awake)
+		adb_shell input keyevent KEYCODE_WAKEUP
+		adb_shell am broadcast -a com.oculus.vrpowermanager.prox_close >/dev/null
+		echo "proximity sensor overridden until reboot or: quest.sh sleep-normal"
+		;;
+	sleep-normal)
+		adb_shell am broadcast -a com.oculus.vrpowermanager.automation_disable >/dev/null
+		;;
+	wait-log|wait-game)
+		[ -n "${1:-}" ] || { usage; exit 1; }
+		if [ "$cmd" = wait-log ]; then
+			source="logcat -d -T '${MARK:-$(device_time)}'"
+		else
+			source="tail -n +$(( ${MARK:-$(game_lines)} + 1 )) '$LOG_DIR/VCMI_Client_log.txt'"
+		fi
+		wait_on_device "$source" "$1" "${2:-60}"
+		;;
+	mark-log)
+		device_time
+		;;
+	mark-game)
+		game_lines
+		;;
+	test)
+		[ -n "${1:-}" ] || { usage; exit 1; }
+		since="$(device_time)"
+		adb_shell am broadcast -a is.xyz.vcmi.quest.TEST -p "$PKG" --es cmd "$1" --ef a "${2:-0}" --ef b "${3:-0}" --ef c "${4:-0}" >/dev/null
+		wait_on_device "logcat -d -s godot:I -T '$since'" "VCMI XR test: $1 ->" 10
 		;;
 	help|-h|--help)
 		usage

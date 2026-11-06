@@ -1,6 +1,8 @@
 # Phase 2 - XR spike
 
-Status of [phase 2](PROJECT_PLAN.md#phase-2---xr-spike). The app still runs as a 2D panel; nothing renders to OpenXR yet.
+Status of [phase 2](PROJECT_PLAN.md#phase-2---xr-spike-done-superseded).
+
+**Superseded (2026-11-06):** the XR part moves to Godot ([phase 2b](PROJECT_PLAN.md#phase-2b---godot-host-spike)); the `clientxr/` code below gets removed. The Horizon OS findings (real activity instead of an alias, hybrid categories, tracking loss, clean session exit) still apply.
 
 ## Done: groundwork (builds without the headset)
 
@@ -90,3 +92,27 @@ Known limits of the spike:
 - With `upscalingFilter` `xbrz4rcas` the swapchain is 5396x2884 and the first frames take about 10 s.
 - Passthrough over a focused session with correct frames: Horizon ran the alias as a panel (`mode=multi-window`); fixed with a real activity, see the table.
 - Controllers: trigger and grip work; the ray and the software cursor show where they point.
+
+## Phase 2b: Godot host
+
+Status of [phase 2b](PROJECT_PLAN.md#phase-2b---godot-host-spike), 2026-11-06, Quest 3:
+- The Godot host (`quest/xr`, `VcmiXrActivity`, `VcmiBridge`) reaches a focused OpenXR session at 90 Hz; the unchanged `VcmiSDLActivity` runs on a private virtual display (2560x1440) drawn into a cylinder layer. Horizon OS allows the launch.
+- Godot does not ship the OpenXR loader: `quest.gradle` adds the Khronos loader AAR.
+- `OpenXRCompositionLayerCylinder.aspect_ratio` is width / height; Godot 4.7.2 `intersects_ray` uses the inverse, so `main.gd` has its own ray-cylinder hit.
+- Godot's default reference space is Stage, which a recenter does not move: the project uses Local Floor.
+- The screen is placed from the head tracker pose; the `XRCamera3D` node moves only after the first `_process`.
+
+- Pointer: the game's cursor is not drawn into the virtual display; Godot draws a dot where the ray hits (no VCMI change). Once the gamepad is used, the game also shows its own cursor.
+- Haptics: Godot pulses the controller on a click on the screen (amplitude 0.5) and on gamepad buttons (0.25), 30 ms. The game's `hapticFeedback()` runs for touch input only, so it is not routed to the controllers.
+- Controllers as an SDL gamepad (`org.libsdl.app.QuestGamepad`, SDL's own Android joystick entry points): right A/B = accept/cancel, left X/Y = next hero/town, left menu = options, stick clicks = map level/grid, right thumbstick = map scroll. The game binds them in `config/keyBindingsConfig.json` ("joystickButtons", "joystickAxes"); no VCMI change. The gamepad is registered on the first pointer move: SDL sends buttons of a gamepad the game has not opened yet as keyboard keys.
+
+## Testing without the headset
+
+Test commands drive the same code paths as the controllers: `pad keycode`, `stick x y`, `head yaw pitch height` (a simulated head pose; the origin moves by its inverse and the screen stays world-locked), `head_off`, `recenter`, `aim yaw pitch` (degrees from the screen centre), `aim_off`, `click`, `rclick`, `probe`. Each logs `VCMI XR test: <cmd> -> screen <position> heading <deg>, pointer (<x>, <y>)`.
+
+On the headset (on a desk, nobody wearing it): `quest/tools/quest.sh awake`, `start-xr`, `test <cmd>`, `screenshot`, `panel`. This covers the whole Android path: the virtual display, the Android surface layer, SDL input. Comfort, stereo depth and how the controllers feel still need a person.
+
+Headset notes:
+- `quest/tools/xr-smoke.sh [apk]` goes from start to the adventure map in about 20 s with a screenshot per step (`quest/out/smoke-<time>/`). It waits on log lines (`quest.sh wait-log`, `wait-game`, `mark-log`, `mark-game`); the waits run on the headset, because adb.exe on Windows keeps a logcat stream open after grep exits.
+- The metacam screenshot sometimes draws a black block over the top right of the cylinder layer; the display does not show it. `quest.sh panel` captures the display panel itself (both eyes, lens-distorted) to check such cases.
+- `quest.sh` picks the `adb tcpip 5555` connection when wireless debugging adds a second entry for the same headset.

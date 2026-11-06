@@ -60,9 +60,12 @@ if [ ! -f conan-generated/conan_toolchain.cmake ]; then
 		--conf="tools.cmake.cmaketoolchain:generator=Ninja"
 fi
 
+# Godot XR host
+"$REPO/quest/tools/export-xr.sh"
+
 # Build
 mkdir -p ~/.gradle && echo "android.bundle.enableUncompressedNativeLibs=true" > ~/.gradle/gradle.properties
-cmake --preset "$PRESET" -DENABLE_OPENXR=ON "-DANDROID_GRADLE_PROPERTIES=$GRADLE_PROPERTIES"
+cmake --preset "$PRESET" "-DANDROID_GRADLE_PROPERTIES=$GRADLE_PROPERTIES"
 cmake --build --preset "$PRESET" -j "${JOBS:-$(( $(nproc) * 2 / 3 ))}"
 
 APK="$REPO/out/build/$PRESET/android-build/vcmi-app/build/outputs/apk/release/vcmi-release.apk"

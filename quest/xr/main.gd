@@ -1,0 +1,339 @@
+extends Node3D
+## Shows the VCMI game activity on a curved layer and passes the controller ray to it as a mouse.
+## Test commands from adb (VcmiBridge `test_command`, quest/tools/quest.sh test) simulate the head, the aim and clicks.
+
+const SCREEN_DISTANCE := 2.0 ## metres from the head; the cylinder radius
+const SCREEN_WIDTH := 2.4 ## metres of arc
+const SURFACE_SIZE := Vector2i(2560, 1440) ## pixels of the game window
+const BUTTON_LEFT := 1 ## MotionEvent.BUTTON_PRIMARY
+const BUTTON_RIGHT := 2 ## MotionEvent.BUTTON_SECONDARY
+const NO_HIT := Vector2(-1.0, -1.0)
+## controller buttons to the SDL gamepad (KeyEvent.KEYCODE_BUTTON_*); the game binds them in config/keyBindingsConfig.json "joystickButtons"
+const PAD_BUTTONS := {
+	"1:ax_button": 96, # right A -> A: accept
+	"1:by_button": 97, # right B -> B: cancel
+	"0:ax_button": 102, # left X -> left shoulder: next hero
+	"0:by_button": 103, # left Y -> right shoulder: next town
+	"0:menu_button": 108, # left menu -> start: options
+	"0:primary_click": 106, # left stick click -> left stick: map level
+	"1:primary_click": 107, # right stick click -> right stick: grid
+}
+const PAD_RIGHT_X := 2 ## the right thumbstick is the gamepad right stick: the game scrolls the map with it ("mouseSwipe")
+const PAD_RIGHT_Y := 3
+
+var bridge: Object
+var origin: XROrigin3D
+var layer: OpenXRCompositionLayerCylinder
+var aims: Array[XRController3D] = []
+var grips: Array[XRController3D] = [] ## carry the controller models
+var rays: Array[MeshInstance3D] = []
+var pointer_dot: Node3D ## where the active ray hits the screen
+var active_hand := 1
+var screen_world := Transform3D() ## screen pose in the world; the layer node is under the origin, which a simulated head moves
+var screen_placed := false
+var game_started := false
+var surface_pending := true ## the layer creates a new Android surface for each OpenXR session
+var last_pointer := Vector2i(-1, -1) ## last pointer position sent to the game, in game pixels
+var test_head: Variant = null ## Transform3D: simulated head pose in the world, null for the tracked head
+var test_head_start: Variant = null ## Transform3D: tracked head when the simulated head was set
+var test_aim: Variant = null ## Vector2: simulated aim of the active hand from the head, yaw and pitch in degrees from the screen centre
+
+
+func _ready() -> void:
+	var xr := XRServer.find_interface("OpenXR") as OpenXRInterface
+	if xr == null or not xr.is_initialized():
+		push_error("VCMI XR: OpenXR is not initialised")
+		get_tree().quit()
+		return
+	get_viewport().use_xr = true
+	xr.pose_recentered.connect(func(): screen_placed = false)
+	xr.session_begun.connect(func(): surface_pending = true)
+
+	# the controller models have lit glTF materials
+	var light := DirectionalLight3D.new()
+	light.rotation_degrees = Vector3(-50.0, 30.0, 0.0)
+	add_child(light)
+	var environment := Environment.new()
+	environment.background_mode = Environment.BG_COLOR
+	environment.background_color = Color.BLACK
+	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	environment.ambient_light_color = Color(0.5, 0.5, 0.5)
+	var world := WorldEnvironment.new()
+	world.environment = environment
+	add_child(world)
+
+	origin = XROrigin3D.new()
+	add_child(origin)
+	origin.add_child(XRCamera3D.new())
+
+	layer = OpenXRCompositionLayerCylinder.new()
+	bridge = Engine.get_singleton("VcmiBridge")
+	layer.use_android_surface = true
+	layer.android_surface_size = SURFACE_SIZE
+	bridge.connect("test_command", _on_test_command)
+	layer.radius = SCREEN_DISTANCE
+	layer.central_angle = SCREEN_WIDTH / SCREEN_DISTANCE
+	layer.aspect_ratio = float(SURFACE_SIZE.x) / SURFACE_SIZE.y # width / height, as in XrCompositionLayerCylinderKHR
+	# behind the Godot frame, so the controllers and the ray draw over the game
+	layer.sort_order = -1
+	layer.enable_hole_punch = true
+	origin.add_child(layer)
+
+	var ray_material := StandardMaterial3D.new()
+	ray_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	ray_material.albedo_color = Color(0.35, 0.75, 1.0)
+	for hand in 2:
+		var tracker := "left_hand" if hand == 0 else "right_hand"
+		var grip := XRController3D.new()
+		grip.tracker = tracker
+		grip.pose = "grip"
+		origin.add_child(grip)
+		var model := ClassDB.instantiate("OpenXRFbRenderModel") as Node3D
+		model.set("render_model_type", hand)
+		model.connect("openxr_fb_render_model_loaded", func(): print("VCMI XR: controller model loaded: ", tracker))
+		grip.add_child(model)
+		grips.append(grip)
+
+		var aim := XRController3D.new()
+		aim.tracker = tracker
+		aim.pose = "aim"
+		origin.add_child(aim)
+		aim.button_pressed.connect(_on_button.bind(hand, true))
+		aim.button_released.connect(_on_button.bind(hand, false))
+		aim.input_vector2_changed.connect(_on_stick.bind(hand))
+		aims.append(aim)
+
+		# in world space, so a simulated aim draws the same way as a controller
+		var ray := MeshInstance3D.new()
+		var box := BoxMesh.new()
+		box.size = Vector3(0.003, 0.003, 1.0)
+		box.material = ray_material
+		ray.mesh = box
+		ray.visible = false
+		add_child(ray)
+		rays.append(ray)
+
+	# the game's own cursor is not drawn into the virtual display; a dot marks the pointer instead of changing VCMI
+	pointer_dot = Node3D.new()
+	pointer_dot.visible = false
+	add_child(pointer_dot)
+	for part in [[0.02, Color(0.05, 0.05, 0.05), 0], [0.013, Color.WHITE, 1]]:
+		var sphere := SphereMesh.new()
+		sphere.radius = part[0]
+		sphere.height = part[0] * 2.0
+		var material := StandardMaterial3D.new()
+		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		material.albedo_color = part[1]
+		material.no_depth_test = true
+		material.render_priority = part[2]
+		sphere.material = material
+		var dot := MeshInstance3D.new()
+		dot.mesh = sphere
+		pointer_dot.add_child(dot)
+
+
+func _process(_delta: float) -> void:
+	var tracked: Variant = _tracked_head()
+	if test_head != null and tracked != null:
+		if test_head_start == null:
+			test_head_start = tracked
+		elif _head_moved(test_head_start, tracked):
+			# somebody wears the headset: a simulated head would lock the screen to the real head
+			print("VCMI XR: the headset moved, simulated head off")
+			_end_test_head()
+	if test_head != null and tracked != null:
+		origin.transform = test_head * tracked.affine_inverse()
+	if not screen_placed:
+		_place_screen()
+	layer.transform = origin.transform.affine_inverse() * screen_world
+	if surface_pending and layer.get_android_surface() != null:
+		surface_pending = false
+		if game_started:
+			bridge.setSurface(layer.get_android_surface())
+		else:
+			game_started = true
+			bridge.startGame(layer.get_android_surface(), SURFACE_SIZE.x, SURFACE_SIZE.y)
+
+	for ray in rays:
+		ray.visible = false
+	var hit := _pointer_hit(active_hand)
+	pointer_dot.visible = hit != NO_HIT
+	if hit != NO_HIT:
+		_move_pointer(hit)
+
+
+## Sends the pointer to the game when it moved by a pixel or more
+func _move_pointer(hit: Vector2) -> void:
+	var pixel := Vector2i(hit * Vector2(SURFACE_SIZE))
+	if pixel == last_pointer:
+		return
+	last_pointer = pixel
+	bridge.pointerMove(float(pixel.x), float(pixel.y))
+
+
+func _head_moved(from: Transform3D, to: Transform3D) -> bool:
+	return from.origin.distance_to(to.origin) > 0.15 or rad_to_deg(from.basis.get_rotation_quaternion().angle_to(to.basis.get_rotation_quaternion())) > 15.0
+
+
+func _end_test_head() -> void:
+	test_head = null
+	test_head_start = null
+	test_aim = null
+	origin.transform = Transform3D()
+	for grip in grips:
+		grip.visible = true
+	screen_placed = false
+
+
+## Head pose in the origin space from the head tracker, or null; not the XRCamera3D node, which moves after this _process
+func _tracked_head() -> Variant:
+	var head := XRServer.get_tracker("head") as XRPositionalTracker
+	var pose := head.get_pose("default") if head != null else null
+	if pose == null or not pose.has_tracking_data or pose.transform.origin.is_zero_approx():
+		return null
+	return pose.get_adjusted_transform()
+
+
+## Centres the cylinder on the head, facing the head heading (yaw only)
+func _place_screen() -> void:
+	var tracked: Variant = _tracked_head()
+	if tracked == null:
+		return
+	var head: Transform3D = origin.transform * tracked
+	var forward := -head.basis.z
+	forward.y = 0.0
+	if forward.length_squared() < 0.0001:
+		return
+	screen_world = Transform3D(Basis.looking_at(forward.normalized(), Vector3.UP), head.origin)
+	screen_placed = true
+	print("VCMI XR: screen placed at ", head.origin, " heading ", rad_to_deg(screen_world.basis.get_euler().y))
+
+
+## World-space origin and direction of the aim ray of `hand`, or an empty array
+func _aim_ray(hand: int) -> Array:
+	if test_aim != null and hand == active_hand:
+		var tracked: Variant = _tracked_head()
+		if tracked == null:
+			return []
+		var from: Vector3 = (origin.transform * tracked).origin
+		var turn := Basis.from_euler(Vector3(deg_to_rad(test_aim.y), deg_to_rad(test_aim.x), 0.0))
+		return [from, screen_world.basis * turn * Vector3.FORWARD]
+	var aim := aims[hand]
+	if not aim.get_has_tracking_data():
+		return []
+	return [aim.global_position, -aim.global_basis.z]
+
+
+## Layer UV where the aim ray of `hand` hits, or NO_HIT; shows the ray up to the hit
+func _pointer_hit(hand: int) -> Vector2:
+	var ray := _aim_ray(hand)
+	if ray.is_empty():
+		return NO_HIT
+	# in screen space: the cylinder axis is Y, the screen centre lies at -Z
+	# shortcut: own intersection because OpenXRCompositionLayerCylinder.intersects_ray in Godot 4.7.2 takes aspect_ratio as height / width; use it once that is fixed
+	var to_screen := screen_world.affine_inverse()
+	var from: Vector3 = to_screen * ray[0]
+	var direction: Vector3 = (to_screen.basis * ray[1]).normalized()
+	var a := direction.x * direction.x + direction.z * direction.z
+	var b := 2.0 * (from.x * direction.x + from.z * direction.z)
+	var c := from.x * from.x + from.z * from.z - layer.radius * layer.radius
+	var discriminant := b * b - 4.0 * a * c
+	if a < 0.000001 or discriminant < 0.0:
+		return NO_HIT
+	var length := (-b + sqrt(discriminant)) / (2.0 * a)
+	if length <= 0.0:
+		return NO_HIT
+	var hit := from + direction * length
+	var height := layer.radius * layer.central_angle / layer.aspect_ratio
+	var uv := Vector2(0.5 + atan2(hit.x, -hit.z) / layer.central_angle, 0.5 - hit.y / height)
+	if uv.x < 0.0 or uv.x > 1.0 or uv.y < 0.0 or uv.y > 1.0:
+		return NO_HIT
+
+	var world_direction: Vector3 = ray[1].normalized()
+	rays[hand].visible = true
+	rays[hand].global_transform = Transform3D(Basis.looking_at(world_direction, Vector3.UP), ray[0] + world_direction * length / 2.0)
+	rays[hand].scale = Vector3(1.0, 1.0, length)
+	if hand == active_hand:
+		# a little in front of the screen, towards the ray origin
+		pointer_dot.global_position = ray[0] + world_direction * (length - 0.02)
+	return uv
+
+
+func _on_button(button_name: String, hand: int, pressed: bool) -> void:
+	match button_name:
+		"trigger_click": _press(BUTTON_LEFT, hand, pressed)
+		"grip_click": _press(BUTTON_RIGHT, hand, pressed)
+		_:
+			var keycode: int = PAD_BUTTONS.get("%d:%s" % [hand, button_name], 0)
+			if keycode != 0:
+				bridge.gamepadButton(keycode, pressed)
+				if pressed:
+					_pulse(hand, 0.25)
+
+
+func _on_stick(input_name: String, value: Vector2, hand: int) -> void:
+	if input_name == "primary" and hand == 1:
+		bridge.gamepadAxis(PAD_RIGHT_X, value.x)
+		bridge.gamepadAxis(PAD_RIGHT_Y, -value.y)
+
+
+func _press(button: int, hand: int, pressed: bool) -> void:
+	if pressed:
+		active_hand = hand
+		var hit := _pointer_hit(hand)
+		if hit == NO_HIT:
+			return
+		_move_pointer(hit)
+		_pulse(hand, 0.5)
+	bridge.pointerButton(button, pressed)
+
+
+## A short click on the controller of `hand`; the game's own hapticFeedback() is called for touch input only
+func _pulse(hand: int, amplitude: float) -> void:
+	# the game's "Haptic feedback" option; read on each pulse, so a change in the game applies at once
+	if not bridge.hapticFeedbackEnabled():
+		return
+	aims[hand].trigger_haptic_pulse("haptic", 0.0, amplitude, 0.03, 0.0)
+	print("VCMI XR: haptic pulse ", hand, " ", amplitude)
+
+
+## head yaw pitch height | head_off | recenter | aim yaw pitch | aim_off | click | rclick | pad keycode | stick x y | probe;
+## angles in degrees, height in metres, stick values -1..1 with y up, as the right thumbstick
+func _on_test_command(command: String, a: float, b: float, c: float) -> void:
+	match command:
+		"head":
+			test_head = Transform3D(Basis.from_euler(Vector3(deg_to_rad(b), deg_to_rad(a), 0.0)), Vector3(0.0, c if c > 0.0 else 1.6, 0.0))
+			test_head_start = null
+			# the real controllers lie next to the real headset; moved with a simulated head they can end up in front of the eyes
+			for grip in grips:
+				grip.visible = false
+		"head_off":
+			_end_test_head()
+		"recenter":
+			screen_placed = false
+		"aim":
+			test_aim = Vector2(a, b)
+		"aim_off":
+			test_aim = null
+		"click", "rclick":
+			var button := BUTTON_LEFT if command == "click" else BUTTON_RIGHT
+			_press(button, active_hand, true)
+			_press(button, active_hand, false)
+		"pad":
+			bridge.gamepadButton(int(a), true)
+			await get_tree().create_timer(0.1).timeout
+			bridge.gamepadButton(int(a), false)
+		"stick":
+			_on_stick("primary", Vector2(a, b), 1)
+		"probe":
+			pass
+		_:
+			print("VCMI XR test: unknown command ", command)
+			return
+	# a frame later, so the head offset and the screen placement are applied
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var hit := _pointer_hit(active_hand)
+	print("VCMI XR test: ", command, " -> screen ", screen_world.origin, " heading ", rad_to_deg(screen_world.basis.get_euler().y),
+			", pointer ", Vector2i(hit * Vector2(SURFACE_SIZE)) if hit != NO_HIT else "off screen",
+			", controllers tracked ", aims.map(func(aim): return aim.get_has_tracking_data()))

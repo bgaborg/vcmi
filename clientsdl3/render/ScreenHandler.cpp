@@ -43,10 +43,6 @@
 #	include "ios/utils.h"
 #endif
 
-#ifdef VCMI_OPENXR
-#	include "session/XrDisplay.h"
-#endif
-
 #include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>
 
@@ -329,19 +325,7 @@ ScreenHandler::ScreenHandler()
 
 	SDL_SetLogOutputFunction(logCallback, nullptr);
 
-#if defined(VCMI_ANDROID) && defined(VCMI_OPENXR)
-	// Quest: 8 bits per channel, RGB565 bands visibly on the large panel. No alpha: the panel
-	// compositor would blend the window with the room behind it.
-	SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
-	SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
-	SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
-	SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 0);
-	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 0);
-	// GLES 3 for the copy into OpenXR swapchain images; the SDL renderer keeps a context it did not request
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
-#elif defined(VCMI_ANDROID)
+#ifdef VCMI_ANDROID
 	// manually setting egl pixel format, as a possible solution for sdl2<->android problem
 	// https://bugzilla.libsdl.org/show_bug.cgi?id=2291
 	SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 5);
@@ -454,10 +438,6 @@ void ScreenHandler::initializeWindow()
 	selectDownscalingFilter();
 
 	logGlobal->info("Created renderer %s", SDL_GetRendererName(GpuResources::get().renderer()));
-
-#ifdef VCMI_OPENXR
-	XrDisplay::start();
-#endif
 }
 
 EUpscalingFilter ScreenHandler::loadUpscalingFilter() const
@@ -846,10 +826,6 @@ void ScreenHandler::initializeLayerTextures(const Point & logicalSize)
 
 void ScreenHandler::destroyWindow()
 {
-#ifdef VCMI_OPENXR
-	XrDisplay::stop();
-#endif
-
 	if(nullptr != GpuResources::get().renderer())
 	{
 		presentedCanvases = {};
@@ -1042,25 +1018,6 @@ void ScreenHandler::presentScreenTexture()
 	{
 		GpuResources::get().processPendingTextureDestruction();
 	}
-
-#ifdef VCMI_OPENXR
-	const auto drawXrFrame = [this]()
-	{
-		// the hardware cursor is drawn on the window, which the headset does not show
-		if(ENGINE->cursor().getShowType() == Cursor::ShowType::HARDWARE)
-		{
-			const Point cursorPosition = ENGINE->getCursorPosition();
-			ENGINE->cursor().changeCursor(Cursor::ShowType::SOFTWARE);
-			ENGINE->cursor().cursorMove(cursorPosition.x * getScalingFactor(), cursorPosition.y * getScalingFactor());
-			// creates the texture of the new cursor, which render() needs
-			ENGINE->cursor().update();
-		}
-		composeFrame();
-		ENGINE->cursor().render();
-	};
-	if(XrDisplay::presentFrame(renderer, drawXrFrame))
-		return;
-#endif
 
 	composeFrame();
 	ENGINE->cursor().render();
