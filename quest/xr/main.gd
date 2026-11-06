@@ -21,7 +21,7 @@ const PAD_BUTTONS := {
 	"0:primary_click": 106, # left stick click -> left stick: map level
 	"1:primary_click": 107, # right stick click -> right stick: grid
 }
-const MENU_HOLD_MS := 600 ## holding the left menu button this long switches passthrough instead of opening the game options
+const MENU_HOLD_MS := 600 ## holding the left menu button this long switches the environment instead of opening the game options
 ## the wrist panel: label and Android KeyEvent.KEYCODE_*, the game's own keys from config/keyBindingsConfig.json "keyboard";
 ## the labels name the key because other screens bind it to something else (in battle D is defend)
 const HOTKEYS := [
@@ -53,7 +53,10 @@ var last_pointer := Vector2i(-1, -1) ## last pointer position sent to the game, 
 var screen_distance := 2.0
 var screen_width := 2.4
 var screen_stick := Vector2.ZERO ## left thumbstick: y = distance, x = width
-var passthrough := false ## the room around the screen instead of black
+const ENVIRONMENTS := ["war room", "passthrough", "black"] ## around the screen; a long left menu press goes to the next
+var environment_name: String = ENVIRONMENTS[0]
+var room: Node3D
+var screen_occluder: ShaderMaterial ## on the screen: writes depth and leaves the pixels transparent, so the game layer shows through
 var menu_pressed_at := -1 ## Time.get_ticks_msec() of a left menu press not yet handled, or -1
 var environment: Environment
 var hotkey_panel: Node3D ## on the left controller, shown when it faces the head; the right ray presses its buttons
@@ -84,6 +87,20 @@ func _ready() -> void:
 	var light := DirectionalLight3D.new()
 	light.rotation_degrees = Vector3(-50.0, 30.0, 0.0)
 	add_child(light)
+	room = preload("res://room.gd").new()
+	add_child(room)
+	# Godot's hole punch does not write depth, so the room behind the screen would draw over the game
+	var shader := Shader.new()
+	shader.code = "shader_type spatial;
+render_mode unshaded, blend_mix, depth_draw_always, cull_disabled, shadows_disabled;
+void fragment() {
+	ALBEDO = vec3(0.0);
+	ALPHA = 0.0;
+}
+"
+	screen_occluder = ShaderMaterial.new()
+	screen_occluder.shader = shader
+	screen_occluder.render_priority = -1 # before the room, which draws in the transparent pass (room.gd)
 	environment = Environment.new()
 	environment.background_mode = Environment.BG_COLOR
 	environment.background_color = Color.BLACK
@@ -105,7 +122,7 @@ func _ready() -> void:
 	var settings := ConfigFile.new()
 	if settings.load(SETTINGS_PATH) == OK:
 		_size_screen(settings.get_value("screen", "distance", screen_distance), settings.get_value("screen", "width", screen_width))
-		_set_passthrough(settings.get_value("screen", "passthrough", false) == true)
+		_set_environment(settings.get_value("screen", "environment", ENVIRONMENTS[0]))
 	else:
 		_size_screen(screen_distance, screen_width)
 	layer.aspect_ratio = float(SURFACE_SIZE.x) / SURFACE_SIZE.y # width / height, as in XrCompositionLayerCylinderKHR
@@ -189,12 +206,16 @@ func _process(delta: float) -> void:
 		_size_screen(screen_distance + screen_stick.y * SCREEN_SPEED * delta, width)
 	if menu_pressed_at >= 0 and Time.get_ticks_msec() - menu_pressed_at >= MENU_HOLD_MS:
 		menu_pressed_at = -1
-		_set_passthrough(not passthrough)
+		_set_environment(ENVIRONMENTS[(ENVIRONMENTS.find(environment_name) + 1) % ENVIRONMENTS.size()])
 		_save_screen()
 		_pulse(0, 0.25)
 	if not screen_placed:
 		_place_screen()
 	layer.transform = origin.transform.affine_inverse() * screen_world
+	# shortcut: the layer's internal hole punch mesh (Godot 4.7.2) carries the occluder, as it already matches the screen; build an own cylinder mesh if Godot changes it
+	var hole_punch := layer.get_child(0, true) as MeshInstance3D if layer.get_child_count(true) > 0 else null
+	if hole_punch != null and hole_punch.material_override != screen_occluder:
+		hole_punch.material_override = screen_occluder
 	if surface_pending and layer.get_android_surface() != null:
 		surface_pending = false
 		if game_started:
@@ -247,18 +268,25 @@ func _tracked_head() -> Variant:
 	return pose.get_adjusted_transform()
 
 
-func _set_passthrough(enabled: bool) -> void:
+## `choice` from the settings file may be anything: unknown names fall back to the war room
+func _set_environment(choice: Variant) -> void:
+	if not choice in ENVIRONMENTS:
+		choice = ENVIRONMENTS[0]
+	var enabled: bool = choice == "passthrough"
 	var xr := XRServer.find_interface("OpenXR")
 	var mode := XRInterface.XR_ENV_BLEND_MODE_ALPHA_BLEND if enabled else XRInterface.XR_ENV_BLEND_MODE_OPAQUE
 	if enabled and not mode in xr.get_supported_environment_blend_modes():
 		print("VCMI XR: passthrough not supported")
-		return
+		choice = "black" # not the war room: the next long press must still reach black
+		enabled = false
+		mode = XRInterface.XR_ENV_BLEND_MODE_OPAQUE
 	xr.environment_blend_mode = mode
 	# the clear colour shows where nothing is drawn: transparent lets the passthrough through
 	get_viewport().transparent_bg = enabled
 	environment.background_mode = Environment.BG_CLEAR_COLOR if enabled else Environment.BG_COLOR
-	passthrough = enabled
-	print("VCMI XR: passthrough ", "on" if enabled else "off")
+	room.visible = choice == "war room"
+	environment_name = choice
+	print("VCMI XR: environment ", choice)
 
 
 func _build_hotkey_panel() -> void:
@@ -349,6 +377,8 @@ func _place_screen() -> void:
 		return
 	screen_world = Transform3D(Basis.looking_at(forward.normalized(), Vector3.UP), head.origin)
 	screen_placed = true
+	# the room stands on the floor under the head, facing the screen
+	room.transform = Transform3D(screen_world.basis, Vector3(head.origin.x, 0.0, head.origin.z))
 	print("VCMI XR: screen placed at ", head.origin, " heading ", rad_to_deg(screen_world.basis.get_euler().y))
 
 
@@ -407,7 +437,7 @@ func _on_button(button_name: String, hand: int, pressed: bool) -> void:
 		"trigger_click": _press(BUTTON_LEFT, hand, pressed)
 		"grip_click": _press(BUTTON_RIGHT, hand, pressed)
 		"menu_button" when hand == 0:
-			# a short press is the game's options button, a long one switches passthrough (in _process)
+			# a short press is the game's options button, a long one switches the environment (in _process)
 			if pressed:
 				menu_pressed_at = Time.get_ticks_msec()
 			elif menu_pressed_at >= 0:
@@ -443,9 +473,9 @@ func _save_screen() -> void:
 	var settings := ConfigFile.new()
 	settings.set_value("screen", "distance", screen_distance)
 	settings.set_value("screen", "width", screen_width)
-	settings.set_value("screen", "passthrough", passthrough)
+	settings.set_value("screen", "environment", environment_name)
 	settings.save(SETTINGS_PATH)
-	print("VCMI XR: screen distance ", screen_distance, " width ", screen_width, " passthrough ", passthrough)
+	print("VCMI XR: screen distance ", screen_distance, " width ", screen_width, " environment ", environment_name)
 
 
 func _press(button: int, hand: int, pressed: bool) -> void:
@@ -529,6 +559,6 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 	var hit := _pointer_hit(active_hand)
-	print("VCMI XR test: ", command, " -> screen ", screen_world.origin, " heading ", rad_to_deg(screen_world.basis.get_euler().y), " distance ", screen_distance, " width ", screen_width, " passthrough ", passthrough,
+	print("VCMI XR test: ", command, " -> screen ", screen_world.origin, " heading ", rad_to_deg(screen_world.basis.get_euler().y), " distance ", screen_distance, " width ", screen_width, " environment ", environment_name,
 			", pointer ", Vector2i(hit * Vector2(SURFACE_SIZE)) if hit != NO_HIT else "off screen",
 			", hotkey ", HOTKEYS[hotkey_hover][0] if hotkey_hover >= 0 else "none", ", controllers tracked ", aims.map(func(aim): return aim.get_has_tracking_data()))
