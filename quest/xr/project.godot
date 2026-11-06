@@ -20,4 +20,5 @@ openxr/enabled=true
 ; Local Floor: the runtime recenter moves it, and Godot emits pose_recentered for it (not for the default Stage)
 openxr/reference_space=2
 openxr/extensions/meta/render_model=true
+openxr/extensions/meta/passthrough=true
 shaders/enabled=true

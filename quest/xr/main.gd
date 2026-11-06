@@ -21,6 +21,7 @@ const PAD_BUTTONS := {
 	"0:primary_click": 106, # left stick click -> left stick: map level
 	"1:primary_click": 107, # right stick click -> right stick: grid
 }
+const MENU_HOLD_MS := 600 ## holding the left menu button this long switches passthrough instead of opening the game options
 const PAD_RIGHT_X := 2 ## the right thumbstick is the gamepad right stick: the game scrolls the map with it ("mouseSwipe")
 const PAD_RIGHT_Y := 3
 
@@ -40,6 +41,9 @@ var last_pointer := Vector2i(-1, -1) ## last pointer position sent to the game, 
 var screen_distance := 2.0
 var screen_width := 2.4
 var screen_stick := Vector2.ZERO ## left thumbstick: y = distance, x = width
+var passthrough := false ## the room around the screen instead of black
+var menu_pressed_at := -1 ## Time.get_ticks_msec() of a left menu press not yet handled, or -1
+var environment: Environment
 var test_head: Variant = null ## Transform3D: simulated head pose in the world, null for the tracked head
 var test_head_start: Variant = null ## Transform3D: tracked head when the simulated head was set
 var test_aim: Variant = null ## Vector2: simulated aim of the active hand from the head, yaw and pitch in degrees from the screen centre
@@ -54,14 +58,16 @@ func _ready() -> void:
 	get_viewport().use_xr = true
 	xr.pose_recentered.connect(func(): screen_placed = false)
 	xr.session_begun.connect(func(): surface_pending = true)
-	# the stick may not report its release while the system menu has focus
-	xr.session_visible.connect(func(): _on_stick("primary", Vector2.ZERO, 0))
+	# the stick and the menu button may not report their release while the system menu has focus
+	xr.session_visible.connect(func():
+		_on_stick("primary", Vector2.ZERO, 0)
+		menu_pressed_at = -1)
 
 	# the controller models have lit glTF materials
 	var light := DirectionalLight3D.new()
 	light.rotation_degrees = Vector3(-50.0, 30.0, 0.0)
 	add_child(light)
-	var environment := Environment.new()
+	environment = Environment.new()
 	environment.background_mode = Environment.BG_COLOR
 	environment.background_color = Color.BLACK
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
@@ -82,6 +88,7 @@ func _ready() -> void:
 	var settings := ConfigFile.new()
 	if settings.load(SETTINGS_PATH) == OK:
 		_size_screen(settings.get_value("screen", "distance", screen_distance), settings.get_value("screen", "width", screen_width))
+		_set_passthrough(settings.get_value("screen", "passthrough", false) == true)
 	else:
 		_size_screen(screen_distance, screen_width)
 	layer.aspect_ratio = float(SURFACE_SIZE.x) / SURFACE_SIZE.y # width / height, as in XrCompositionLayerCylinderKHR
@@ -160,6 +167,11 @@ func _process(delta: float) -> void:
 			# widening stops at the arc limit; the width is kept when only the distance changes
 			width = minf(width + screen_stick.x * SCREEN_SPEED * delta, maxf(screen_width, screen_distance * SCREEN_MAX_ANGLE))
 		_size_screen(screen_distance + screen_stick.y * SCREEN_SPEED * delta, width)
+	if menu_pressed_at >= 0 and Time.get_ticks_msec() - menu_pressed_at >= MENU_HOLD_MS:
+		menu_pressed_at = -1
+		_set_passthrough(not passthrough)
+		_save_screen()
+		_pulse(0, 0.25)
 	if not screen_placed:
 		_place_screen()
 	layer.transform = origin.transform.affine_inverse() * screen_world
@@ -209,6 +221,20 @@ func _tracked_head() -> Variant:
 	if pose == null or not pose.has_tracking_data or pose.transform.origin.is_zero_approx():
 		return null
 	return pose.get_adjusted_transform()
+
+
+func _set_passthrough(enabled: bool) -> void:
+	var xr := XRServer.find_interface("OpenXR")
+	var mode := XRInterface.XR_ENV_BLEND_MODE_ALPHA_BLEND if enabled else XRInterface.XR_ENV_BLEND_MODE_OPAQUE
+	if enabled and not mode in xr.get_supported_environment_blend_modes():
+		print("VCMI XR: passthrough not supported")
+		return
+	xr.environment_blend_mode = mode
+	# the clear colour shows where nothing is drawn: transparent lets the passthrough through
+	get_viewport().transparent_bg = enabled
+	environment.background_mode = Environment.BG_CLEAR_COLOR if enabled else Environment.BG_COLOR
+	passthrough = enabled
+	print("VCMI XR: passthrough ", "on" if enabled else "off")
 
 
 ## Values from the settings file may be of any type or range
@@ -290,6 +316,17 @@ func _on_button(button_name: String, hand: int, pressed: bool) -> void:
 	match button_name:
 		"trigger_click": _press(BUTTON_LEFT, hand, pressed)
 		"grip_click": _press(BUTTON_RIGHT, hand, pressed)
+		"menu_button" when hand == 0:
+			# a short press is the game's options button, a long one switches passthrough (in _process)
+			if pressed:
+				menu_pressed_at = Time.get_ticks_msec()
+			elif menu_pressed_at >= 0:
+				menu_pressed_at = -1
+				var keycode: int = PAD_BUTTONS["0:menu_button"]
+				bridge.gamepadButton(keycode, true)
+				_pulse(hand, 0.25)
+				await get_tree().create_timer(0.1).timeout
+				bridge.gamepadButton(keycode, false)
 		_:
 			var keycode: int = PAD_BUTTONS.get("%d:%s" % [hand, button_name], 0)
 			if keycode != 0:
@@ -316,8 +353,9 @@ func _save_screen() -> void:
 	var settings := ConfigFile.new()
 	settings.set_value("screen", "distance", screen_distance)
 	settings.set_value("screen", "width", screen_width)
+	settings.set_value("screen", "passthrough", passthrough)
 	settings.save(SETTINGS_PATH)
-	print("VCMI XR: screen distance ", screen_distance, " width ", screen_width)
+	print("VCMI XR: screen distance ", screen_distance, " width ", screen_width, " passthrough ", passthrough)
 
 
 func _press(button: int, hand: int, pressed: bool) -> void:
@@ -340,7 +378,7 @@ func _pulse(hand: int, amplitude: float) -> void:
 	print("VCMI XR: haptic pulse ", hand, " ", amplitude)
 
 
-## head yaw pitch height | head_off | recenter | aim yaw pitch | aim_off | click | rclick | pad keycode | stick x y | lstick x y | screen distance width | probe;
+## head yaw pitch height | head_off | recenter | aim yaw pitch | aim_off | click | rclick | pad keycode | stick x y | lstick x y | screen distance width | lmenu seconds | probe;
 ## angles in degrees, height in metres, stick values -1..1 with y up, as the right (stick) and left (lstick) thumbstick
 func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 	match command:
@@ -370,6 +408,10 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 			_on_stick("primary", Vector2(a, b), 1)
 		"lstick":
 			_on_stick("primary", Vector2(a, b), 0)
+		"lmenu":
+			_on_button("menu_button", 0, true)
+			await get_tree().create_timer(a).timeout
+			_on_button("menu_button", 0, false)
 		"screen":
 			# not saved: a test run keeps the size the user chose for the next launch
 			_size_screen(a, b)
@@ -382,6 +424,6 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 	var hit := _pointer_hit(active_hand)
-	print("VCMI XR test: ", command, " -> screen ", screen_world.origin, " heading ", rad_to_deg(screen_world.basis.get_euler().y), " distance ", screen_distance, " width ", screen_width,
+	print("VCMI XR test: ", command, " -> screen ", screen_world.origin, " heading ", rad_to_deg(screen_world.basis.get_euler().y), " distance ", screen_distance, " width ", screen_width, " passthrough ", passthrough,
 			", pointer ", Vector2i(hit * Vector2(SURFACE_SIZE)) if hit != NO_HIT else "off screen",
 			", controllers tracked ", aims.map(func(aim): return aim.get_has_tracking_data()))

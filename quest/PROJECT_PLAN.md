@@ -270,7 +270,7 @@ All in Godot and the input bridge; no change to VCMI C++.
 - Haptics: Godot pulses the controller on clicks and gamepad buttons and follows the game's "Haptic feedback" option (the game's own `hapticFeedback()` runs for touch input only, so no hook).
 - QoL hotkeys on controllers: radial menu or a wrist hotkey panel in Godot that sends keys (section 4).
 - Popups stay on the main screen. The bridge sees clicks, not dialogs: haptics on click only until the data bridge exists.
-- Environment: a low-poly war room (glTF scene in Godot) or passthrough, selected in settings.
+- Environment: a low-poly war room (glTF scene in Godot) or passthrough, selected in settings. Done: passthrough (XR_FB_passthrough, alpha blend), switched by holding the left menu button for 0.6 s, saved in `user://screen.cfg`; a short press stays the game's options button.
 - Seated / standing mode, recenter (Godot follows the runtime recenter event), screen distance, size and curvature settings (stored by Godot). Done: the left thumbstick sets distance (up / down, 1-4 m; the screen is a cylinder around the head, so a nearer screen curves more) and width (left / right, 1-4 m, at most 115° of arc), saved in `user://screen.cfg`; recenter works.
 - Text readability: virtual display 2560x1440 or higher, cylinder compositor layer.
 - HD: 2x assets for the screen and UI panels; XR graphics presets.

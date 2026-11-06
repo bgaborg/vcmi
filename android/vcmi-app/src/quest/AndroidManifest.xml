@@ -25,6 +25,11 @@
 		android:required="false" />
 	<uses-permission android:name="com.oculus.permission.RENDER_MODEL" />
 
+	<!-- the room behind the screen (XR_FB_passthrough), switched on by holding the left menu button -->
+	<uses-feature
+		android:name="com.oculus.feature.PASSTHROUGH"
+		android:required="false" />
+
 	<application>
 		<meta-data
 			android:name="com.oculus.supportedDevices"
