@@ -271,7 +271,7 @@ All in Godot and the input bridge; no change to VCMI C++.
 - QoL hotkeys on controllers: radial menu or a wrist hotkey panel in Godot that sends keys (section 4). Done: a wrist panel above the left controller, shown when it is turned to the eyes; the right ray and trigger press end turn, spells, kingdom, quests, sleep, dig, quick save and quick load, sent as the game's own keys (`config/keyBindingsConfig.json`). Godot does not know which screen is open, so the labels name the key: in battle D is defend.
 - Popups stay on the main screen. The bridge sees clicks, not dialogs: haptics on click only until the data bridge exists.
 - Environment: a low-poly war room (glTF scene in Godot) or passthrough, selected in settings. Done: passthrough (XR_FB_passthrough, alpha blend), switched by holding the left menu button for 0.6 s, saved in `user://screen.cfg`; a short press stays the game's options button.
-- Seated / standing mode, recenter (Godot follows the runtime recenter event), screen distance, size and curvature settings (stored by Godot). Done: the left thumbstick sets distance (up / down, 1-4 m; the screen is a cylinder around the head, so a nearer screen curves more) and width (left / right, 1-4 m, at most 115° of arc), saved in `user://screen.cfg`; recenter works.
+- Recenter (Godot follows the runtime recenter event), screen distance, size and curvature settings (stored by Godot). Done: the left thumbstick sets distance (up / down, 1-4 m; the screen is a cylinder around the head, so a nearer screen curves more) and width (left / right, 1-4 m, at most 115° of arc), saved in `user://screen.cfg`; recenter works. No seated / standing mode: recenter puts the screen at the current eye height either way.
 - Text readability: virtual display 2560x1440 or higher, cylinder compositor layer.
 - HD: 2x assets for the screen and UI panels; XR graphics presets.
 - **Exit:** a full campaign map is playable start to end in VR with no comfort complaints. Sideload release v0.1.
@@ -296,6 +296,7 @@ Pick the option with the fewest changes to upstream files; prototype it on the m
 - Picking: the ray hits the table plane, then a tile; the tile goes to VCMI through the bridge (hover / click).
 - Panel routing (section 5): resource bar at the table edge, hero / town lists on the left wrist, minimap as a small tablet, dialogs in front of the table.
 - Controls: grab-drag the map, two-hand pinch zoom.
+- Seated / standing mode: the table height follows it (moved from phase 3, where recenter covers the flat screen).
 - Card metadata (height, anchor, fold style) from JSON, so mods can tune it. Include HotA objects.
 - Army management gestures: grab / drop / split stacks.
 - HD: 4x object cards and 3x-4x terrain page; Godot mipmaps and ASTC compression.
