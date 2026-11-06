@@ -7,7 +7,7 @@ set -eo pipefail
 
 TOOLS="$(cd "$(dirname "$0")" && pwd)"
 Q="$TOOLS/quest.sh"
-OUT="$TOOLS/../out/smoke-$(date +%Y%m%d-%H%M%S)"
+OUT="${OUT:-$TOOLS/../out/smoke-$(date +%Y%m%d-%H%M%S)}"
 mkdir -p "$OUT"
 command -v cygpath >/dev/null && OUT="$(cygpath -m "$OUT")"
 
@@ -52,6 +52,8 @@ shot 2-main-menu
 sleep 1
 step "Received CPack of type 16LobbyUpdateState" 20 click
 shot 3-scenario-list
+# xr-perf.sh picks its own map from here
+[ -z "${SMOKE_TO_LOBBY:-}" ] || { echo "$OUT"; exit 0; }
 
 # A on the gamepad starts the scenario
 step "Received CPack of type 16PlayerStartsTurn" 60 pad 96

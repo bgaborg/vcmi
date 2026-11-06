@@ -31,7 +31,7 @@ All paths are in this repository; line numbers are from 2026-11-06.
 
 **Sizes.**
 - Map: up to 252 x 252 tiles, 2 levels (`lib/mapping/CMapHeader.h:227-232`): 127 008 tiles.
-- Objects: a few thousand on a large map (estimate, measured in milestone 0).
+- Objects (milestone 0, counted from the map files): 7 009 on an XL map (Myth and Legend), 23 803 on the heaviest map shipped enabled (The Devil Is in the Detail, G), 64 622 on the heaviest HotA map at all (Might and Magic, G, in the "Famous community maps" pack, off by default). Distinct sprites: 540, 1 286 and 1 852.
 - Battle: 187 hexes (`lib/battle/BattleHex.h:19-21`), 7 stacks per side plus war machines and summons.
 
 **Memory today.**
@@ -128,12 +128,12 @@ The 2D animations must not slow the game down while the tabletop is shown, and t
 
 - Godot asks for an animation by its table index. The bridge loads it through the game's cache (`ENGINE->renderHandler().loadAnimation`, `client/render/IRenderHandler.h:37-48`) at scale 1 (an xBRZ image can be an unfinished stand-in) and draws each frame into its own RGBA `SDL_Surface` on the game GUI thread.
 - Player colour mask: draw a frame twice with two `playerColored` colours; the pixels that differ are the mask. Godot applies the owner colour in a shader, so one texture serves all eight colours.
-- Godot makes one texture per animation atlas and builds mipmaps; the bridge frees its surface once Godot has it. The decoded image also stays in the game's cache: that copy is counted in the memory budget.
+- Godot packs the frames of many animations into a few large atlas pages (up to 1 852 animations on one map, milestone 0) and builds mipmaps; the bridge frees its surface once Godot has it. The decoded image also stays in the game's cache: that copy is counted in the memory budget.
 
 ### Rendering in Godot
 
 - Terrain: one texture per map level built from the tiles, mipmapped. Fog: a second texture, 1 byte per tile, sampled in the same shader, re-uploaded when the fog buffer is fresh (127 KB).
-- Objects: one `MultiMeshInstance3D` per animation atlas (transform, frame and owner in custom data): a few draw calls for thousands of objects. Animated frames advance in the shader from time, not by rewriting instance data each frame.
+- Objects: one `MultiMeshInstance3D` per atlas page (transform, frame rectangle and owner in custom data): a few draw calls for tens of thousands of objects. One per animation would be up to 1 852 draw calls. Animated frames advance in the shader from time, not by rewriting instance data each frame.
 - GDScript sees ready Godot objects, never raw records.
 
 ## 4. Performance and memory
@@ -146,8 +146,8 @@ The 2D animations must not slow the game down while the tabletop is shown, and t
 | Game side per publish | < 0.3 ms (copy of objects + fog compare) |
 | Lifecycle task | < 0.05 ms per 100 ms when nothing changed |
 | Map load snapshot | < 30 ms once |
-| Bridge memory | < 3 MB of buffers |
-| Sprite atlases | counted in a Godot texture budget set from milestone 0 numbers |
+| Bridge memory | < 5 MB of buffers (64 622 objects: 3.1 MB triple-buffered, fog 0.4 MB, tile snapshot 1 MB) |
+| Sprite atlases | < 256 MB of textures: the game itself already reaches 3.5 GB on the heaviest map (milestone 0) |
 
 ### Optimisations
 
@@ -155,26 +155,47 @@ The 2D animations must not slow the game down while the tabletop is shown, and t
 - No locks on the Godot side; one atomic load per buffer per frame.
 - No per-object JNI calls, Dictionaries or GDScript loops over records: native decoding in the extension.
 - Full state instead of deltas: simpler and, at these sizes, a copy of microseconds.
-- Batching: MultiMesh per atlas; animated frames in the shader.
-- **No 2D map drawing while the tabletop is shown:** the 3D-mode window is the top window, so normal frames draw only that empty window, not the adventure map. What remains is the game loop at 60 Hz: logic, an upload of the unchanged screen texture and a present, because `wantsFrameRendered` asks for a frame whenever the adventure map is not on top. Zero frames needs a small generic upstream hook (a window that reports it has nothing to draw, so `wantsFrameRendered` can skip); proposed only if milestones 0 and 2 show those frames cost something measurable.
+- Batching: MultiMesh per atlas page; animated frames in the shader.
+- **No 2D map drawing while the tabletop is shown:** the 3D-mode window is the top window, so normal frames draw only that empty window, not the adventure map. What remains is the game loop at 60 Hz: logic, an upload of the unchanged screen texture and a present, because `wantsFrameRendered` asks for a frame whenever the adventure map is not on top. Zero frames needs a small generic upstream hook (a window that reports it has nothing to draw, so `wantsFrameRendered` can skip); proposed only if milestone 2 shows those frames cost something measurable. Milestone 0 shows why the 2D map must not draw: it is the most expensive thing on the headset (below).
 
 ### Memory
 
-- xBRZ costs up to 1-1.5 GB for a sharper 2D screen. Milestone 0 measures PSS with `video.upscalingFilter` auto and `none`; a Quest default is decided with those numbers.
+- xBRZ: on the heaviest map, auto (xbrz2) grew to 6.75 GB PSS and the low-memory killer ended the game; `none` peaked at 3.5 GB. Decision: the Quest build defaults to `none` (open: how, with the fewest upstream changes; a player can still pick xBRZ).
 - Sprite atlases: one per animation for all colours; requested on first use. Freeing unused atlases comes only if milestone 3 shows the texture budget is exceeded.
 - The 2D view's caches stay as they are (releasing them needs an upstream change).
 - ETC2 / ASTC compression of atlases only if the texture budget is exceeded.
 
+### Milestone 0 results (2026-11-06)
+
+Measured with `quest/tools/xr-perf.sh` on the heaviest map, [HotA] Might and Magic (252 x 252 x 2, 64 622 objects, 8 players), with the map revealed by the `vcmieagles` cheat and the 2D map zoomed out until the whole map is on screen, so every object is drawn and animates. Rows from `quest.sh sample` (about one per 1.7 s); CPU in % of one core; memory in decimal GB; data in `quest/out/perf-20261106-194305-auto` and `perf-20261106-202443-none`.
+
+| Step | xBRZ | Game thread CPU | Godot CPU | Process CPU | Godot FPS / app GPU ms | PSS max | Graphics max |
+|---|---|---|---|---|---|---|---|
+| Lobby | auto / none | 4 / 4 | 11 / 11 | 20 / 20 | 72 / 8.0 | 1.28 / 1.04 GB | 0.42 / 0.35 GB |
+| Map start (normal zoom) | auto / none | 16 / 21 | 11 / 11 | 31 / 36 | 71-72 / 8.4 | 2.12 / 1.76 GB | 0.54 / 0.41 GB |
+| Revealed, normal zoom | auto / none | 24 / 32 | 11 / 11 | 42 / 49 | 71-72 / 8.9 | 2.30 / 1.84 GB | 0.64 / 0.45 GB |
+| Scrolling, normal zoom | auto / none | 27 / 31 | 11 / 11 | 45 / 47 | 72 / 8.8 | 4.19 / 1.84 GB | 1.80 / 0.45 GB |
+| Whole map on screen | auto / none | 96 / 92 | 11 / 11 | 120 / 107 | 72 / 9.0 | 4.63 / 2.46 GB | 2.09 / 0.81 GB |
+| AI turn, whole map on screen | auto / none | 95 / 95 | 12 / 11 | 116 / 112 | 72 / 9.2 | 6.75 (killed) / 3.50 GB | 3.04 / 1.31 GB |
+
+- **Order:** in the auto run, scrolling came after a first zoom-out, so its memory includes what that drew; the whole-map and AI-turn steps of the auto run were driven by hand after the scripted end turn failed (fixed in the script since).
+- **Map load:** 5.8 s (auto) and 5.9 s (none) from Begin to the first turn.
+- **AI turn** (7 AI players, every move on screen): 921 s with auto, then the low-memory killer ended the game at the new day; 692 s with `none`, game survived. Not measured yet: the same turn at normal zoom without the cheat, the case a player sees.
+- **Godot is not the problem:** 71-73 FPS and 8-9 ms app GPU time of the 13.9 ms frame in every step, at about 11 % of one core.
+- **The 2D map is:** the game thread draws in software and saturates one core when many objects are on screen (88-97 %); the AI turn is then paced by it. The tabletop's 3D-mode window, which stops the 2D map from drawing, is the main optimisation, not an extra.
+- **Memory grows with what the 2D map has drawn:** sprites stay in the game's caches, upscaled ones (xBRZ) in graphics memory. With `none` the heaviest case stays under half of the 8 GB.
+- **Objects and sprites:** see section 1, Sizes. The object buffer and the atlas design are sized for 64 622 objects and 1 852 animations.
+
 ### How to measure
 
-- Frame time and CPU / GPU load: OVR Metrics Tool or a Perfetto trace (`adb shell perfetto`), started from `quest.sh`.
-- Memory: `adb shell dumpsys meminfo is.xyz.vcmi.quest` (native heap, graphics PSS).
+- `quest.sh sample <rows>`: rows about 1.7 s apart with the compositor's VrApi line (Godot FPS, app GPU ms), the CPU of the game thread (SDLThread), of Godot (VkThread) and of the process, and `dumpsys meminfo` (PSS, native heap, graphics), into a CSV.
+- `quest/tools/xr-perf.sh <filter> [row] [rows] [player]`: the whole milestone 0 run on a G-size map in at most 15 minutes. A Perfetto trace (`adb shell perfetto`) only when a number needs explaining.
 - Bridge timers: producer and consumer timings, printed by a test command `bridge_stats`.
 - Each milestone records its numbers in this file. A milestone over budget is optimised before the next one starts.
 
 ## 5. Milestones
 
-0. **Baseline** (no code): frame time, CPU and PSS on the adventure map of a large map, with xBRZ auto and `none`; object count of that map.
+0. **Baseline** (no code), **done 2026-11-06:** frame time, CPU and PSS on the heaviest map with xBRZ auto and `none`; object counts (section 4, Milestone 0 results).
 1. **Skeleton:** `quest/bridge` with the table and version; the extension finds it after the game starts and logs the version; the lifecycle task survives new game, load, restart, replay and quit to menu; test command `bridge` in `main.gd`.
 2. **Minimap:** tile snapshot and fog buffer into Godot textures on a panel in the war room; fog follows hero moves and a View Air spell. Check the budgets.
 3. **Objects:** object buffer, string table, one atlas with the colour mask, a MultiMesh on the minimap panel; the 3D-mode window; hero step timing through `waitForOngoingAnimations`.

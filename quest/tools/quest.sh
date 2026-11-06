@@ -45,7 +45,8 @@ game_lines() { adb_shell "wc -l < '$LOG_DIR/VCMI_Client_log.txt' 2>/dev/null || 
 # The loop runs on the headset: one adb call, and no logcat stream that adb.exe would keep open after grep exits.
 wait_on_device() {
 	local pattern="${2//\'/\'\\\'\'}"
-	adb_shell "for i in \$(seq $(( $3 * 4 ))); do $1 | grep -m1 -E '$pattern' && exit 0; sleep 0.25; done; echo 'timed out' >&2; exit 1"
+	# a deadline, not a pass count: one pass over a long log takes longer than its 0.25 s sleep
+	adb_shell "end=\$((\$(date +%s) + $3)); while [ \$(date +%s) -lt \$end ]; do $1 | grep -m1 -E '$pattern' && exit 0; sleep 0.25; done; echo 'timed out' >&2; exit 1"
 }
 
 usage() {
@@ -53,6 +54,7 @@ usage() {
 Usage: quest.sh <command> [args]
 
   devices                 list connected devices
+  adb <args>              run adb on the selected headset
   info                    device model, OS build, refresh rate, installed app version
   install <apk>           install or update the APK (keeps app data)
   start                   launch the app (refuses if it is already running)
@@ -61,7 +63,7 @@ Usage: quest.sh <command> [args]
   start-xr                launch the immersive Godot host directly, without the launcher
   logcat                  follow logcat for the running app
   pull-logs [dir]         copy VCMI logs from the device (default: quest/out/logs-<timestamp>)
-  sample <seconds> [csv]  sample PSS memory, CPU and battery temperature once per second
+  sample <rows> [csv]     rows about 1.7 s apart: VrApi frame stats, game / Godot / process CPU, PSS, native heap, graphics, temperature
   screenshot [jpg]        capture the headset view (works for immersive apps; black while the headset sleeps)
   panel [png]             capture the display panel as shown (both eyes, lens-distorted); the metacam screenshot can draw
                           layers wrong (a black block over the cylinder layer), the panel cannot
@@ -84,6 +86,9 @@ shift || true
 case "$cmd" in
 	devices)
 		"$ADB" devices -l
+		;;
+	adb)
+		"$ADB" "$@"
 		;;
 	info)
 		echo "model:    $(adb_shell getprop ro.product.model)"
@@ -140,21 +145,21 @@ case "$cmd" in
 		;;
 	sample)
 		[ $# -ge 1 ] || { usage; exit 1; }
-		seconds="$1"
+		rows="$1"
 		mkdir -p "$OUT_DIR"
 		csv="${2:-$OUT_DIR/sample-$(date +%Y%m%d-%H%M%S).csv}"
-		echo "time,pss_kb,cpu_percent,battery_temp_c" > "$csv"
-		for ((i = 0; i < seconds; i++)); do
-			pid="$(app_pid | awk '{print $1}')"
-			if [ -z "$pid" ]; then
-				echo "$PKG is not running" >&2
-				break
-			fi
-			pss="$(adb_shell dumpsys meminfo "$PKG" | awk '/TOTAL PSS:/ {print $3; exit} /^ *TOTAL / {print $2; exit}')"
-			cpu="$(adb_shell top -b -n 1 -p "$pid" | awk -v p="$pid" '$1 == p {print $9}')"
-			temp="$(adb_shell dumpsys battery | awk '/temperature:/ {printf "%.1f", $2 / 10}')"
-			echo "$(date +%H:%M:%S),$pss,$cpu,$temp" | tee -a "$csv"
-			sleep 1
+		echo "time,fps,app_gpu_ms,cpu_gpu_ms,gpu_util,cpu_util,game_cpu_percent,godot_cpu_percent,process_cpu_percent,pss_kb,native_heap_kb,graphics_kb,battery_temp_c" > "$csv"
+		# one row per loop, measured on the headset in one adb call: the compositor's VrApi line of the last second,
+		# thread CPU over 1 s (SDLThread: the game loop, VkThread: Godot), the memory summary
+		for ((i = 0; i < rows; i++)); do
+			row="$(adb_shell "P=$PKG; "'
+p=$(pidof $P) || exit 1
+v=$(logcat -d -s VrApi:I | tail -1)
+f() { echo "$v" | sed -n "s/.*[,:] *$1=\([0-9.]*\).*/\1/p"; }
+c=$(top -H -b -n 2 -d 1 -p $p | awk "/^Threads/ {n++} n == 2 && \$1 ~ /^[0-9]+\$/ {s += \$9; if (\$12 == \"SDLThread\" && \$9 > g) g = \$9; if (\$12 == \"VkThread\" && \$9 > k) k = \$9} END {printf \"%s,%s,%s\", g + 0, k + 0, s}")
+m=$(dumpsys meminfo $p | awk "/TOTAL PSS:/ {t = \$3} /Native Heap:/ {n = \$3} /Graphics:/ {g = \$2} END {printf \"%s,%s,%s\", t, n, g}")
+echo "$(f FPS),$(f App),$(f "CPU&GPU"),$(f GPU%),$(f CPU%),$c,$m,$(dumpsys battery | awk "/temperature:/ {print \$2 / 10}")"')" || { echo "$PKG is not running" >&2; break; }
+			echo "$(date +%H:%M:%S),$row" | tee -a "$csv"
 		done
 		echo "saved $csv"
 		;;

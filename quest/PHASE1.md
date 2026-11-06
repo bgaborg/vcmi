@@ -65,7 +65,7 @@ Open phase 1 work, all on the headset. Phase 1 exits when these are done.
 quest/tools/quest.sh info
 quest/tools/quest.sh install <apk>
 quest/tools/quest.sh start
-quest/tools/quest.sh sample 300          # PSS, CPU, battery temperature, 1 sample per second
+quest/tools/quest.sh sample 300          # frame stats, CPU, memory, temperature; rows about 1.7 s apart
 quest/tools/quest.sh pull-logs           # VCMI_Client_log.txt, server_log.txt, logcat
 ```
 
