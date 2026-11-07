@@ -2,6 +2,7 @@
  * Bridge.cpp, Meta Quest build: the game side of the data bridge to Godot (quest/DATA_BRIDGE.md).
  * Compiled into libvcmiclient by clientapp/CMakeLists.txt when quest/bridge exists.
  * Milestone 1: the exported table, the lifecycle task and one map observer per game.
+ * Milestone 2: the tile snapshot per map and the local team's fog, for the minimap in Godot.
  *
  * License: GNU General Public License v2.0 or later
  */
@@ -15,9 +16,13 @@
 #include "../../client/adventureMap/AdventureMapInterface.h"
 #include "../../client/mapView/IMapRendererObserver.h"
 #include "../../client/mapView/mapHandler.h"
+#include "../../lib/CPlayerState.h"
 #include "../../lib/CThreadHelper.h"
+#include "../../lib/GameLibrary.h"
+#include "../../lib/TerrainHandler.h"
 #include "../../lib/callback/CCallback.h"
 #include "../../lib/int3.h"
+#include "../../lib/mapping/TerrainTile.h"
 
 namespace
 {
@@ -47,10 +52,87 @@ std::atomic<bool> inGame{false};
 // one tick queued at most: while the game is paused (Meta menu) or loading, posted ticks would pile up
 std::atomic<bool> tickPending{false};
 std::once_flag started;
+std::atomic<uint32_t> tilesGeneration{0};
+std::atomic<uint32_t> fogGeneration{0};
+std::atomic<uint32_t> publishMicros{0};
+
+// what Godot reads: written by the game thread under this lock, which Godot only try_locks, so it never waits
+std::mutex publishedMutex;
+std::vector<VcmiTile> publishedTiles;
+std::array<uint32_t, VCMI_TERRAIN_COLOURS * 2> publishedColours{};
+VcmiGrid tilesGrid{};
+std::vector<uint8_t> publishedFog;
+VcmiGrid fogGrid{};
+
+// game thread only: the adventure map and size the tile snapshot was taken for
+std::weak_ptr<AdventureMapInterface> tilesMap;
+int3 tilesSize;
 
 // game thread only: the adventure maps that have an observer. A replay puts the same adventure map back when
 // it ends (GameplayReplayer.cpp:347-349), with its map handler and observer, so it must not get a second one.
 std::vector<std::weak_ptr<AdventureMapInterface>> observedMaps;
+
+VcmiGrid makeGrid(const int3 & size, uint32_t generation)
+{
+	VcmiGrid grid{};
+	grid.generation = generation;
+	grid.width = size.x;
+	grid.height = size.y;
+	grid.levels = size.z;
+	return grid;
+}
+
+// game thread, interfaceMutex held: once per map, or when the map grows a level (CMap::addLevel)
+void publishTiles(const CCallback & cb, const int3 & size)
+{
+	std::vector<VcmiTile> snapshot(static_cast<size_t>(size.x) * size.y * size.z);
+	for(int z = 0; z < size.z; z++)
+		for(int x = 0; x < size.x; x++)
+			for(int y = 0; y < size.y; y++)
+			{
+				const TerrainTile * tile = cb.getTileUnchecked(int3(x, y, z));
+				if(!tile)
+					continue;
+				VcmiTile & out = snapshot[(static_cast<size_t>(z) * size.x + x) * size.y + y];
+				// ids past the colour table (mods) share the last slot, which stays black
+				out.terrain = std::min<int>(tile->terrainType.getNum(), VCMI_TERRAIN_COLOURS - 1);
+				out.terrainView = tile->terView;
+				out.river = tile->riverType.getNum();
+				out.riverDir = tile->riverDir;
+				out.road = tile->roadType.getNum();
+				out.roadDir = tile->roadDir;
+				// shortcut: blocking as at map load; objects that appear or vanish later update it with the object buffer (milestone 3)
+				out.flags = (tile->blocked() ? VCMI_TILE_BLOCKED : 0) | (tile->visitable() ? VCMI_TILE_VISITABLE : 0);
+			}
+	std::array<uint32_t, VCMI_TERRAIN_COLOURS * 2> colours{};
+	for(const auto & terrain : LIBRARY->terrainTypeHandler->getObjects())
+		if(terrain && terrain->getIndex() >= 0 && terrain->getIndex() < VCMI_TERRAIN_COLOURS - 1)
+		{
+			std::memcpy(&colours[2 * terrain->getIndex()], &terrain->minimapUnblocked, 4);
+			std::memcpy(&colours[2 * terrain->getIndex() + 1], &terrain->minimapBlocked, 4);
+		}
+	std::lock_guard lock(publishedMutex);
+	publishedTiles.swap(snapshot);
+	publishedColours = colours;
+	tilesGrid = makeGrid(size, ++tilesGeneration);
+}
+
+// game thread, interfaceMutex held: copies the local team's fog when it differs from the last copy
+void publishFog(const CCallback & cb, const int3 & size)
+{
+	const TeamState * team = cb.getPlayerTeam(GAME->interface()->playerID);
+	if(!team)
+		return;
+	const auto & fog = team->fogOfWarMap;
+	const size_t count = static_cast<size_t>(size.x) * size.y * size.z;
+	if(static_cast<size_t>(std::distance(fog.begin(), fog.end())) != count)
+		return;
+	std::lock_guard lock(publishedMutex);
+	if(publishedFog.size() == count && std::equal(fog.begin(), fog.end(), publishedFog.begin()))
+		return;
+	publishedFog.assign(fog.begin(), fog.end());
+	fogGrid = makeGrid(size, ++fogGeneration);
+}
 
 // on the game GUI thread, with interfaceMutex held
 void tick()
@@ -66,6 +148,23 @@ void tick()
 	inGame = true;
 	const int3 size = GAME->interface() && GAME->interface()->cb ? GAME->interface()->cb->getMapSize() : int3();
 	mapSize = static_cast<uint32_t>(size.x) | static_cast<uint32_t>(size.y) << 12 | static_cast<uint32_t>(size.z) << 24;
+	if(size.x > 0 && size.y > 0 && size.z > 0)
+	{
+		const auto from = std::chrono::steady_clock::now();
+		const CCallback & cb = *GAME->interface()->cb;
+		// a replay shows its own map, and the live one comes back when it ends: a snapshot per adventure map
+		const bool newTiles = tilesMap.lock() != adventureInt || tilesSize != size;
+		if(newTiles)
+		{
+			publishTiles(cb, size);
+			tilesMap = adventureInt;
+			tilesSize = size;
+		}
+		const uint32_t fogBefore = fogGeneration;
+		publishFog(cb, size);
+		if(newTiles || fogGeneration != fogBefore)
+			publishMicros = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - from).count();
+	}
 	std::erase_if(observedMaps, [](const auto & map) { return map.expired(); });
 	for(const auto & map : observedMaps)
 		if(map.lock() == adventureInt)
@@ -127,6 +226,40 @@ void stats(VcmiBridgeStats * out)
 	out->mapHeight = size >> 12 & 0xfff;
 	out->mapLevels = size >> 24;
 	out->inGame = inGame;
+	out->tilesGeneration = tilesGeneration;
+	out->fogGeneration = fogGeneration;
+	out->publishMicros = publishMicros;
+}
+
+void copyTiles(VcmiTile * out, uint32_t capacity, uint32_t * colours, VcmiGrid * grid)
+{
+	*grid = {};
+	std::unique_lock lock(publishedMutex, std::try_to_lock);
+	if(!lock)
+		return;
+	*grid = tilesGrid;
+	if(capacity < publishedTiles.size())
+	{
+		grid->generation = 0; // the size tells the caller how much to allocate
+		return;
+	}
+	std::copy(publishedTiles.begin(), publishedTiles.end(), out);
+	std::copy(publishedColours.begin(), publishedColours.end(), colours);
+}
+
+void copyFog(uint8_t * out, uint32_t capacity, VcmiGrid * grid)
+{
+	*grid = {};
+	std::unique_lock lock(publishedMutex, std::try_to_lock);
+	if(!lock)
+		return;
+	*grid = fogGrid;
+	if(capacity < publishedFog.size())
+	{
+		grid->generation = 0;
+		return;
+	}
+	std::copy(publishedFog.begin(), publishedFog.end(), out);
 }
 
 }
@@ -135,4 +268,6 @@ extern "C" __attribute__((visibility("default"))) const VcmiBridgeApi vcmi_bridg
 	VCMI_BRIDGE_VERSION,
 	start,
 	stats,
+	copyTiles,
+	copyFog,
 };

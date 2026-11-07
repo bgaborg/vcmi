@@ -10,7 +10,7 @@
 #include <stdint.h>
 
 // raise on any change to the structs below; the extension refuses a table with another version
-#define VCMI_BRIDGE_VERSION 1
+#define VCMI_BRIDGE_VERSION 2
 
 typedef struct VcmiBridgeStats
 {
@@ -21,7 +21,29 @@ typedef struct VcmiBridgeStats
 	uint8_t mapLevels;
 	uint8_t inGame;      // 1 while an adventure map exists
 	uint16_t pad;
+	uint32_t tilesGeneration; // raised on each tile snapshot (new map), 0 before the first
+	uint32_t fogGeneration;   // raised each time the local team's fog changes
+	uint32_t publishMicros;   // game thread time of the last tile or fog publish
 } VcmiBridgeStats;
+
+// one tile as the game stores it; terrain, river and road are the game's ids
+typedef struct VcmiTile
+{
+	uint8_t terrain, terrainView, river, riverDir, road, roadDir, flags, pad; // flags: VCMI_TILE_*
+} VcmiTile;
+#define VCMI_TILE_BLOCKED 1
+#define VCMI_TILE_VISITABLE 2
+
+// tiles and fog are indexed as the game stores them: z * width * height + x * height + y (x-major)
+typedef struct VcmiGrid
+{
+	uint32_t generation; // 0: nothing copied (no map, buffer too small, or the game is writing: try next frame)
+	uint16_t width, height;
+	uint8_t levels;
+	uint8_t pad[3];
+} VcmiGrid;
+
+#define VCMI_TERRAIN_COLOURS 256
 
 typedef struct VcmiBridgeApi
 {
@@ -30,4 +52,10 @@ typedef struct VcmiBridgeApi
 	void (*start)(void);
 	// copies the current stats; any thread
 	void (*stats)(VcmiBridgeStats * out);
+	// copies the tile snapshot (width * height * levels records) and, per terrain id, the game's minimap colours
+	// as RGBA bytes: colours[2 * id] unblocked, colours[2 * id + 1] blocked (VCMI_TERRAIN_COLOURS * 2 entries);
+	// never waits for the game, any thread
+	void (*tiles)(VcmiTile * out, uint32_t capacity, uint32_t * colours, VcmiGrid * grid);
+	// copies the local team's fog, 1 byte per tile, nonzero where visible; never waits, any thread
+	void (*fog)(uint8_t * out, uint32_t capacity, VcmiGrid * grid);
 } VcmiBridgeApi;

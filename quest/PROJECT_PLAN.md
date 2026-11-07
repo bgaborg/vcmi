@@ -28,6 +28,7 @@ As of 2026-11-07.
 | War room rebuild | lit castle study, baked light, app GPU 12.1 -> 6.9 ms | [`XR_PERFORMANCE.md`](XR_PERFORMANCE.md) |
 | Data bridge milestone 0 | baseline on the heaviest map | [`DATA_BRIDGE.md`](DATA_BRIDGE.md#milestone-0-results-2026-11-06) |
 | Data bridge milestone 1 | skeleton: the Godot extension finds the game's table; lifecycle survives new game, load, restart, replay, quit | [`DATA_BRIDGE.md`](DATA_BRIDGE.md#milestone-1-results-2026-11-07) |
+| Data bridge milestone 2 | the game's minimap on the war table: tile snapshot and fog, within budget on the heaviest map | [`DATA_BRIDGE.md`](DATA_BRIDGE.md#milestone-2-results-2026-11-07) |
 | xBRZ default `none` | `VcmiBridge` writes `video.upscalingFilter: none` before the game starts when the player has not chosen a filter; no upstream change | [`DATA_BRIDGE.md`](DATA_BRIDGE.md#memory) |
 
 Not closed yet:
@@ -36,16 +37,15 @@ Not closed yet:
 
 ### Next, in order
 
-1. **Data bridge milestone 2, minimap:** tile snapshot and fog into Godot textures on a panel in the war room ([`DATA_BRIDGE.md` section 5](DATA_BRIDGE.md#5-milestones)).
-2. **Milestone 3, objects:** object buffer, atlas with colour mask, MultiMesh, the 3D-mode window, hero step timing.
-3. **Phase 4, tabletop adventure map:** builds on milestones 2 and 3.
-4. **Milestone 4, battle**, then **phase 5, battle diorama**.
+1. **Data bridge milestone 3, objects:** object buffer, atlas with colour mask, MultiMesh on the minimap, the 3D-mode window, hero step timing ([`DATA_BRIDGE.md` section 5](DATA_BRIDGE.md#5-milestones)).
+2. **Phase 4, tabletop adventure map:** builds on milestones 2 and 3.
+3. **Milestone 4, battle**, then **phase 5, battle diorama**.
 
 Each milestone records its numbers in `DATA_BRIDGE.md` and is optimised before the next one starts.
 
 ### Budget left for the 3D view
 
-- **GPU:** the frame at 72 Hz is 13.9 ms. The war room takes 6.9 ms app GPU time (measured 2026-11-07, [`XR_PERFORMANCE.md`](XR_PERFORMANCE.md#1-measured-in-the-war-room-2026-11-07)). About 7 ms is left for the minimap, the table and the bridge consumer (< 0.5 ms). The game screen is a composition layer: it costs the compositor, not app GPU time. More GPU when needed: [`XR_PERFORMANCE.md` section 5](XR_PERFORMANCE.md#5-next-when-the-budget-is-needed).
+- **GPU:** the frame at 72 Hz is 13.9 ms. The war room takes 6.9 ms app GPU time (measured 2026-11-07, [`XR_PERFORMANCE.md`](XR_PERFORMANCE.md#1-measured-in-the-war-room-2026-11-07)). About 7 ms is left for the table and the bridge consumer (< 0.5 ms); the minimap takes about 0.4 ms of it (looking at the table the room takes 8.8 ms, 9.2 ms with the minimap, [`DATA_BRIDGE.md`](DATA_BRIDGE.md#milestone-2-results-2026-11-07)). The game screen is a composition layer: it costs the compositor, not app GPU time. More GPU when needed: [`XR_PERFORMANCE.md` section 5](XR_PERFORMANCE.md#5-next-when-the-budget-is-needed).
 - **CPU and memory, the 2D game** (milestone 0, heaviest map, whole map on screen): the game thread uses 92-96 % of one core, Godot 11 %. The 2D map drawing is the main cost, which is why the tabletop hides it ([`DATA_BRIDGE.md`](DATA_BRIDGE.md#animation-timing)).
 
 ## 1. Architecture and repository layout

@@ -9,6 +9,8 @@ const OUT := "res://../out/room-preview" ## quest/out/room-preview
 ## quest/out is not in git, so without it the screen is flat dark grey
 const SHOT := "res://../out/perf-20261106-194305-auto/debug-zoom2.jpg"
 const SHOT_RECT := Rect2i(125, 345, 1160, 535)
+## the minimap on the war table: the terrain image the headset saved with the test command `minimap` (main.gd), when present
+const MINIMAP := "res://../out/minimap-debug/minimap-%s.png"
 const SIZE := Vector2i(1920, 1080)
 const HEAD := Vector3(0.0, 1.6, 0.0)
 const SEATED := Vector3(0.0, 1.2, 0.0)
@@ -50,6 +52,11 @@ func _ready() -> void:
 	world.environment = room.environment
 	add_child(world)
 	_check_clear(room)
+	if FileAccess.file_exists(MINIMAP % "terrain"):
+		var terrain := Image.load_from_file(ProjectSettings.globalize_path(MINIMAP % "terrain"))
+		var fog := Image.create(terrain.get_height(), terrain.get_width(), false, Image.FORMAT_L8)
+		fog.fill(Color8(1, 1, 1)) # all visible, to check the terrain
+		room.set_minimap(terrain, fog, true)
 
 	var eye := _viewport(true)
 	var eye_camera := _camera(eye, 0xFFFFF & ~SCREEN_LAYER)

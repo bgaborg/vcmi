@@ -149,6 +149,18 @@ var environment := _make_environment() ## main.gd shows the room with this envir
 var _flames := [] ## [base position, width, height, brightness]
 var _table_light := Vector3.ZERO ## where the candles on the war table light the map from
 var _materials := [] ## the tiled surface materials, for set_feature
+var _table := Transform3D() ## the war table, set in _build_props
+var _minimap: MeshInstance3D ## the game's minimap on the war table, from the data bridge (main.gd)
+const MINIMAP_AREA := Vector2(0.8, 0.5) ## metres on the table inside the corner figures
+const MINIMAP_SHADER := "shader_type spatial;
+render_mode unshaded, shadows_disabled;
+uniform sampler2D terrain : source_color, filter_nearest_mipmap;
+uniform sampler2D fog : filter_linear;
+void fragment() {
+	// the fog image is x-major (VcmiData.fog_image), 1 of 255 where visible
+	ALBEDO = texture(terrain, UV).rgb * min(texture(fog, UV.yx).r * 255.0, 1.0) * 0.85;
+}
+"
 
 
 ## Test command `gfx <feature> <0|1>` (main.gd): switches one costly part off or on, to measure its GPU time on the headset
@@ -209,6 +221,36 @@ func _ready() -> void:
 	if ResourceLoader.exists(LIGHTMAP):
 		lightmap.light_data = load(LIGHTMAP)
 	_add(lightmap, "Lightmap") # last: it looks up the meshes when it enters the tree
+	_minimap = MeshInstance3D.new()
+	_minimap.mesh = PlaneMesh.new() # faces up, image top towards the chair, away from the player
+	(_minimap.mesh as PlaneMesh).size = MINIMAP_AREA
+	# the code before the shader goes into the material: set later, the material keeps drawing flat grey (Godot 4.7.2)
+	var shader := Shader.new()
+	shader.code = MINIMAP_SHADER
+	var material := ShaderMaterial.new()
+	material.shader = shader
+	_minimap.material_override = material
+	_minimap.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
+	_minimap.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_minimap.transform = _table * Transform3D(Basis(), Vector3(0.0, TABLE_TOP + 0.015, 0.0))
+	_minimap.visible = false
+	_add(_minimap, "Minimap")
+
+
+## The minimap from main.gd: new images when the game published them (else null), hidden outside a game
+func set_minimap(terrain: Image, fog: Image, in_game: bool) -> void:
+	var material: ShaderMaterial = _minimap.material_override
+	if terrain != null:
+		material.set_shader_parameter("terrain", ImageTexture.create_from_image(terrain))
+		var size := Vector2(terrain.get_size())
+		(_minimap.mesh as PlaneMesh).size = size * minf(MINIMAP_AREA.x / size.x, MINIMAP_AREA.y / size.y)
+	if fog != null:
+		var texture: ImageTexture = material.get_shader_parameter("fog")
+		if texture != null and texture.get_size() == Vector2(fog.get_size()):
+			texture.update(fog)
+		else:
+			material.set_shader_parameter("fog", ImageTexture.create_from_image(fog))
+	_minimap.visible = in_game and material.get_shader_parameter("terrain") != null
 
 
 func _make_environment() -> Environment:
@@ -462,6 +504,7 @@ func _banner(cloth: SurfaceTool, top: Vector3, along: Vector3, normal: Vector3, 
 func _build_props() -> void:
 	# long side to the user, the nearest corner at 56 degrees: outside every screen size main.gd allows (preview.gd checks)
 	var table := Transform3D(Basis(Vector3.UP, -PI / 2.0), Vector3(2.6, 0.0, -0.3))
+	_table = table
 	_prop("WarTable", "meshy/war_table.gltf", table.origin, table.basis)
 	# castles, towers and flags of four players on the corners of the campaign map (lit by the probes, too small to bake)
 	for piece in [["building_castle_red", Vector3(-0.66, 0.0, 0.36), 0.05, 0.0], ["building_castle_blue", Vector3(0.68, 0.0, -0.34), 0.05, 2.6],

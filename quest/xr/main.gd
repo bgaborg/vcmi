@@ -240,6 +240,10 @@ func _process(delta: float) -> void:
 			game_started = true
 			bridge.startGame(layer.get_android_surface(), SURFACE_SIZE.x, SURFACE_SIZE.y)
 
+	if vcmi_data != null:
+		var changed: int = vcmi_data.update()
+		room.set_minimap(vcmi_data.terrain_image() if changed & 1 else null, vcmi_data.fog_image() if changed & 2 else null, changed & 4 != 0)
+
 	for ray in rays:
 		ray.visible = false
 	_update_hotkey_panel()
@@ -530,7 +534,7 @@ func _pulse(hand: int, amplitude: float) -> void:
 	print("VCMI XR: haptic pulse ", hand, " ", amplitude)
 
 
-## head yaw pitch height | head_off | recenter | aim yaw pitch | aim_off | click | rclick | pad keycode | stick x y | lstick x y | screen distance width | env index | lmenu seconds | wrist 1/0 | gfx feature on | probe | bridge;
+## head yaw pitch height | head_off | recenter | aim yaw pitch | aim_off | click | rclick | pad keycode | stick x y | lstick x y | screen distance width | env index | lmenu seconds | wrist 1/0 | gfx feature on | probe | bridge | minimap;
 ## angles in degrees, height in metres, stick values -1..1 with y up, as the right (stick) and left (lstick) thumbstick
 func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 	match command:
@@ -579,6 +583,13 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 				(XRServer.find_interface("OpenXR") as OpenXRInterface).foveation_dynamic = b != 0.0
 			else:
 				room.set_feature(int(a), b != 0.0)
+		"minimap": # saves the bridge images where adb can pull them
+			if vcmi_data == null:
+				return
+			for image in [["terrain", vcmi_data.terrain_image()], ["fog", vcmi_data.fog_image()]]:
+				if image[1] != null:
+					var path := "/sdcard/Android/data/is.xyz.vcmi.quest/files/minimap-%s.png" % image[0]
+					print("VCMI XR: minimap ", image[0], " ", image[1].get_size(), " saved ", image[1].save_png(path))
 		"probe", "bridge":
 			pass
 		_:
