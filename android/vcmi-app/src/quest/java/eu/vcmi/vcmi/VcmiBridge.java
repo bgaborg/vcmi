@@ -35,8 +35,10 @@ import org.json.JSONObject;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 
 import java.util.Collections;
 import java.util.Set;
@@ -51,6 +53,7 @@ public class VcmiBridge extends GodotPlugin
 {
     // android.util.Log: eu.vcmi.vcmi.util.Log prints to logcat in debug builds only, and the Quest checks run on release builds
     private static final String TAG = "VcmiBridge";
+    private static final String EXTENSION_CONFIG = "vcmi_xr.gdextension";
     private static final int DISPLAY_DPI = 320;
     private static final String TEST_ACTION = "is.xyz.vcmi.quest.TEST";
     // held by adb shell and the system only, so other apps cannot send test commands
@@ -76,6 +79,29 @@ public class VcmiBridge extends GodotPlugin
     public String getPluginName()
     {
         return "VcmiBridge";
+    }
+
+    /**
+     * The extension that reads game data from the bridge in quest/bridge (quest/DATA_BRIDGE.md). Its configuration is an
+     * APK asset copied to a file, because Godot reads it with plain file access and res:// is the exported pack; a
+     * .gdextension in the Godot project would make the Linux editor that exports the pack fail to load it and abort.
+     * The library is not at that path, so Godot loads it by file name from the APK's native libraries.
+     */
+    @NonNull
+    @Override
+    public Set<String> getPluginGDExtensionLibrariesPaths()
+    {
+        final File config = new File(getActivity().getFilesDir(), EXTENSION_CONFIG);
+        try (InputStream in = getActivity().getAssets().open(EXTENSION_CONFIG); OutputStream out = new FileOutputStream(config))
+        {
+            FileUtil.copyStream(in, out);
+        }
+        catch (final IOException e)
+        {
+            Log.e(TAG, "no game data: cannot copy " + EXTENSION_CONFIG, e);
+            return Collections.emptySet();
+        }
+        return Collections.singleton(config.getAbsolutePath());
     }
 
     @NonNull

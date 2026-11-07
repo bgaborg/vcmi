@@ -28,6 +28,10 @@ if(ANDROID)
 	set_target_properties(vcmiclient PROPERTIES
 		OUTPUT_NAME "vcmiclient_${ANDROID_ABI}" # required by Qt
 	)
+	# Meta Quest fork: game data for the Godot XR host, quest/DATA_BRIDGE.md
+	if(EXISTS "${CMAKE_SOURCE_DIR}/quest/bridge/Bridge.cpp")
+		target_sources(vcmiclient PRIVATE "${CMAKE_SOURCE_DIR}/quest/bridge/Bridge.cpp")
+	endif()
 	# ffmpeg requires -Bsymbolic on 64-bit Android for assembler functions to compile
 	if(ANDROID_ABI STREQUAL "arm64-v8a" OR ANDROID_ABI STREQUAL "x86_64")
 		target_link_options(vcmiclient PRIVATE -Wl,-Bsymbolic)

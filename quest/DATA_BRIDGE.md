@@ -186,6 +186,23 @@ Measured with `quest/tools/xr-perf.sh` on the heaviest map, [HotA] Might and Mag
 - **Memory grows with what the 2D map has drawn:** sprites stay in the game's caches, upscaled ones (xBRZ) in graphics memory. With `none` the heaviest case stays under half of the 8 GB.
 - **Objects and sprites:** see section 1, Sizes. The object buffer and the atlas design are sized for 64 622 objects and 1 852 animations.
 
+### Milestone 1 results (2026-11-07)
+
+`quest/tools/xr-lifecycle.sh` on the headset (first scenario, 72 x 72 x 2), data in `quest/out/lifecycle-20261107-082943`:
+
+| Step | Observers | In game |
+|---|---|---|
+| New game | 1 | yes |
+| Quick save, quick load | 2 | yes |
+| Restart | 3 | yes |
+| End turn, own turn again | 3 | yes |
+| Replay of the enemy turn running | 4 | yes |
+| Replay finished, live game restored | 4 | yes |
+| Quit to the main menu | 4 | no |
+
+- The extension finds the table with `dlopen(RTLD_NOLOAD)` about 1 s after the host starts and logs `VCMI bridge: connected, version 1`; the first risk below did not happen.
+- One observer per new map, none for the restored live game after a replay; ticks arrive at the planned 10 per second through the steps. The script checks the observer and in-game columns and fails on any difference.
+
 ### How to measure
 
 - `quest.sh sample <rows>`: rows about 1.7 s apart with the compositor's VrApi line (Godot FPS, app GPU ms), the CPU of the game thread (SDLThread), of Godot (VkThread) and of the process, and `dumpsys meminfo` (PSS, native heap, graphics), into a CSV.
@@ -196,7 +213,7 @@ Measured with `quest/tools/xr-perf.sh` on the heaviest map, [HotA] Might and Mag
 ## 5. Milestones
 
 0. **Baseline** (no code), **done 2026-11-06:** frame time, CPU and PSS on the heaviest map with xBRZ auto and `none`; object counts (section 4, Milestone 0 results).
-1. **Skeleton:** `quest/bridge` with the table and version; the extension finds it after the game starts and logs the version; the lifecycle task survives new game, load, restart, replay and quit to menu; test command `bridge` in `main.gd`.
+1. **Skeleton, done 2026-11-07:** `quest/bridge` with the table and version; the extension finds it after the game starts and logs the version; the lifecycle task survives new game, load, restart, replay and quit to menu; test command `bridge` in `main.gd`.
 2. **Minimap:** tile snapshot and fog buffer into Godot textures on a panel in the war room; fog follows hero moves and a View Air spell. Check the budgets.
 3. **Objects:** object buffer, string table, one atlas with the colour mask, a MultiMesh on the minimap panel; the 3D-mode window; hero step timing through `waitForOngoingAnimations`.
 4. **Battle:** receiver, battle buffer and the blocking-confirmation timing.

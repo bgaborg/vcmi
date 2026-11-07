@@ -60,8 +60,9 @@ if [ ! -f conan-generated/conan_toolchain.cmake ]; then
 		--conf="tools.cmake.cmaketoolchain:generator=Ninja"
 fi
 
-# Godot XR host
+# Godot XR host and its extension
 "$REPO/quest/tools/export-xr.sh"
+"$REPO/quest/tools/make-extension.sh"
 
 # Build
 mkdir -p ~/.gradle && echo "android.bundle.enableUncompressedNativeLibs=true" > ~/.gradle/gradle.properties

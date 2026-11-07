@@ -1,0 +1,3 @@
+# libvcmi_xr.so, built by quest/tools/make-extension.sh
+*
+!.gitignore

@@ -37,6 +37,7 @@ const PAD_RIGHT_X := 2 ## the right thumbstick is the gamepad right stick: the g
 const PAD_RIGHT_Y := 3
 
 var bridge: Object
+var vcmi_data: RefCounted ## game data from the bridge in quest/bridge (quest/DATA_BRIDGE.md); null without the extension
 var origin: XROrigin3D
 var layer: OpenXRCompositionLayerCylinder
 var aims: Array[XRController3D] = []
@@ -119,6 +120,17 @@ void fragment() {
 	layer.use_android_surface = true
 	layer.android_surface_size = SURFACE_SIZE
 	bridge.connect("test_command", _on_test_command)
+	# the extension (quest/xr/extension) finds the game's bridge once the game library has loaded, after Godot
+	if ClassDB.class_exists("VcmiData"):
+		vcmi_data = ClassDB.instantiate("VcmiData")
+		var bridge_timer := Timer.new()
+		bridge_timer.timeout.connect(func():
+			if vcmi_data.connect_bridge():
+				bridge_timer.queue_free())
+		add_child(bridge_timer)
+		bridge_timer.start(1.0)
+	else:
+		push_error("VCMI XR: the VcmiData extension is missing, no game data")
 	var settings := ConfigFile.new()
 	if settings.load(SETTINGS_PATH) == OK:
 		_size_screen(settings.get_value("screen", "distance", screen_distance), settings.get_value("screen", "width", screen_width))
@@ -555,7 +567,7 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 				_size_screen(a, b)
 			else:
 				_set_environment(ENVIRONMENTS[clampi(int(a), 0, ENVIRONMENTS.size() - 1)])
-		"probe":
+		"probe", "bridge":
 			pass
 		_:
 			print("VCMI XR test: unknown command ", command)
@@ -566,4 +578,5 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 	var hit := _pointer_hit(active_hand)
 	print("VCMI XR test: ", command, " -> screen ", screen_world.origin, " heading ", rad_to_deg(screen_world.basis.get_euler().y), " distance ", screen_distance, " width ", screen_width, " environment ", environment_name,
 			", pointer ", Vector2i(hit * Vector2(SURFACE_SIZE)) if hit != NO_HIT else "off screen",
-			", hotkey ", HOTKEYS[hotkey_hover][0] if hotkey_hover >= 0 else "none", ", controllers tracked ", aims.map(func(aim): return aim.get_has_tracking_data()))
+			", hotkey ", HOTKEYS[hotkey_hover][0] if hotkey_hover >= 0 else "none", ", controllers tracked ", aims.map(func(aim): return aim.get_has_tracking_data()),
+			", bridge ", vcmi_data.stats() if vcmi_data else "no extension")

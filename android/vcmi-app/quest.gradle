@@ -10,6 +10,8 @@ if (project.findProperty('vcmiQuest') == 'true') {
 		sources.java.srcDir 'src/quest/java'
 		// vcmi-xr.pck, exported by quest/tools/export-xr.sh
 		sources.assets.srcDir 'src/quest/assets'
+		// libvcmi_xr.so, the Godot extension built by quest/tools/make-extension.sh
+		sources.jniLibs.srcDir 'src/quest/jniLibs'
 	}
 
 	// the Godot and OpenXR vendor AARs require API 24; every Quest runs a newer Android

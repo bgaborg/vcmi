@@ -91,6 +91,9 @@ jobs:
     - name: Export Godot XR host
       run: quest/tools/export-xr.sh
 
+    - name: Godot extension
+      run: quest/tools/make-extension.sh
+
     - name: Configure
       run: |
         cmake --preset "$PRESET" \

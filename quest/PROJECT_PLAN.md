@@ -63,6 +63,7 @@ The goal: `git rebase upstream/develop` has no conflicts in normal weeks.
 |---|---|---|
 | `android/vcmi-app/build.gradle` | `apply from: 'quest.gradle'` (2 lines) | Gradle reads only this file |
 | `ActivityLauncher.java` | Play starts the immersive activity if the flavor declares one (~15 lines) | the launcher starts `VcmiSDLActivity` by class |
+| `clientapp/CMakeLists.txt` | adds `quest/bridge/Bridge.cpp` to `vcmiclient` on Android when it exists (4 lines) | the data bridge must be compiled into the game library to reach the client and its lock ([`DATA_BRIDGE.md`](DATA_BRIDGE.md)) |
 
 To remove (phase 2 GLES spike, superseded): `clientxr/`, `ENABLE_OPENXR` in `CMakeLists.txt`, the XR code and the RGB888 / GLES 3.0 changes in `clientsdl3/render/ScreenHandler.cpp`, `VCMI_OPENXR`.
 

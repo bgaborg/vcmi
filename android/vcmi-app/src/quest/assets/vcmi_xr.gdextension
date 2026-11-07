@@ -1,0 +1,13 @@
+; Godot extension of the Quest build (quest/xr/extension): game data from the bridge in quest/bridge.
+; Copied to the app's files by VcmiBridge.getPluginGDExtensionLibrariesPaths, which lists it. The library is not next to
+; it but in the APK's native libraries (android/vcmi-app/src/quest/jniLibs, built by quest/tools/make-extension.sh), so
+; Godot loads it by file name.
+
+[configuration]
+
+entry_symbol = "vcmi_xr_init"
+compatibility_minimum = "4.5"
+
+[libraries]
+
+android.arm64 = "libvcmi_xr.so"
