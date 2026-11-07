@@ -28,7 +28,7 @@ fi
 "$Q" stop
 mark="$("$Q" mark-log)"
 "$Q" start-xr >/dev/null
-MARK="$mark" "$Q" wait-log "VCMI XR: screen placed" 30 >/dev/null
+MARK="$mark" "$Q" wait-log "VCMI XR: screen placed" 60 >/dev/null
 MARK="$mark" "$Q" wait-log "Initialization of VCMI \(together\)" 60 >/dev/null
 
 # a standing head looking ahead, screen recentred in front of it

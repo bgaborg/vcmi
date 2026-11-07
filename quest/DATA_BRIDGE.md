@@ -1,6 +1,6 @@
 # Data bridge: game data from VCMI to Godot
 
-Status: plan, 2026-11-06, revised after four rounds of review (code-checked peer reviews and ponytail reviews). Decides open decision 1 of [`PROJECT_PLAN.md`](PROJECT_PLAN.md#8-open-decisions) before phase 4.
+Status: option C chosen 2026-11-06; milestones 0 and 1 done, milestone 2 (minimap) is next ([section 5](#5-milestones), [`PROJECT_PLAN.md`](PROJECT_PLAN.md#0-status-and-next-steps)).
 
 Phases 4 (tabletop adventure map) and 5 (battle diorama) draw the game in 3D in Godot. Godot needs game data (tiles, objects, fog, heroes, battle stacks), not pixels. This plan picks how the data gets from the VCMI client to Godot, with the fewest changes to upstream VCMI and the lowest cost in CPU and memory on Quest 3.
 
@@ -20,7 +20,7 @@ All paths are in this repository; line numbers are from 2026-11-06.
 - Net packs arrive on `CServerHandler::threadNetwork`; `onPacketReceived` takes `ENGINE->interfaceMutex` (`client/CServerHandler.cpp:983-988`) and applies the pack under `CGameState::mutex` (`client/Client.cpp:335-345`).
 - The game GUI thread holds `interfaceMutex` for the logic and drawing part of each frame and releases it to present and wait (`client/GameEngine.cpp:131-140`).
 - Callbacks run with `interfaceMutex` held, but some release it inside a pack (`client/CPlayerInterface.cpp:1493,1534`).
-- Godot renders on its own thread at 72-90 Hz. It must never wait for `interfaceMutex`.
+- Godot renders on its own thread at 72 Hz (runtime default; 90 Hz possible, not budgeted). It must never wait for `interfaceMutex`.
 
 **Hooks that need no upstream change.**
 - `IMapObjectObserver` (`client/mapView/IMapRendererObserver.h:17-50`): object fade in / out, add / remove, `onHeroMoved`, teleport, embark / disembark; `hasOngoingAnimations` / `waitForOngoingAnimations` (`:23-24`), which the game calls after each hero step and fade (`client/mapView/mapHandler.cpp:30-43`, `client/HeroMovementController.cpp:195`, `client/CPlayerInterface.cpp:1553`); `endNetwork` (`:25`), called before the map is destroyed (`client/Client.cpp:132`). The constructor registers with `GAME->map()`, the destructor unregisters through it (`mapHandler.cpp:177-185`).
@@ -47,7 +47,7 @@ All paths are in this repository; line numbers are from 2026-11-06.
 | | A: JNI hook | B: GDExtension linked to VCMI | C: in-client bridge + thin GDExtension (recommended) |
 |---|---|---|---|
 | What | client code serialises data and calls Java `VcmiBridge`, which emits signals with `PackedByteArray` | a godot-cpp `.so` links VCMI and reads game state | quest-only sources compiled into `libvcmiclient` fill plain buffers under the game's lock; a small godot-cpp extension reads them by pointer through one exported `extern "C"` table |
-| Upstream change | client sources, CMake, JNI glue | VCMI must export client symbols and the lock: many files | 2-3 lines in `clientapp/CMakeLists.txt` |
+| Upstream change | client sources, CMake, JNI glue | VCMI must export client symbols and the lock: many files | 4 lines in `clientapp/CMakeLists.txt` |
 | Copies per update | C++ -> `byte[]` -> `PackedByteArray`, plus JNI calls | 0 | 1 (buffer -> Godot array or texture) |
 | Godot waits for the game lock | no | yes, or unsafe reads | no (lock-free buffer exchange) |
 | Decoding | in GDScript: slow for 127k tiles | native | native, in the extension |
@@ -65,11 +65,12 @@ quest/bridge/                  quest-only C++, compiled into libvcmiclient_<abi>
   VcmiBridgeApi.h              the C ABI: plain structs, the function table, VCMI_BRIDGE_VERSION
   Bridge.cpp                   lifecycle task, observer, buffers, battle receiver
 quest/xr/extension/            godot-cpp GDExtension libvcmi_xr.so
+  CMakeLists.txt               built by quest/tools/make-extension.sh into src/quest/jniLibs
   VcmiData.cpp                 Godot class: finds the table, turns buffers into Image / MultiMesh / arrays
 android/vcmi-app/src/quest/assets/vcmi_xr.gdextension   android_aar_plugin style, path returned by VcmiBridge
 ```
 
-Upstream change, `clientapp/CMakeLists.txt`: `if(ANDROID AND EXISTS ${CMAKE_SOURCE_DIR}/quest/bridge)` add `quest/bridge/Bridge.cpp` to `target_sources(vcmiclient PRIVATE ...)`. Client headers come through `vcmiclientcommon`'s include directories. The table is `extern "C" __attribute__((visibility("default")))`: `--gc-sections` keeps exported symbols of a shared library, and `-Bsymbolic` does not affect `dlsym`. Listed in `PROJECT_PLAN.md` "Changes to upstream files".
+Upstream change, `clientapp/CMakeLists.txt` (4 lines, inside its `if(ANDROID)`): when `quest/bridge/Bridge.cpp` exists, add it to `target_sources(vcmiclient PRIVATE ...)` ([`PROJECT_PLAN.md`](PROJECT_PLAN.md#changes-to-upstream-files-keep-this-list-short)). Client headers come through `vcmiclientcommon`'s include directories. The table is `extern "C" __attribute__((visibility("default")))`: `--gc-sections` keeps exported symbols of a shared library, and `-Bsymbolic` does not affect `dlsym`.
 
 ### Lifecycle
 
@@ -142,7 +143,7 @@ The 2D animations must not slow the game down while the tabletop is shown, and t
 
 | Item | Budget |
 |---|---|
-| Godot frame at 72 Hz | 13.9 ms; bridge consumer < 0.5 ms when fresh, < 0.05 ms otherwise. The war room takes 6.9 ms app GPU time of it (63 % GPU; quest/XR_PERFORMANCE.md) |
+| Godot frame at 72 Hz | 13.9 ms, of which ~7 ms is left for the 3D view ([`PROJECT_PLAN.md`](PROJECT_PLAN.md#budget-left-for-the-3d-view)); bridge consumer < 0.5 ms when fresh, < 0.05 ms otherwise |
 | Game side per publish | < 0.3 ms (copy of objects + fog compare) |
 | Lifecycle task | < 0.05 ms per 100 ms when nothing changed |
 | Map load snapshot | < 30 ms once |
@@ -151,16 +152,13 @@ The 2D animations must not slow the game down while the tabletop is shown, and t
 
 ### Optimisations
 
-- Read at event time and in one 100 ms task, under the lock the game already holds; never from Godot's threads.
-- No locks on the Godot side; one atomic load per buffer per frame.
-- No per-object JNI calls, Dictionaries or GDScript loops over records: native decoding in the extension.
-- Full state instead of deltas: simpler and, at these sizes, a copy of microseconds.
-- Batching: MultiMesh per atlas page; animated frames in the shader.
+The design above already reads only under the lock the game holds, keeps Godot lock-free, decodes natively (no per-object JNI calls, Dictionaries or GDScript loops), copies full state instead of deltas and batches by atlas page. One more:
+
 - **No 2D map drawing while the tabletop is shown:** the 3D-mode window is the top window, so normal frames draw only that empty window, not the adventure map. What remains is the game loop at 60 Hz: logic, an upload of the unchanged screen texture and a present, because `wantsFrameRendered` asks for a frame whenever the adventure map is not on top. Zero frames needs a small generic upstream hook (a window that reports it has nothing to draw, so `wantsFrameRendered` can skip); proposed only if milestone 2 shows those frames cost something measurable. Milestone 0 shows why the 2D map must not draw: it is the most expensive thing on the headset (below).
 
 ### Memory
 
-- xBRZ: on the heaviest map, auto (xbrz2) grew to 6.75 GB PSS and the low-memory killer ended the game; `none` peaked at 3.5 GB. Decision: the Quest build defaults to `none` (open: how, with the fewest upstream changes; a player can still pick xBRZ).
+- xBRZ: on the heaviest map, auto (xbrz2) grew to 6.75 GB PSS and the low-memory killer ended the game; `none` peaked at 3.5 GB. Decision: the Quest build defaults to `none`; a player can still pick xBRZ (how: [open decision 1](PROJECT_PLAN.md#8-open-decisions)).
 - Sprite atlases: one per animation for all colours; requested on first use. Freeing unused atlases comes only if milestone 3 shows the texture budget is exceeded.
 - The 2D view's caches stay as they are (releasing them needs an upstream change).
 - ETC2 / ASTC compression of atlases only if the texture budget is exceeded.
@@ -178,13 +176,12 @@ Measured with `quest/tools/xr-perf.sh` on the heaviest map, [HotA] Might and Mag
 | Whole map on screen | auto / none | 96 / 92 | 11 / 11 | 120 / 107 | 72 / 9.0 | 4.63 / 2.46 GB | 2.09 / 0.81 GB |
 | AI turn, whole map on screen | auto / none | 95 / 95 | 12 / 11 | 116 / 112 | 72 / 9.2 | 6.75 (killed) / 3.50 GB | 3.04 / 1.31 GB |
 
-- **Order:** in the auto run, scrolling came after a first zoom-out, so its memory includes what that drew; the whole-map and AI-turn steps of the auto run were driven by hand after the scripted end turn failed (fixed in the script since).
+- **Order:** in the auto run, scrolling came after a first zoom-out, so its memory includes what that drew.
 - **Map load:** 5.8 s (auto) and 5.9 s (none) from Begin to the first turn.
 - **AI turn** (7 AI players, every move on screen): 921 s with auto, then the low-memory killer ended the game at the new day; 692 s with `none`, game survived. Not measured yet: the same turn at normal zoom without the cheat, the case a player sees.
-- **Godot is not the problem:** 71-73 FPS and 8-9 ms app GPU time of the 13.9 ms frame in every step, at about 11 % of one core.
+- **Godot is not the problem:** 71-73 FPS and 8-9 ms app GPU time of the 13.9 ms frame in every step, at about 11 % of one core. These GPU times are with the earlier war room; the rebuilt one takes 6.9 ms ([`XR_PERFORMANCE.md`](XR_PERFORMANCE.md)).
 - **The 2D map is:** the game thread draws in software and saturates one core when many objects are on screen (88-97 %); the AI turn is then paced by it. The tabletop's 3D-mode window, which stops the 2D map from drawing, is the main optimisation, not an extra.
 - **Memory grows with what the 2D map has drawn:** sprites stay in the game's caches, upscaled ones (xBRZ) in graphics memory. With `none` the heaviest case stays under half of the 8 GB.
-- **Objects and sprites:** see section 1, Sizes. The object buffer and the atlas design are sized for 64 622 objects and 1 852 animations.
 
 ### Milestone 1 results (2026-11-07)
 
@@ -200,21 +197,20 @@ Measured with `quest/tools/xr-perf.sh` on the heaviest map, [HotA] Might and Mag
 | Replay finished, live game restored | 4 | yes |
 | Quit to the main menu | 4 | no |
 
-- The extension finds the table with `dlopen(RTLD_NOLOAD)` about 1 s after the host starts and logs `VCMI bridge: connected, version 1`; the first risk below did not happen.
+- The extension finds the table with `dlopen(RTLD_NOLOAD)` about 1 s after the host starts and logs `VCMI bridge: connected, version 1`.
 - One observer per new map, none for the restored live game after a replay; ticks arrive at the planned 10 per second through the steps. The script checks the observer and in-game columns and fails on any difference.
 
 ### How to measure
 
-- `quest.sh sample <rows>`: rows about 1.7 s apart with the compositor's VrApi line (Godot FPS, app GPU ms), the CPU of the game thread (SDLThread), of Godot (VkThread) and of the process, and `dumpsys meminfo` (PSS, native heap, graphics), into a CSV.
-- `quest/tools/xr-perf.sh <filter> [row] [rows] [player]`: the whole milestone 0 run on a G-size map in at most 15 minutes. A Perfetto trace (`adb shell perfetto`) only when a number needs explaining.
-- Bridge timers: producer and consumer timings, printed by a test command `bridge_stats`.
+- `quest.sh sample` and `xr-perf.sh` ([`PHASE2.md`](PHASE2.md#working-on-the-headset)). A Perfetto trace (`adb shell perfetto`) only when a number needs explaining.
+- Bridge timers: producer and consumer timings, to be added to the stats the test command `bridge` prints (today: ticks, observers, in game, map).
 - Each milestone records its numbers in this file. A milestone over budget is optimised before the next one starts.
 
 ## 5. Milestones
 
 0. **Baseline** (no code), **done 2026-11-06:** frame time, CPU and PSS on the heaviest map with xBRZ auto and `none`; object counts (section 4, Milestone 0 results).
 1. **Skeleton, done 2026-11-07:** `quest/bridge` with the table and version; the extension finds it after the game starts and logs the version; the lifecycle task survives new game, load, restart, replay and quit to menu; test command `bridge` in `main.gd`.
-2. **Minimap:** tile snapshot and fog buffer into Godot textures on a panel in the war room; fog follows hero moves and a View Air spell. Check the budgets.
+2. **Minimap, next:** tile snapshot and fog buffer into Godot textures on a panel in the war room; fog follows hero moves and a View Air spell. Check the budgets.
 3. **Objects:** object buffer, string table, one atlas with the colour mask, a MultiMesh on the minimap panel; the 3D-mode window; hero step timing through `waitForOngoingAnimations`.
 4. **Battle:** receiver, battle buffer and the blocking-confirmation timing.
 
@@ -224,9 +220,9 @@ Phase 4 proper builds on 2 and 3; phase 5 on 4.
 
 | Risk | Check | Fallback |
 |---|---|---|
-| `dlopen(RTLD_NOLOAD)` / `dlsym` does not find the table | milestone 1 | the game's `JNI_OnLoad` stores the table address; `VcmiBridge` hands it to Godot as an integer |
-| GDExtension classes unknown to the headless editor export (no desktop build) | milestone 1 | GDScript uses `ClassDB.instantiate` and untyped calls, as `main.gd` does for `OpenXRFbRenderModel` |
-| godot-cpp with NDK r29 and the shared libc++ | milestone 1 | build it in `make-apk.sh` and CI with VCMI's toolchain file |
+| `dlopen(RTLD_NOLOAD)` / `dlsym` does not find the table | passed in milestone 1 | the game's `JNI_OnLoad` stores the table address; `VcmiBridge` hands it to Godot as an integer |
+| GDExtension classes unknown to the headless editor export (no desktop build) | passed in milestone 1 | `main.gd` uses `ClassDB.instantiate("VcmiData")` and untyped calls |
+| godot-cpp with NDK r29 and the shared libc++ | passed in milestone 1 | `make-extension.sh` builds it with the NDK of the game's conan toolchain |
 | Drawing frames into a surface is slow for big animations | milestone 3 timers | request frames lazily, one group at a time |
 | The wait in `waitForOngoingAnimations` deadlocks with Godot paused (Meta menu) | milestone 3 | the timeout; skip the wait while the host is paused (the bridge already knows, `onMainPause`) |
 | A crash leaves the battle speed at 18 | milestone 4 | original in `user://`, restored on the next bridge start |

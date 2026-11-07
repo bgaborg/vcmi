@@ -74,7 +74,9 @@ Usage: quest.sh <command> [args]
   mark-log, mark-game     print the current position; MARK=<it> wait-log|wait-game then also matches lines after it,
                           for events that can happen before the wait starts
   test <cmd> [a] [b] [c]  send a test command to the Godot XR host (quest/xr/main.gd): head yaw pitch height,
-                          head_off, recenter, aim yaw pitch, aim_off, click, rclick, pad keycode, stick x y, probe; the result is in logcat as "VCMI XR test:"
+                          head_off, recenter, aim yaw pitch, aim_off, click, rclick, pad keycode, stick x y,
+                          lstick x y, screen distance width, env index, lmenu seconds, wrist 1/0, gfx feature on, probe,
+                          bridge (list: quest/PHASE2.md); the result is in logcat as "VCMI XR test:"
 
 Package: $PKG (override with VCMI_QUEST_PKG)
 EOF

@@ -26,7 +26,6 @@ Single toggles from the first room (each against 12.1 ms; ±0.3 ms noise between
 
 - **Glow costs far more than its own pass:** it moves tonemapping out of the main render pass, which turns foveation off. Foveation set at runtime changed nothing while glow was on; with glow off, level 3 saves 2.2 ms.
 - **Dynamic foveation does not help here:** the runtime keeps level 0 until the GPU is nearly full (`Fov=0` at 78 %). The project uses fixed level 3.
-- **Startup:** the 89 MB pack must be stored uncompressed in the APK (`quest.gradle` `noCompress 'pck'`). Deflated, every seek re-inflates from the start of the pack: the room took 27 s to load instead of 1.6 s.
 - **What is left:** about 3 ms over no room, most likely the shading of the walls and floor (albedo, normal, ORM, lightmap) in the unfoveated centre; not measured on its own.
 
 ## 2. Ranked techniques
@@ -69,4 +68,4 @@ Public detail is thin; no rendering postmortems were found for Demeo, Moss, Resi
 
 ## 5. Next, when the budget is needed
 
-In order: baked albedo for walls, floor and ceiling; then SpaceWarp, checked for artefacts on the flames and the controllers; `render_target_size_multiplier` 0.9 only if both are not enough.
+About 7 ms of the 13.9 ms frame is left for the 3D view ([`PROJECT_PLAN.md`](PROJECT_PLAN.md#budget-left-for-the-3d-view)). If it needs more, in order: baked albedo for walls, floor and ceiling; then SpaceWarp, checked for artefacts on the flames and the controllers; `render_target_size_multiplier` 0.9 only if both are not enough. Keep the 3D view's own materials on the rules above (no glow, no dynamic lights, no screen-reading shaders).

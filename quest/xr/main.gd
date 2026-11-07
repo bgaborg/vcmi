@@ -530,7 +530,7 @@ func _pulse(hand: int, amplitude: float) -> void:
 	print("VCMI XR: haptic pulse ", hand, " ", amplitude)
 
 
-## head yaw pitch height | head_off | recenter | aim yaw pitch | aim_off | click | rclick | pad keycode | stick x y | lstick x y | screen distance width | env index | lmenu seconds | wrist 1/0 | probe;
+## head yaw pitch height | head_off | recenter | aim yaw pitch | aim_off | click | rclick | pad keycode | stick x y | lstick x y | screen distance width | env index | lmenu seconds | wrist 1/0 | gfx feature on | probe | bridge;
 ## angles in degrees, height in metres, stick values -1..1 with y up, as the right (stick) and left (lstick) thumbstick
 func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 	match command:
