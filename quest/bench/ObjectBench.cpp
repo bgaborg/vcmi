@@ -59,7 +59,7 @@ void benchSprites(std::vector<std::string> names)
 		anims.push_back(decodeAnimation(name));
 	const double decodeMicros = microsSince(from);
 
-	// frames of one animation with the same pixels (same offset) are packed once
+	// .def frames of one animation with the same pixels (same offset) are packed once; PNG frames are counted only
 	struct Rect { uint32_t anim, offset; uint16_t w, h; };
 	std::vector<Rect> rects;
 	// per animation, for a look on the PC (object-bench.sh pulls it to quest/out/object-bench/): which have a mod JSON
@@ -68,11 +68,11 @@ void benchSprites(std::vector<std::string> names)
 	if(table)
 		std::fprintf(table, "name\tdef\tjson\tframes\tdistinct\tpixels\ttrimmed\n");
 	size_t frames = 0, pixels = 0, trimmed = 0, noDef = 0, withJson = 0, jsonOnly = 0, overruns = 0;
+	size_t pngFrames = 0, pngBytes = 0, pngPixels = 0, overlays = 0, badPng = 0;
 	for(uint32_t a = 0; a < anims.size(); a++)
 	{
 		const SpriteAnimation & anim = anims[a];
 		frames += anim.frames.size();
-		pixels += anim.pixels.size();
 		noDef += !anim.def;
 		withJson += anim.def && anim.json;
 		jsonOnly += !anim.def && anim.json;
@@ -80,13 +80,22 @@ void benchSprites(std::vector<std::string> names)
 		std::unordered_set<uint32_t> offsets;
 		size_t animTrimmed = 0;
 		for(const SpriteFrame & f : anim.frames)
-			if(f.width && f.height && offsets.insert(f.offset).second)
+			if(f.format == VCMI_FRAME_PNG)
 			{
+				pngFrames++;
+				pngBytes += f.size + f.overlaySize;
+				pngPixels += size_t(f.width) * f.height;
+				overlays += f.overlaySize > 0;
+				badPng += f.width == 0;
+			}
+			else if(f.width && f.height && offsets.insert(f.offset).second)
+			{
+				pixels += f.size;
 				rects.push_back({a, f.offset, f.width, f.height});
 				int x0 = f.width, y0 = f.height, x1 = -1, y1 = -1;
 				for(int y = 0; y < f.height; y++)
 					for(int x = 0; x < f.width; x++)
-						if(anim.pixels[f.offset + size_t(y) * f.width + x])
+						if(anim.data[f.offset + size_t(y) * f.width + x])
 						{
 							x0 = std::min(x0, x);
 							x1 = std::max(x1, x);
@@ -98,13 +107,15 @@ void benchSprites(std::vector<std::string> names)
 		trimmed += animTrimmed;
 		if(table)
 			std::fprintf(table, "%s\t%d\t%d\t%zu\t%zu\t%zu\t%zu\n", names[a].c_str(), anim.def, anim.json, anim.frames.size(), offsets.size(),
-				anim.pixels.size(), animTrimmed);
+				anim.data.size(), animTrimmed);
 	}
 	if(table)
 		std::fclose(table);
 	std::printf("animations %zu: no .def %zu (JSON only %zu), .def with a JSON layout %zu\n", anims.size(), noDef, jsonOnly, withJson);
 	std::printf("frames %zu, distinct %zu, pixels %.1f M (trimmed to the visible box %.1f M), rows cut %zu, decode %.0f ms on one thread\n",
 		frames, rects.size(), pixels / 1e6, trimmed / 1e6, overruns, decodeMicros / 1e3);
+	std::printf("PNG frames %zu (not PNG: %zu), %.1f M pixels, with a flag mask %zu, files %.1f MB\n", pngFrames, badPng, pngPixels / 1e6,
+		overlays, pngBytes / 1e6);
 
 	// shelf packing, tallest first, 1 px padding
 	from = Clock::now();
@@ -133,7 +144,7 @@ void benchSprites(std::vector<std::string> names)
 			x = y = shelf = 0;
 		}
 		shelf = std::max(shelf, r.h + 1);
-		const uint8_t * src = anims[r.anim].pixels.data() + r.offset;
+		const uint8_t * src = anims[r.anim].data.data() + r.offset;
 		for(int row = 0; row < r.h; row++)
 			std::memcpy(pages.back().data() + size_t(y + row) * PAGE + x, src + size_t(row) * r.w, r.w);
 		if(pages.size() == 1)

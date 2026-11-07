@@ -38,6 +38,7 @@ const PAD_RIGHT_Y := 3
 
 var bridge: Object
 var vcmi_data: RefCounted ## game data from the bridge in quest/bridge (quest/DATA_BRIDGE.md); null without the extension
+var atlas_task := -1 ## the worker of the test command `atlas -1`, waited for before another one and at exit
 var origin: XROrigin3D
 var layer: OpenXRCompositionLayerCylinder
 var aims: Array[XRController3D] = []
@@ -201,6 +202,11 @@ void fragment() {
 		var dot := MeshInstance3D.new()
 		dot.mesh = sphere
 		pointer_dot.add_child(dot)
+
+
+func _exit_tree() -> void:
+	if atlas_task >= 0:
+		WorkerThreadPool.wait_for_task_completion(atlas_task)
 
 
 func _process(delta: float) -> void:
@@ -592,6 +598,55 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 				if image[1] != null:
 					var path := "/sdcard/Android/data/is.xyz.vcmi.quest/files/minimap-%s.png" % image[0]
 					print("VCMI XR: minimap ", image[0], " ", image[1].get_size(), " saved ", image[1].save_png(path))
+		"atlas": # a >= 0: saves the frames of animation a (in full frames, the owner flag in red) where adb can pull them;
+				# a < 0: decodes every animation of the map and prints the times (quest/MILESTONE_3B.md)
+			if vcmi_data == null:
+				return
+			var names: PackedStringArray = vcmi_data.animation_names()
+			if a < 0.0:
+				# on a worker, as the atlas will be filled: the main thread must keep rendering, or the system closes the app
+				if atlas_task >= 0:
+					WorkerThreadPool.wait_for_task_completion(atlas_task)
+				atlas_task = WorkerThreadPool.add_task(func():
+					var totals := {"animations": 0, "frames": 0, "bridge_us": 0, "bake_us": 0, "slowest_us": 0, "slowest": "",
+							"png": [], "def_flag": [], "png_flag": []} # the first indices of each kind, to pick for `atlas <i>`
+					var from := Time.get_ticks_usec()
+					for i in names.size():
+						var decoded: Dictionary = vcmi_data.decode_animation(names[i])
+						var spent: int = decoded.get("bridge_us", 0) + decoded.get("bake_us", 0)
+						totals.animations += 1
+						totals.frames += decoded.frames.size()
+						totals.bridge_us += decoded.get("bridge_us", 0)
+						totals.bake_us += decoded.get("bake_us", 0)
+						for f in decoded.frames:
+							var kind := ("png" if f.png else "def") + ("_flag" if f.mask != null else "")
+							if totals.has(kind) and totals[kind].size() < 5 and not totals[kind].has(i):
+								totals[kind].append(i)
+						if spent > totals.slowest_us:
+							totals.slowest_us = spent
+							totals.slowest = names[i]
+						if i % 200 == 199:
+							print("VCMI XR: atlas progress ", i + 1, " in ", (Time.get_ticks_usec() - from) / 1000, " ms")
+					totals.wall_ms = (Time.get_ticks_usec() - from) / 1000
+					print("VCMI XR: atlas all ", totals))
+			else:
+				var i := int(a)
+				var dir := "/sdcard/Android/data/is.xyz.vcmi.quest/files/atlas"
+				DirAccess.make_dir_recursive_absolute(dir)
+				var decoded: Dictionary = vcmi_data.decode_animation(names[i]) if i < names.size() else {"frames": []}
+				print("VCMI XR: atlas ", i, " ", names[i] if i < names.size() else "?", ": ", decoded.frames.size(), " frames, bridge ", decoded.get("bridge_us", 0), " us, bake ", decoded.get("bake_us", 0), " us")
+				for f in decoded.frames:
+					var full := Image.create_empty(f.full_size.x, f.full_size.y, false, Image.FORMAT_RGBA8)
+					full.fill(Color(0.5, 0.5, 0.5))
+					var body: Image = f.image
+					full.blend_rect(body, Rect2i(Vector2i.ZERO, body.get_size()), Vector2i(f.left, f.top))
+					var flag: Image = f.mask
+					if flag != null:
+						for y in flag.get_height():
+							for x in flag.get_width():
+								if flag.get_pixel(x, y).r > 0.5:
+									full.set_pixel(x + f.left, y + f.top, Color.RED)
+					full.save_png("%s/%d_%d_%d.png" % [dir, i, f.group, f.frame])
 		"probe", "bridge":
 			pass
 		_:

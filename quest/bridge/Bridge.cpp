@@ -12,6 +12,7 @@
 #include "VcmiBridgeApi.h"
 // compiled here, so clientapp/CMakeLists.txt adds one file; the object benchmark compiles it on its own
 #include "ObjectScan.cpp"
+#include "SpriteDecode.cpp"
 
 #include "../../client/CPlayerInterface.h"
 #include "../../client/GameEngine.h"
@@ -452,7 +453,33 @@ uint32_t copyAnimation(uint32_t index, char * out, uint32_t capacity)
 	return length;
 }
 
+uint32_t decodeFrames(const char * name, VcmiAnimationData * out)
+{
+	// per calling thread, so Godot's workers decode side by side; valid until that thread's next call
+	thread_local SpriteAnimation anim;
+	anim = {};
+	// the filesystem is set up before a game exists and stays until the process ends; no mod reload while in game
+	if(name && inGame.load())
+	{
+		try
+		{
+			anim = decodeAnimation(name);
+		}
+		catch(const std::exception & e)
+		{
+			logGlobal->warn("Quest bridge: animation %s: %s", name, e.what());
+			anim = {};
+		}
+	}
+	if(out)
+		*out = {anim.frames.data(), anim.data.data(), anim.palette.data(), static_cast<uint32_t>(anim.frames.size()),
+			static_cast<uint32_t>(anim.data.size())};
+	return static_cast<uint32_t>(anim.frames.size());
 }
+
+}
+
+static_assert(sizeof(VcmiFrame) == 36, "VcmiFrame is part of the bridge ABI");
 
 extern "C" __attribute__((visibility("default"))) const VcmiBridgeApi vcmi_bridge_api = {
 	VCMI_BRIDGE_VERSION,
@@ -463,4 +490,5 @@ extern "C" __attribute__((visibility("default"))) const VcmiBridgeApi vcmi_bridg
 	copyObjects,
 	copyObjectChanges,
 	copyAnimation,
+	decodeFrames,
 };

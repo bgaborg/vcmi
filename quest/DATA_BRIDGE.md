@@ -63,7 +63,9 @@ C combines A's small upstream change with B's speed. The C ABI boundary means th
 ```
 quest/bridge/                  quest-only C++, compiled into libvcmiclient_<abi>.so
   VcmiBridgeApi.h              the C ABI: plain structs, the function table, VCMI_BRIDGE_VERSION
-  Bridge.cpp                   lifecycle task, observer, buffers, battle receiver
+  Bridge.cpp                   lifecycle task, observer, buffers, battle receiver; includes the two below
+  ObjectScan.cpp/.h            the object records (milestone 3a), also built into quest/bench
+  SpriteDecode.cpp/.h          the frames of an animation: .def indices and mod PNGs (MILESTONE_3B.md), also in quest/bench
 quest/xr/extension/            godot-cpp GDExtension libvcmi_xr.so
   CMakeLists.txt               built by quest/tools/make-extension.sh into src/quest/jniLibs
   VcmiData.cpp                 Godot class: finds the table, turns buffers into Image / MultiMesh / arrays

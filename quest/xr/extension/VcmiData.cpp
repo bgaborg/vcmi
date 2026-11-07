@@ -5,6 +5,7 @@
 #include "../../bridge/VcmiBridgeApi.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstring>
 #include <vector>
@@ -16,7 +17,9 @@
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/godot.hpp>
+#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -45,6 +48,7 @@ protected:
 		ClassDB::bind_method(D_METHOD("animation_names"), &VcmiData::animation_names);
 		ClassDB::bind_method(D_METHOD("object_count"), &VcmiData::object_count);
 		ClassDB::bind_method(D_METHOD("update_markers", "multimesh", "panel_size", "metres"), &VcmiData::update_markers);
+		ClassDB::bind_method(D_METHOD("decode_animation", "name"), &VcmiData::decode_animation);
 		BIND_CONSTANT(TERRAIN_CHANGED);
 		BIND_CONSTANT(FOG_CHANGED);
 		BIND_CONSTANT(IN_GAME);
@@ -253,6 +257,46 @@ public:
 	}
 
 	/// the names the table gained; the rest on the next update when the game is writing
+	static Ref<Image> loadPng(const uint8_t * bytes, uint32_t size)
+	{
+		PackedByteArray buffer;
+		buffer.resize(size);
+		std::memcpy(buffer.ptrw(), bytes, size);
+		Ref<Image> image;
+		image.instantiate();
+		if(image->load_png_from_buffer(buffer) != OK)
+			return Ref<Image>();
+		return image;
+	}
+
+	/// a .def palette as RGBA with the special entries the 2D map uses for map objects
+	/// (ScalableImageParameters::setShadowTransparency, clientsdl3/render/ScalableImage.cpp:205-222): 0 clear, 1 and 4
+	/// shadow at alpha 64 and 128, 2 and 3 the same when they hold H3's shadow colours. 5, the owner flag, keeps its
+	/// colour: objects without an owner draw it so (WITH_SHADOW or ONLY_BODY_IGNORE_OVERLAY, MapRenderer.cpp:425-427);
+	/// for owned ones the mask marks it for the owner colour
+	static std::array<uint8_t, 1024> bakePalette(const uint8_t * rgb)
+	{
+		std::array<uint8_t, 1024> out{};
+		if(!rgb)
+			return out;
+		for(int i = 0; i < 256; i++)
+		{
+			std::memcpy(&out[i * 4], &rgb[i * 3], 3);
+			out[i * 4 + 3] = 255;
+		}
+		const auto similar = [rgb](int i, int r, int g, int b)
+		{ return std::abs(rgb[i * 3] - r) < 8 && std::abs(rgb[i * 3 + 1] - g) < 8 && std::abs(rgb[i * 3 + 2] - b) < 8; };
+		const auto shadow = [&out](int i, uint8_t alpha) { out[i * 4] = out[i * 4 + 1] = out[i * 4 + 2] = 0; out[i * 4 + 3] = alpha; };
+		shadow(0, 0);
+		shadow(1, 64);
+		shadow(4, 128);
+		if(similar(2, 255, 100, 255))
+			shadow(2, 64);
+		if(similar(3, 255, 50, 255))
+			shadow(3, 128);
+		return out;
+	}
+
 	void fetchAnimations()
 	{
 		char name[256];
@@ -264,6 +308,90 @@ public:
 	Ref<Image> terrain_image() const { return terrain; }
 	/// 1 (of 255) where the local team sees; x-major: terrain_image with the axes swapped
 	Ref<Image> fog_image() const { return fogMap; }
+
+	/// the frames of animation `name` (an animation_names entry) as the 2D map draws them (quest/MILESTONE_3B.md):
+	/// {frames: [{group, frame, left, top, full_size, image (RGBA8, shadow in alpha), mask (L8 owner flag,
+	/// or null), png (from a mod's PNG)}], bridge_us, bake_us}; empty frames when missing or no game is loaded. Reads the game's files: for a
+	/// test, or from a worker thread
+	Dictionary decode_animation(const String & name) const
+	{
+		Dictionary result;
+		Array frames;
+		result["frames"] = frames;
+		if(!api)
+			return result;
+		using Clock = std::chrono::steady_clock;
+		auto from = Clock::now();
+		VcmiAnimationData anim{};
+		api->decodeAnimation(name.utf8().get_data(), &anim);
+		result["bridge_us"] = int64_t(std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - from).count());
+		from = Clock::now();
+		const auto rgba = bakePalette(anim.palette);
+		for(uint32_t i = 0; i < anim.frameCount; i++)
+		{
+			const VcmiFrame & f = anim.frames[i];
+			if(f.offset + uint64_t(f.size) > anim.dataSize || f.overlayOffset + uint64_t(f.overlaySize) > anim.dataSize)
+				continue;
+			Ref<Image> image;
+			Ref<Image> mask;
+			if(f.format == VCMI_FRAME_PNG)
+			{
+				image = loadPng(anim.data + f.offset, f.size);
+				if(image.is_null())
+					continue;
+				image->convert(Image::FORMAT_RGBA8);
+				if(f.overlaySize)
+					if(Ref<Image> overlay = loadPng(anim.data + f.overlayOffset, f.overlaySize);
+						overlay.is_valid() && overlay->get_size() == image->get_size())
+					{
+						// the flag is where the overlay is opaque (its alpha), as the 2D map draws it in the owner colour
+						overlay->convert(Image::FORMAT_RGBA8);
+						const PackedByteArray px = overlay->get_data();
+						PackedByteArray alpha;
+						alpha.resize(px.size() / 4);
+						const uint8_t * src = px.ptr();
+						uint8_t * dst = alpha.ptrw();
+						for(int64_t p = 0; p < alpha.size(); p++)
+							dst[p] = src[p * 4 + 3];
+						mask = Image::create_from_data(overlay->get_width(), overlay->get_height(), false, Image::FORMAT_L8, alpha);
+					}
+			}
+			else
+			{
+				if(f.width == 0 || f.height == 0 || f.size != uint32_t(f.width) * f.height)
+					continue;
+				PackedByteArray px;
+				px.resize(int64_t(f.size) * 4);
+				PackedByteArray flag;
+				flag.resize(f.size);
+				uint8_t * out = px.ptrw();
+				uint8_t * flagOut = flag.ptrw();
+				bool flagged = false;
+				for(uint32_t p = 0; p < f.size; p++)
+				{
+					const uint8_t index = anim.data[f.offset + p];
+					std::memcpy(out + p * 4, &rgba[index * 4], 4);
+					flagOut[p] = index == 5 ? 255 : 0;
+					flagged |= index == 5;
+				}
+				image = Image::create_from_data(f.width, f.height, false, Image::FORMAT_RGBA8, px);
+				if(flagged)
+					mask = Image::create_from_data(f.width, f.height, false, Image::FORMAT_L8, flag);
+			}
+			Dictionary frame;
+			frame["group"] = f.group;
+			frame["frame"] = f.frame;
+			frame["left"] = f.left;
+			frame["top"] = f.top;
+			frame["full_size"] = Vector2i(f.fullWidth, f.fullHeight);
+			frame["image"] = image;
+			frame["mask"] = mask;
+			frame["png"] = f.format == VCMI_FRAME_PNG;
+			frames.push_back(frame);
+		}
+		result["bake_us"] = int64_t(std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - from).count());
+		return result;
+	}
 
 	/// the animation names the objects use, by index (VcmiObject.animation)
 	PackedStringArray animation_names() const { return animations; }

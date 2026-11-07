@@ -10,7 +10,7 @@
 #include <stdint.h>
 
 // raise on any change to the structs below; the extension refuses a table with another version
-#define VCMI_BRIDGE_VERSION 4
+#define VCMI_BRIDGE_VERSION 5
 
 typedef struct VcmiBridgeStats
 {
@@ -87,6 +87,31 @@ typedef struct VcmiGrid
 
 #define VCMI_TERRAIN_COLOURS 256
 
+// one frame of a map object animation (quest/MILESTONE_3B.md); pixels in VcmiAnimationData.data at offset, size bytes
+#define VCMI_FRAME_INDEXED 0 // width * height palette indices: 0 clear, 1 and 4 shadow, 2 and 3 shadow when the palette
+                             // has the H3 shadow colours there, 5 owner flag (ScalableImage.cpp:205-222)
+#define VCMI_FRAME_PNG 1     // a PNG file at its full size (left, top 0), shadow in its alpha; the owner flag mask,
+                             // when there is one, is a second PNG at overlayOffset (its alpha)
+typedef struct VcmiFrame
+{
+	uint16_t group, frame;
+	uint16_t width, height;
+	int16_t left, top;            // offset of the pixels in the full frame
+	uint16_t fullWidth, fullHeight;
+	uint32_t offset, size;
+	uint32_t overlayOffset, overlaySize; // VCMI_FRAME_PNG only; size 0 when none
+	uint8_t format;
+	uint8_t pad[3];
+} VcmiFrame; // 36 bytes
+
+typedef struct VcmiAnimationData
+{
+	const VcmiFrame * frames;
+	const uint8_t * data;
+	const uint8_t * palette; // 256 RGB entries of the .def
+	uint32_t frameCount, dataSize;
+} VcmiAnimationData;
+
 typedef struct VcmiBridgeApi
 {
 	uint32_t version;
@@ -108,4 +133,8 @@ typedef struct VcmiBridgeApi
 	// copies the name of animation `index` (an AnimationPath, NUL-terminated, cut to capacity) and returns its
 	// length, 0 when unknown or the game is writing; any thread
 	uint32_t (*animation)(uint32_t index, char * out, uint32_t capacity);
+	// decodes animation `name` (as `animation` gives it) into frames and returns their count, 0 when it is missing or
+	// no game is loaded; reads the game's files (milliseconds), so call it from a worker thread. `out` points into
+	// storage of the calling thread, valid until its next call
+	uint32_t (*decodeAnimation)(const char * name, VcmiAnimationData * out);
 } VcmiBridgeApi;

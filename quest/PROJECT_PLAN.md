@@ -38,7 +38,7 @@ Not closed yet:
 
 ### Next, in order
 
-1. **Data bridge milestone 3, objects:** 3b, the map object sprites. **Read [`MILESTONE_3B.md`](MILESTONE_3B.md) first** (research findings, design and budgets). Plan step 1 is done: the installed HD mod makes half the map's sprites RGBA PNGs, and the whole map's sprites do not fit the budget, so the atlas is now RGBA and holds only the zoomed view (its section 1a). The next step is plan step 2: the bridge's `decodeAnimation` for .def and PNG frames, with a test command that saves them as PNG. Then 3c, the 3D-mode window and hero step timing ([`DATA_BRIDGE.md` section 5](DATA_BRIDGE.md#5-milestones)).
+1. **Data bridge milestone 3, objects:** 3b, the map object sprites. **Read [`MILESTONE_3B.md`](MILESTONE_3B.md) first** (research findings, design and budgets). Plan step 1 is done: the installed HD mod makes half the map's sprites RGBA PNGs, and the whole map's sprites do not fit the budget, so the atlas is now RGBA and holds only the zoomed view (its section 1a). Plan step 2 is done: the bridge decodes .def and PNG frames, matching the mod's images, at 1.2 ms per animation on a worker. The next step is plan step 3: the view-driven atlas fill on two workers, with the page upload and its timers. Then 3c, the 3D-mode window and hero step timing ([`DATA_BRIDGE.md` section 5](DATA_BRIDGE.md#5-milestones)).
 2. **Phase 4, tabletop adventure map:** builds on milestones 2 and 3.
 3. **Milestone 4, battle**, then **phase 5, battle diorama**.
 
