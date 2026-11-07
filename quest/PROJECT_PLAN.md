@@ -28,6 +28,7 @@ As of 2026-11-07.
 | War room rebuild | lit castle study, baked light, app GPU 12.1 -> 6.9 ms | [`XR_PERFORMANCE.md`](XR_PERFORMANCE.md) |
 | Data bridge milestone 0 | baseline on the heaviest map | [`DATA_BRIDGE.md`](DATA_BRIDGE.md#milestone-0-results-2026-11-06) |
 | Data bridge milestone 1 | skeleton: the Godot extension finds the game's table; lifecycle survives new game, load, restart, replay, quit | [`DATA_BRIDGE.md`](DATA_BRIDGE.md#milestone-1-results-2026-11-07) |
+| xBRZ default `none` | `VcmiBridge` writes `video.upscalingFilter: none` before the game starts when the player has not chosen a filter; no upstream change | [`DATA_BRIDGE.md`](DATA_BRIDGE.md#memory) |
 
 Not closed yet:
 - Phase 1: mod preset tests, data import through the system file picker, a full game start to end ([`PHASE1.md`](PHASE1.md#follow-ups)).
@@ -35,11 +36,10 @@ Not closed yet:
 
 ### Next, in order
 
-1. **Default xBRZ to `none` on Quest** (open decision 1): xBRZ auto got the game killed on the heaviest map ([`DATA_BRIDGE.md`](DATA_BRIDGE.md#memory)).
-2. **Data bridge milestone 2, minimap:** tile snapshot and fog into Godot textures on a panel in the war room ([`DATA_BRIDGE.md` section 5](DATA_BRIDGE.md#5-milestones)).
-3. **Milestone 3, objects:** object buffer, atlas with colour mask, MultiMesh, the 3D-mode window, hero step timing.
-4. **Phase 4, tabletop adventure map:** builds on milestones 2 and 3.
-5. **Milestone 4, battle**, then **phase 5, battle diorama**.
+1. **Data bridge milestone 2, minimap:** tile snapshot and fog into Godot textures on a panel in the war room ([`DATA_BRIDGE.md` section 5](DATA_BRIDGE.md#5-milestones)).
+2. **Milestone 3, objects:** object buffer, atlas with colour mask, MultiMesh, the 3D-mode window, hero step timing.
+3. **Phase 4, tabletop adventure map:** builds on milestones 2 and 3.
+4. **Milestone 4, battle**, then **phase 5, battle diorama**.
 
 Each milestone records its numbers in `DATA_BRIDGE.md` and is optimised before the next one starts.
 
@@ -100,8 +100,8 @@ The goal: `git rebase upstream/develop` has no conflicts in normal weeks.
 
 1. New code goes only into new files: `quest/`, `android/vcmi-app/src/quest/`, `android/vcmi-app/quest.gradle`, `.github/workflows/quest.yml`.
 2. No change to VCMI C++ (`client/`, `clientsdl3/`, `lib/`, ...) unless a phase cannot work without it. Then a small generic hook, proposed upstream first.
-3. Every change to an upstream file is in the table below and is a few lines. Today they are spread over several commits; squash them into one `quest: upstream hooks` commit at the bottom of the series at the next rebase, so conflicts can only land there.
-4. Planned, not set up yet: a weekly CI job that rebases `quest` on `upstream/develop` and builds the APK.
+3. Every change to an upstream file is in the table below and is a few lines. Today they are spread over several commits; the next rebase squashes them into one `quest: upstream hooks` commit at the bottom of the series, so conflicts can only land there.
+4. Every Monday `quest.yml` rebases `quest` on vcmi/vcmi `develop` inside the runner and builds the APK; nothing is pushed. A failed run means the real rebase needs work. GitHub stops schedules after 60 days without repository activity.
 
 ### Changes to upstream files (keep this list short)
 
@@ -113,7 +113,7 @@ Checked against the merge base with `develop` on 2026-11-07; nothing else outsid
 | `android/vcmi-app/src/main/java/eu/vcmi/vcmi/ActivityLauncher.java` | Play starts the immersive activity if the build declares one, then closes the launcher task (16 lines) | the launcher starts `VcmiSDLActivity` by class |
 | `clientapp/CMakeLists.txt` | adds `quest/bridge/Bridge.cpp` to `vcmiclient` on Android when it exists (4 lines) | the data bridge must be in the game library to reach the client and its lock ([`DATA_BRIDGE.md`](DATA_BRIDGE.md)) |
 
-Remotes: `origin` is the fork; add `upstream` (`https://github.com/vcmi/vcmi.git`) to rebase: `git fetch upstream develop && git rebase upstream/develop`.
+Remotes: `origin` is the fork, `upstream` is `https://github.com/vcmi/vcmi.git`. To rebase: `git fetch upstream develop && git rebase upstream/develop`.
 
 ## 2. Constraints
 
@@ -266,7 +266,7 @@ After the roadmap: hand tracking (ray from the hand, pinch = click).
 | Risk | Impact | Mitigation |
 |---|---|---|
 | Godot XR APIs marked experimental (`use_android_surface`) change | build breaks on an update | pinned Godot 4.7.2 and vendors 5.1.0; update on purpose |
-| RAM with xBRZ and HD assets | the low-memory killer ends the game | xBRZ `none` by default (decision 1); pre-made HD; scale per asset class |
+| RAM with xBRZ and HD assets | the low-memory killer ends the game | xBRZ `none` by default (done); pre-made HD; scale per asset class |
 | CPU: AI, server and the 2D map drawing on one core | slow AI turns | the 3D-mode window stops 2D drawing (`DATA_BRIDGE.md`); Godot's frame rate is independent of the game |
 | GPU budget of the 3D view | dropped frames | ~7 ms left (section 0); next levers in `XR_PERFORMANCE.md` section 5 |
 | Text input on the virtual display | no save names or chat | check the system keyboard; fallback: a Godot keyboard that sends keys |
@@ -280,12 +280,12 @@ Data bridge risks: [`DATA_BRIDGE.md` section 6](DATA_BRIDGE.md#6-risks).
 
 ## 8. Open decisions
 
-1. **xBRZ default `none` on Quest: how.** Fewest upstream changes: the Quest Java side writes `"video": {"upscalingFilter": "none"}` into the user's `settings.json` on first start when the key is not set (no upstream change; a player can still pick xBRZ). The alternative, a RAM-based default in `ScreenHandler::loadUpscalingFilter`, is an upstream change.
-2. **HD pack builder upscaler:** AI model (quality, model licence) or xBRZ + sharpen (fast, no licence issue).
-3. **Upstream strategy:** which hooks to propose to VCMI. The contributor opens the PRs ([`AGENTS.md`](../AGENTS.md)).
+1. **HD pack builder upscaler:** AI model (quality, model licence) or xBRZ + sharpen (fast, no licence issue).
+2. **Upstream strategy:** which hooks to propose to VCMI. The contributor opens the PRs ([`AGENTS.md`](../AGENTS.md)).
 
 Decided:
 - 2026-11-06: Godot hosts the XR part; the game keeps its own renderer.
 - 2026-11-06: the war room is the default environment; passthrough and black are a long left menu press away.
 - 2026-11-06: data bridge option C, an in-client bridge plus a thin Godot extension ([`DATA_BRIDGE.md`](DATA_BRIDGE.md#2-options)).
+- 2026-11-07: xBRZ `none` by default on Quest, set by the Quest Java side in `settings.json` (no upstream change); a player can still pick a concrete xBRZ filter.
 - Separate package ID `is.xyz.vcmi.quest`, installs next to the normal Android build.

@@ -158,7 +158,7 @@ The design above already reads only under the lock the game holds, keeps Godot l
 
 ### Memory
 
-- xBRZ: on the heaviest map, auto (xbrz2) grew to 6.75 GB PSS and the low-memory killer ended the game; `none` peaked at 3.5 GB. Decision: the Quest build defaults to `none`; a player can still pick xBRZ (how: [open decision 1](PROJECT_PLAN.md#8-open-decisions)).
+- xBRZ: on the heaviest map, auto (xbrz2) grew to 6.75 GB PSS and the low-memory killer ended the game; `none` peaked at 3.5 GB. The Quest build defaults to `none` (`VcmiBridge.defaultUpscalingNone`, done 2026-11-07); a player can still pick xBRZ.
 - Sprite atlases: one per animation for all colours; requested on first use. Freeing unused atlases comes only if milestone 3 shows the texture budget is exceeded.
 - The 2D view's caches stay as they are (releasing them needs an upstream change).
 - ETC2 / ASTC compression of atlases only if the texture budget is exceeded.

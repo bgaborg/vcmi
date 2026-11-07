@@ -39,6 +39,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 
 import java.util.Collections;
 import java.util.Set;
@@ -123,6 +124,7 @@ public class VcmiBridge extends GodotPlugin
     {
         final Activity host = getActivity();
         host.runOnUiThread(() -> {
+            defaultUpscalingNone();
             host.getApplication().registerActivityLifecycleCallbacks(gameLifecycle);
             final DisplayManager displays = host.getSystemService(DisplayManager.class);
             display = displays.createVirtualDisplay("VCMI", width, height, DISPLAY_DPI, surface, DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY);
@@ -202,7 +204,7 @@ public class VcmiBridge extends GodotPlugin
     @UsedByGodot
     public boolean hapticFeedbackEnabled()
     {
-        final File settings = new File(Storage.getVcmiDataDir(getActivity()), "config/settings.json");
+        final File settings = settingsFile();
         final long time = settings.lastModified(); // 0 when the file does not exist
         if (time == hapticSettingTime)
             return hapticSetting;
@@ -210,10 +212,9 @@ public class VcmiBridge extends GodotPlugin
         hapticSetting = true;
         if (time == 0)
             return hapticSetting;
-        try (InputStream in = new FileInputStream(settings); ByteArrayOutputStream out = new ByteArrayOutputStream())
+        try
         {
-            FileUtil.copyStream(in, out);
-            final JSONObject general = new JSONObject(out.toString("UTF-8")).optJSONObject("general");
+            final JSONObject general = readSettings(settings).optJSONObject("general");
             hapticSetting = general == null || general.optBoolean("hapticFeedback", true);
         }
         catch (IOException | JSONException e)
@@ -221,6 +222,56 @@ public class VcmiBridge extends GodotPlugin
             Log.w(TAG, "cannot read the haptic feedback setting, using on: " + e);
         }
         return hapticSetting;
+    }
+
+    /**
+     * The game's upscaling filter `video.upscalingFilter` defaults to none on Quest, unless the player chose one: "auto"
+     * picks xBRZ, whose sprite caches got the game killed by the low-memory killer on the largest maps (quest/DATA_BRIDGE.md, Memory).
+     * Written before the game starts, which reads the file once at start. "auto" is the schema default, which the game does
+     * not save: a player who wants xBRZ picks a concrete filter such as xbrz2.
+     */
+    private void defaultUpscalingNone()
+    {
+        final File settings = settingsFile();
+        try
+        {
+            final JSONObject root = settings.exists() ? readSettings(settings) : new JSONObject();
+            JSONObject video = root.optJSONObject("video");
+            if (video == null)
+                root.put("video", video = new JSONObject());
+            if (video.has("upscalingFilter"))
+                return;
+            video.put("upscalingFilter", "none");
+            // via a temporary file, so a failed write cannot leave the player's settings half written
+            final File temp = new File(settings.getPath() + ".tmp");
+            if (!settings.getParentFile().isDirectory() && !settings.getParentFile().mkdirs())
+                throw new IOException("cannot create " + settings.getParent());
+            try (OutputStream out = new FileOutputStream(temp))
+            {
+                out.write(root.toString(4).getBytes(StandardCharsets.UTF_8));
+            }
+            if (!temp.renameTo(settings))
+                throw new IOException("cannot replace " + settings);
+            Log.i(TAG, "upscaling filter set to none");
+        }
+        catch (IOException | JSONException e)
+        {
+            Log.w(TAG, "upscaling filter left as it is: " + e);
+        }
+    }
+
+    private File settingsFile()
+    {
+        return new File(Storage.getVcmiDataDir(getActivity()), "config/settings.json");
+    }
+
+    private static JSONObject readSettings(final File settings) throws IOException, JSONException
+    {
+        try (InputStream in = new FileInputStream(settings); ByteArrayOutputStream out = new ByteArrayOutputStream())
+        {
+            FileUtil.copyStream(in, out);
+            return new JSONObject(out.toString("UTF-8"));
+        }
     }
 
     @Override

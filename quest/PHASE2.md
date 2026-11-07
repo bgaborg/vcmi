@@ -16,7 +16,7 @@ Godot project `quest/xr/` (`main.gd` host, `room.gd` war room), Android side in 
 | War room | `room.gd`: a castle study, baked lightmap only (`assets/room/room.lmbake`), flames animated in their shader. Assets and licences: [`LICENSES.md`](xr/assets/room/LICENSES.md); GPU rules: [`XR_PERFORMANCE.md`](XR_PERFORMANCE.md). |
 | Haptics | Godot pulses the controller on a click on the screen (0.5) and on gamepad buttons (0.25), 30 ms, if the game's "Haptic feedback" option is on. The game's own `hapticFeedback()` runs for touch input only |
 | Pause | the game activity stays resumed on its display when the host pauses (Meta menu, headset off, Guardian), so `VcmiBridge` runs SDL's own pause (`QuestPause`): game loop and audio stop until the host resumes |
-| HD | the game's defaults on the 2560x1440 display: 200 % interface scaling, `video.upscalingFilter` auto picks xBRZ 2x (to be changed to `none`, [open decision 1](PROJECT_PLAN.md#8-open-decisions)); `video.useHdTextures` uses installed HD packs |
+| HD | the game's defaults on the 2560x1440 display: 200 % interface scaling, `video.upscalingFilter` is `none` on Quest unless the player picks a concrete xBRZ filter such as `xbrz2` (`VcmiBridge`; "auto" is not saved, so it falls back to `none`); `video.useHdTextures` uses installed HD packs |
 
 Godot findings:
 - Godot's hole punch writes no depth, so the room would draw over the screen: the screen mesh has a depth-writing material that multiplies by zero (`blend_mul`, first in the transparent pass), which clears colour and alpha where the room drew behind it; the room's additive effects write no alpha.
