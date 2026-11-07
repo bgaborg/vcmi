@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Object benchmark on the headset, without the APK or a game start: times the bridge's object list
-# (quest/bridge/ObjectScan) on a saved game, with real Quest timings, in about a minute per change.
+# Object benchmark on the headset, without the APK or a game start: times the bridge's object list and sprite decode
+# (quest/bridge/ObjectScan, SpriteDecode) on a saved game, with real Quest timings, in about a minute per change.
 #
 #   object-bench.sh build                  in WSL, in the Linux checkout of make-apk.sh (after one APK build there):
 #                                          builds libobject-bench.so and bench.jar into quest/out/object-bench/
@@ -68,6 +68,8 @@ run)
 	# the user data: the game's own folders, and a copy of its config so settings written here stay here
 	"$Q" adb shell "cd $DEVICE/data && for d in Data Mods Maps Saves; do [ -e \$d ] || ln -s $GAME_DATA/\$d \$d; done; rm -rf config cache; cp -r $GAME_DATA/config config; mkdir -p cache"
 	"$Q" adb shell "cd $DEVICE && VCMI_DATA_ROOT=$DEVICE/data VCMI_INTERNAL_ROOT=$DEVICE/internal LD_LIBRARY_PATH=$DEVICE/libs CLASSPATH=$DEVICE/bench.dex app_process $DEVICE eu.vcmi.vcmi.NativeMethods $DEVICE/libobject-bench.so '$DEVICE/data/$SAVE' $REPEATS"
+	# the sprite table and page 0 of the sprite atlas (a PPM: PIL or most image viewers open it)
+	"$Q" adb pull "$DEVICE/sprites.tsv" "$DEVICE/page0.ppm" "$OUT_WIN/" >/dev/null && echo "pulled sprites.tsv and page0.ppm to $OUT"
 	;;
 *)
 	sed -n '2,12p' "$0"
