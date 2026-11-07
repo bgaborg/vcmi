@@ -13,6 +13,11 @@ config/features=PackedStringArray("4.7", "Mobile")
 
 renderer/rendering_method="mobile"
 textures/vram_compression/import_etc2_astc=true
+; the war room (room.gd): dithering against banding in its dark gradients, finer lightmap texels on its walls
+anti_aliasing/quality/use_debanding=true
+lightmapping/primitive_meshes/texel_size=0.06
+; one lightmap fetch per pixel instead of four (bicubic): the lightmap is smooth enough at this texel size
+lightmapping/lightmap_gi/use_bicubic_filter=false
 
 [xr]
 
@@ -21,4 +26,8 @@ openxr/enabled=true
 openxr/reference_space=2
 openxr/extensions/meta/render_model=true
 openxr/extensions/meta/passthrough=true
+; fixed foveated rendering, high: 9.1 -> 6.9 ms app GPU time in the war room (quest/XR_PERFORMANCE.md); the game layer is not
+; foveated. Not dynamic: the runtime then keeps level 0 until the GPU is nearly full, which leaves the saving unused.
+; Mobile renderer: needs the viewport's vrs_mode XR (main.gd) and no glow, which would add a separate tonemap pass.
+openxr/foveation_level=3
 shaders/enabled=true

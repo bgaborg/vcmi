@@ -1,0 +1,215 @@
+{
+ "accessors": [
+  {
+   "bufferView": 1,
+   "byteOffset": 0,
+   "componentType": 5126,
+   "normalized": false,
+   "count": 7988,
+   "type": "VEC3",
+   "max": [
+    0.9295459985733032,
+    0.5241810083389282,
+    0.8257880210876465
+   ],
+   "min": [
+    -0.9496930241584778,
+    -0.5332649946212769,
+    -0.8282769918441772
+   ]
+  },
+  {
+   "bufferView": 2,
+   "byteOffset": 0,
+   "componentType": 5126,
+   "normalized": false,
+   "count": 7988,
+   "type": "VEC2",
+   "max": [
+    0.9999840259552002,
+    1.0
+   ],
+   "min": [
+    2.5999999706982635e-05,
+    0.0005099773406982422
+   ]
+  },
+  {
+   "bufferView": 3,
+   "byteOffset": 0,
+   "componentType": 5126,
+   "normalized": false,
+   "count": 7988,
+   "type": "VEC3",
+   "max": [
+    0.9999970197677612,
+    0.9999809861183167,
+    1.0
+   ],
+   "min": [
+    -0.9999969005584717,
+    -0.9999948740005493,
+    -0.9999908804893494
+   ]
+  },
+  {
+   "bufferView": 0,
+   "componentType": 5125,
+   "normalized": false,
+   "count": 29673,
+   "type": "SCALAR"
+  }
+ ],
+ "asset": {
+  "generator": "pygltflib@v1.16.5",
+  "version": "2.0"
+ },
+ "bufferViews": [
+  {
+   "buffer": 0,
+   "byteOffset": 0,
+   "byteLength": 118692,
+   "target": 34963
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 118692,
+   "byteLength": 95856,
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 214548,
+   "byteLength": 63904,
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 278452,
+   "byteLength": 95856,
+   "target": 34962
+  }
+ ],
+ "buffers": [
+  {
+   "uri": "treasure_chest.bin",
+   "byteLength": 374308
+  }
+ ],
+ "images": [
+  {
+   "uri": "treasure_chest_albedo.jpg",
+   "mimeType": "image/jpeg"
+  },
+  {
+   "uri": "treasure_chest_orm.jpg",
+   "mimeType": "image/jpeg"
+  },
+  {
+   "uri": "treasure_chest_normal.jpg",
+   "mimeType": "image/jpeg"
+  }
+ ],
+ "materials": [
+  {
+   "pbrMetallicRoughness": {
+    "baseColorFactor": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "metallicFactor": 1.0,
+    "roughnessFactor": 1.0,
+    "baseColorTexture": {
+     "index": 0,
+     "texCoord": 0
+    },
+    "metallicRoughnessTexture": {
+     "index": 1,
+     "texCoord": 0
+    }
+   },
+   "normalTexture": {
+    "index": 2,
+    "texCoord": 0
+   },
+   "alphaMode": "OPAQUE",
+   "doubleSided": true
+  }
+ ],
+ "meshes": [
+  {
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 0,
+      "NORMAL": 2,
+      "TEXCOORD_0": 1
+     },
+     "indices": 3,
+     "mode": 4,
+     "material": 0
+    }
+   ]
+  }
+ ],
+ "nodes": [
+  {
+   "mesh": 0,
+   "name": "treasure_chest",
+   "scale": [
+    0.43,
+    0.43,
+    0.43
+   ],
+   "translation": [
+    0.0,
+    0.22930394768714904,
+    0.0
+   ]
+  }
+ ],
+ "samplers": [
+  {
+   "magFilter": 9729,
+   "minFilter": 9987,
+   "wrapS": 10497,
+   "wrapT": 10497
+  },
+  {
+   "magFilter": 9729,
+   "minFilter": 9987,
+   "wrapS": 10497,
+   "wrapT": 10497
+  },
+  {
+   "magFilter": 9729,
+   "minFilter": 9987,
+   "wrapS": 10497,
+   "wrapT": 10497
+  }
+ ],
+ "scene": 0,
+ "scenes": [
+  {
+   "nodes": [
+    0
+   ]
+  }
+ ],
+ "textures": [
+  {
+   "sampler": 0,
+   "source": 0
+  },
+  {
+   "sampler": 1,
+   "source": 1
+  },
+  {
+   "sampler": 2,
+   "source": 2
+  }
+ ]
+}

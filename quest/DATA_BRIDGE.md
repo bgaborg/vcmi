@@ -142,7 +142,7 @@ The 2D animations must not slow the game down while the tabletop is shown, and t
 
 | Item | Budget |
 |---|---|
-| Godot frame at 72 Hz | 13.9 ms; bridge consumer < 0.5 ms when fresh, < 0.05 ms otherwise |
+| Godot frame at 72 Hz | 13.9 ms; bridge consumer < 0.5 ms when fresh, < 0.05 ms otherwise. The war room takes 6.9 ms app GPU time of it (63 % GPU; quest/XR_PERFORMANCE.md) |
 | Game side per publish | < 0.3 ms (copy of objects + fog compare) |
 | Lifecycle task | < 0.05 ms per 100 ms when nothing changed |
 | Map load snapshot | < 30 ms once |

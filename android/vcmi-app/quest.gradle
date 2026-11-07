@@ -19,6 +19,9 @@ if (project.findProperty('vcmiQuest') == 'true') {
 		android.defaultConfig.minSdk = 24
 	}
 
+	// Godot seeks inside the pack; in a deflated asset each seek inflates from the start (war room load 27 s instead of 1.6 s)
+	android.androidResources.noCompress += 'pck'
+
 	// the AARs ship x86_64 too; Quest is arm64 only, and so is the native part of this build
 	android.defaultConfig.ndk.abiFilters 'arm64-v8a'
 

@@ -59,7 +59,8 @@ var environment_name: String = ENVIRONMENTS[0]
 var room: Node3D
 var screen_occluder: ShaderMaterial ## on the screen: writes depth and leaves the pixels transparent, so the game layer shows through
 var menu_pressed_at := -1 ## Time.get_ticks_msec() of a left menu press not yet handled, or -1
-var environment: Environment
+var environment: Environment ## around the screen when it is not the war room, which has its own
+var world: WorldEnvironment
 var hotkey_panel: Node3D ## on the left controller, shown when it faces the head; the right ray presses its buttons
 var hotkey_buttons: Array[MeshInstance3D] = []
 var hotkey_hover := -1 ## HOTKEYS index the right ray points at, or -1
@@ -77,6 +78,7 @@ func _ready() -> void:
 		get_tree().quit()
 		return
 	get_viewport().use_xr = true
+	get_viewport().vrs_mode = Viewport.VRS_XR # the foveation of project.godot, on the Mobile renderer
 	xr.pose_recentered.connect(func(): screen_placed = false)
 	xr.session_begun.connect(func(): surface_pending = true)
 	# the stick and the menu button may not report their release while the system menu has focus
@@ -87,13 +89,15 @@ func _ready() -> void:
 	# the controller models have lit glTF materials
 	var light := DirectionalLight3D.new()
 	light.rotation_degrees = Vector3(-50.0, 30.0, 0.0)
+	light.light_cull_mask = 1 # not the room (room.gd LAYER), which has baked light
 	add_child(light)
 	room = preload("res://room.gd").new()
 	add_child(room)
-	# Godot's hole punch does not write depth, so the room behind the screen would draw over the game
+	# Godot's hole punch does not write depth, so the room behind the screen would draw over the game.
+	# Multiplying by 0 clears colour and alpha whatever the opaque room drew there; its depth keeps what is behind it out later.
 	var shader := Shader.new()
 	shader.code = "shader_type spatial;
-render_mode unshaded, blend_mix, depth_draw_always, cull_disabled, shadows_disabled;
+render_mode unshaded, blend_mul, depth_draw_always, cull_disabled, shadows_disabled;
 void fragment() {
 	ALBEDO = vec3(0.0);
 	ALPHA = 0.0;
@@ -101,14 +105,14 @@ void fragment() {
 "
 	screen_occluder = ShaderMaterial.new()
 	screen_occluder.shader = shader
-	screen_occluder.render_priority = -1 # before the room, which draws in the transparent pass (room.gd)
+	screen_occluder.render_priority = -1 # first of the transparent pass, after the opaque room, before the flames
 	environment = Environment.new()
 	environment.background_mode = Environment.BG_COLOR
 	environment.background_color = Color.BLACK
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	environment.ambient_light_color = Color(0.5, 0.5, 0.5)
-	var world := WorldEnvironment.new()
-	world.environment = environment
+	world = WorldEnvironment.new()
+	world.environment = room.environment
 	add_child(world)
 
 	origin = XROrigin3D.new()
@@ -297,6 +301,7 @@ func _set_environment(choice: Variant) -> void:
 	get_viewport().transparent_bg = passthrough
 	environment.background_mode = Environment.BG_CLEAR_COLOR if passthrough else Environment.BG_COLOR
 	room.visible = choice == "war room"
+	world.environment = room.environment if room.visible else environment
 	environment_name = choice
 	print("VCMI XR: environment ", choice)
 
@@ -567,6 +572,13 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 				_size_screen(a, b)
 			else:
 				_set_environment(ENVIRONMENTS[clampi(int(a), 0, ENVIRONMENTS.size() - 1)])
+		"gfx": # 10: foveation level b (0 off .. 3 high), 11: dynamic foveation b; else room.gd set_feature
+			if int(a) == 10:
+				(XRServer.find_interface("OpenXR") as OpenXRInterface).foveation_level = int(b)
+			elif int(a) == 11:
+				(XRServer.find_interface("OpenXR") as OpenXRInterface).foveation_dynamic = b != 0.0
+			else:
+				room.set_feature(int(a), b != 0.0)
 		"probe", "bridge":
 			pass
 		_:

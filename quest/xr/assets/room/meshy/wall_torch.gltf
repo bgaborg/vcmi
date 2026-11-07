@@ -1,0 +1,215 @@
+{
+ "accessors": [
+  {
+   "bufferView": 1,
+   "byteOffset": 0,
+   "componentType": 5126,
+   "normalized": false,
+   "count": 7197,
+   "type": "VEC3",
+   "max": [
+    0.2872920036315918,
+    0.9468010067939758,
+    0.4106209874153137
+   ],
+   "min": [
+    -0.29036998748779297,
+    -0.9520639777183533,
+    -0.4268999993801117
+   ]
+  },
+  {
+   "bufferView": 2,
+   "byteOffset": 0,
+   "componentType": 5126,
+   "normalized": false,
+   "count": 7197,
+   "type": "VEC2",
+   "max": [
+    0.9999939799308777,
+    0.9999970197677612
+   ],
+   "min": [
+    1.4999999621068127e-05,
+    0.0004990100860595703
+   ]
+  },
+  {
+   "bufferView": 3,
+   "byteOffset": 0,
+   "componentType": 5126,
+   "normalized": false,
+   "count": 7197,
+   "type": "VEC3",
+   "max": [
+    0.9999886155128479,
+    0.9999887347221375,
+    0.9999987483024597
+   ],
+   "min": [
+    -0.9999903440475464,
+    -0.9999750256538391,
+    -0.9999989867210388
+   ]
+  },
+  {
+   "bufferView": 0,
+   "componentType": 5125,
+   "normalized": false,
+   "count": 22833,
+   "type": "SCALAR"
+  }
+ ],
+ "asset": {
+  "generator": "pygltflib@v1.16.5",
+  "version": "2.0"
+ },
+ "bufferViews": [
+  {
+   "buffer": 0,
+   "byteOffset": 0,
+   "byteLength": 91332,
+   "target": 34963
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 91332,
+   "byteLength": 86364,
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 177696,
+   "byteLength": 57576,
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 235272,
+   "byteLength": 86364,
+   "target": 34962
+  }
+ ],
+ "buffers": [
+  {
+   "uri": "wall_torch.bin",
+   "byteLength": 321636
+  }
+ ],
+ "images": [
+  {
+   "uri": "wall_torch_albedo.jpg",
+   "mimeType": "image/jpeg"
+  },
+  {
+   "uri": "wall_torch_orm.jpg",
+   "mimeType": "image/jpeg"
+  },
+  {
+   "uri": "wall_torch_normal.jpg",
+   "mimeType": "image/jpeg"
+  }
+ ],
+ "materials": [
+  {
+   "pbrMetallicRoughness": {
+    "baseColorFactor": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "metallicFactor": 1.0,
+    "roughnessFactor": 1.0,
+    "baseColorTexture": {
+     "index": 0,
+     "texCoord": 0
+    },
+    "metallicRoughnessTexture": {
+     "index": 1,
+     "texCoord": 0
+    }
+   },
+   "normalTexture": {
+    "index": 2,
+    "texCoord": 0
+   },
+   "alphaMode": "OPAQUE",
+   "doubleSided": true
+  }
+ ],
+ "meshes": [
+  {
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 0,
+      "NORMAL": 2,
+      "TEXCOORD_0": 1
+     },
+     "indices": 3,
+     "mode": 4,
+     "material": 0
+    }
+   ]
+  }
+ ],
+ "nodes": [
+  {
+   "mesh": 0,
+   "name": "wall_torch",
+   "scale": [
+    0.32,
+    0.32,
+    0.32
+   ],
+   "translation": [
+    0.0,
+    0.3046604728698731,
+    0.0
+   ]
+  }
+ ],
+ "samplers": [
+  {
+   "magFilter": 9729,
+   "minFilter": 9987,
+   "wrapS": 10497,
+   "wrapT": 10497
+  },
+  {
+   "magFilter": 9729,
+   "minFilter": 9987,
+   "wrapS": 10497,
+   "wrapT": 10497
+  },
+  {
+   "magFilter": 9729,
+   "minFilter": 9987,
+   "wrapS": 10497,
+   "wrapT": 10497
+  }
+ ],
+ "scene": 0,
+ "scenes": [
+  {
+   "nodes": [
+    0
+   ]
+  }
+ ],
+ "textures": [
+  {
+   "sampler": 0,
+   "source": 0
+  },
+  {
+   "sampler": 1,
+   "source": 1
+  },
+  {
+   "sampler": 2,
+   "source": 2
+  }
+ ]
+}

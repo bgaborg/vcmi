@@ -1,0 +1,215 @@
+{
+ "accessors": [
+  {
+   "bufferView": 1,
+   "byteOffset": 0,
+   "componentType": 5126,
+   "normalized": false,
+   "count": 8106,
+   "type": "VEC3",
+   "max": [
+    0.46554800868034363,
+    0.9476029872894287,
+    0.3097740113735199
+   ],
+   "min": [
+    -0.4758850038051605,
+    -0.9509450197219849,
+    -0.31338998675346375
+   ]
+  },
+  {
+   "bufferView": 2,
+   "byteOffset": 0,
+   "componentType": 5126,
+   "normalized": false,
+   "count": 8106,
+   "type": "VEC2",
+   "max": [
+    0.9999920129776001,
+    0.9998019933700562
+   ],
+   "min": [
+    8.499999967170879e-05,
+    0.00396198034286499
+   ]
+  },
+  {
+   "bufferView": 3,
+   "byteOffset": 0,
+   "componentType": 5126,
+   "normalized": false,
+   "count": 8106,
+   "type": "VEC3",
+   "max": [
+    0.9999780058860779,
+    0.9999780058860779,
+    0.9999826550483704
+   ],
+   "min": [
+    -0.9999738335609436,
+    -0.9999951124191284,
+    -0.9999987483024597
+   ]
+  },
+  {
+   "bufferView": 0,
+   "componentType": 5125,
+   "normalized": false,
+   "count": 25047,
+   "type": "SCALAR"
+  }
+ ],
+ "asset": {
+  "generator": "pygltflib@v1.16.5",
+  "version": "2.0"
+ },
+ "bufferViews": [
+  {
+   "buffer": 0,
+   "byteOffset": 0,
+   "byteLength": 100188,
+   "target": 34963
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 100188,
+   "byteLength": 97272,
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 197460,
+   "byteLength": 64848,
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 262308,
+   "byteLength": 97272,
+   "target": 34962
+  }
+ ],
+ "buffers": [
+  {
+   "uri": "weapon_rack.bin",
+   "byteLength": 359580
+  }
+ ],
+ "images": [
+  {
+   "uri": "weapon_rack_albedo.jpg",
+   "mimeType": "image/jpeg"
+  },
+  {
+   "uri": "weapon_rack_orm.jpg",
+   "mimeType": "image/jpeg"
+  },
+  {
+   "uri": "weapon_rack_normal.jpg",
+   "mimeType": "image/jpeg"
+  }
+ ],
+ "materials": [
+  {
+   "pbrMetallicRoughness": {
+    "baseColorFactor": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "metallicFactor": 1.0,
+    "roughnessFactor": 1.0,
+    "baseColorTexture": {
+     "index": 0,
+     "texCoord": 0
+    },
+    "metallicRoughnessTexture": {
+     "index": 1,
+     "texCoord": 0
+    }
+   },
+   "normalTexture": {
+    "index": 2,
+    "texCoord": 0
+   },
+   "alphaMode": "OPAQUE",
+   "doubleSided": true
+  }
+ ],
+ "meshes": [
+  {
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 0,
+      "NORMAL": 2,
+      "TEXCOORD_0": 1
+     },
+     "indices": 3,
+     "mode": 4,
+     "material": 0
+    }
+   ]
+  }
+ ],
+ "nodes": [
+  {
+   "mesh": 0,
+   "name": "weapon_rack",
+   "scale": [
+    0.95,
+    0.95,
+    0.95
+   ],
+   "translation": [
+    0.0,
+    0.9033977687358856,
+    0.0
+   ]
+  }
+ ],
+ "samplers": [
+  {
+   "magFilter": 9729,
+   "minFilter": 9987,
+   "wrapS": 10497,
+   "wrapT": 10497
+  },
+  {
+   "magFilter": 9729,
+   "minFilter": 9987,
+   "wrapS": 10497,
+   "wrapT": 10497
+  },
+  {
+   "magFilter": 9729,
+   "minFilter": 9987,
+   "wrapS": 10497,
+   "wrapT": 10497
+  }
+ ],
+ "scene": 0,
+ "scenes": [
+  {
+   "nodes": [
+    0
+   ]
+  }
+ ],
+ "textures": [
+  {
+   "sampler": 0,
+   "source": 0
+  },
+  {
+   "sampler": 1,
+   "source": 1
+  },
+  {
+   "sampler": 2,
+   "source": 2
+  }
+ ]
+}

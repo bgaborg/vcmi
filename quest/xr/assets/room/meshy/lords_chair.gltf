@@ -1,0 +1,215 @@
+{
+ "accessors": [
+  {
+   "bufferView": 1,
+   "byteOffset": 0,
+   "componentType": 5126,
+   "normalized": false,
+   "count": 18746,
+   "type": "VEC3",
+   "max": [
+    0.6684990525245667,
+    0.9489740133285522,
+    0.7251010537147522
+   ],
+   "min": [
+    -0.6683419942855835,
+    -0.9517340660095215,
+    -0.7252079248428345
+   ]
+  },
+  {
+   "bufferView": 2,
+   "byteOffset": 0,
+   "componentType": 5126,
+   "normalized": false,
+   "count": 18746,
+   "type": "VEC2",
+   "max": [
+    0.9989110231399536,
+    0.9999939799308777
+   ],
+   "min": [
+    9.000000318337698e-06,
+    1.0132789611816406e-06
+   ]
+  },
+  {
+   "bufferView": 3,
+   "byteOffset": 0,
+   "componentType": 5126,
+   "normalized": false,
+   "count": 18746,
+   "type": "VEC3",
+   "max": [
+    1.0,
+    0.9999996423721313,
+    0.9999998807907104
+   ],
+   "min": [
+    -0.9999991655349731,
+    -1.0,
+    -0.9999988675117493
+   ]
+  },
+  {
+   "bufferView": 0,
+   "componentType": 5125,
+   "normalized": false,
+   "count": 26736,
+   "type": "SCALAR"
+  }
+ ],
+ "asset": {
+  "generator": "pygltflib@v1.16.5",
+  "version": "2.0"
+ },
+ "bufferViews": [
+  {
+   "buffer": 0,
+   "byteOffset": 0,
+   "byteLength": 106944,
+   "target": 34963
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 106944,
+   "byteLength": 224952,
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 331896,
+   "byteLength": 149968,
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 481864,
+   "byteLength": 224952,
+   "target": 34962
+  }
+ ],
+ "buffers": [
+  {
+   "uri": "lords_chair.bin",
+   "byteLength": 706816
+  }
+ ],
+ "images": [
+  {
+   "uri": "lords_chair_albedo.jpg",
+   "mimeType": "image/jpeg"
+  },
+  {
+   "uri": "lords_chair_orm.jpg",
+   "mimeType": "image/jpeg"
+  },
+  {
+   "uri": "lords_chair_normal.jpg",
+   "mimeType": "image/jpeg"
+  }
+ ],
+ "materials": [
+  {
+   "pbrMetallicRoughness": {
+    "baseColorFactor": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "metallicFactor": 1.0,
+    "roughnessFactor": 1.0,
+    "baseColorTexture": {
+     "index": 0,
+     "texCoord": 0
+    },
+    "metallicRoughnessTexture": {
+     "index": 1,
+     "texCoord": 0
+    }
+   },
+   "normalTexture": {
+    "index": 2,
+    "texCoord": 0
+   },
+   "alphaMode": "OPAQUE",
+   "doubleSided": true
+  }
+ ],
+ "meshes": [
+  {
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 0,
+      "NORMAL": 2,
+      "TEXCOORD_0": 1
+     },
+     "indices": 3,
+     "mode": 4,
+     "material": 0
+    }
+   ]
+  }
+ ],
+ "nodes": [
+  {
+   "mesh": 0,
+   "name": "lords_chair",
+   "scale": [
+    0.63,
+    0.63,
+    0.63
+   ],
+   "translation": [
+    0.0,
+    0.5995924615859985,
+    0.0
+   ]
+  }
+ ],
+ "samplers": [
+  {
+   "magFilter": 9729,
+   "minFilter": 9987,
+   "wrapS": 10497,
+   "wrapT": 10497
+  },
+  {
+   "magFilter": 9729,
+   "minFilter": 9987,
+   "wrapS": 10497,
+   "wrapT": 10497
+  },
+  {
+   "magFilter": 9729,
+   "minFilter": 9987,
+   "wrapS": 10497,
+   "wrapT": 10497
+  }
+ ],
+ "scene": 0,
+ "scenes": [
+  {
+   "nodes": [
+    0
+   ]
+  }
+ ],
+ "textures": [
+  {
+   "sampler": 0,
+   "source": 0
+  },
+  {
+   "sampler": 1,
+   "source": 1
+  },
+  {
+   "sampler": 2,
+   "source": 2
+  }
+ ]
+}

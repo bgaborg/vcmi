@@ -1,0 +1,215 @@
+{
+ "accessors": [
+  {
+   "bufferView": 1,
+   "byteOffset": 0,
+   "componentType": 5126,
+   "normalized": false,
+   "count": 22934,
+   "type": "VEC3",
+   "max": [
+    0.9491839408874512,
+    0.4897259473800659,
+    0.6901689171791077
+   ],
+   "min": [
+    -0.9505779147148132,
+    -0.5444550514221191,
+    -0.6910790205001831
+   ]
+  },
+  {
+   "bufferView": 2,
+   "byteOffset": 0,
+   "componentType": 5126,
+   "normalized": false,
+   "count": 22934,
+   "type": "VEC2",
+   "max": [
+    0.9999780058860779,
+    0.9999849796295166
+   ],
+   "min": [
+    0.0,
+    2.0265579223632812e-06
+   ]
+  },
+  {
+   "bufferView": 3,
+   "byteOffset": 0,
+   "componentType": 5126,
+   "normalized": false,
+   "count": 22934,
+   "type": "VEC3",
+   "max": [
+    0.9999996423721313,
+    1.0,
+    0.9999996423721313
+   ],
+   "min": [
+    -0.9999991655349731,
+    -1.0,
+    -0.9999996423721313
+   ]
+  },
+  {
+   "bufferView": 0,
+   "componentType": 5125,
+   "normalized": false,
+   "count": 40221,
+   "type": "SCALAR"
+  }
+ ],
+ "asset": {
+  "generator": "pygltflib@v1.16.5",
+  "version": "2.0"
+ },
+ "bufferViews": [
+  {
+   "buffer": 0,
+   "byteOffset": 0,
+   "byteLength": 160884,
+   "target": 34963
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 160884,
+   "byteLength": 275208,
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 436092,
+   "byteLength": 183472,
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 619564,
+   "byteLength": 275208,
+   "target": 34962
+  }
+ ],
+ "buffers": [
+  {
+   "uri": "war_table.bin",
+   "byteLength": 894772
+  }
+ ],
+ "images": [
+  {
+   "uri": "war_table_albedo.jpg",
+   "mimeType": "image/jpeg"
+  },
+  {
+   "uri": "war_table_orm.jpg",
+   "mimeType": "image/jpeg"
+  },
+  {
+   "uri": "war_table_normal.jpg",
+   "mimeType": "image/jpeg"
+  }
+ ],
+ "materials": [
+  {
+   "pbrMetallicRoughness": {
+    "baseColorFactor": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "metallicFactor": 1.0,
+    "roughnessFactor": 1.0,
+    "baseColorTexture": {
+     "index": 0,
+     "texCoord": 0
+    },
+    "metallicRoughnessTexture": {
+     "index": 1,
+     "texCoord": 0
+    }
+   },
+   "normalTexture": {
+    "index": 2,
+    "texCoord": 0
+   },
+   "alphaMode": "OPAQUE",
+   "doubleSided": true
+  }
+ ],
+ "meshes": [
+  {
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 0,
+      "NORMAL": 2,
+      "TEXCOORD_0": 1
+     },
+     "indices": 3,
+     "mode": 4,
+     "material": 0
+    }
+   ]
+  }
+ ],
+ "nodes": [
+  {
+   "mesh": 0,
+   "name": "war_table",
+   "scale": [
+    1.03,
+    1.03,
+    1.03
+   ],
+   "translation": [
+    0.0,
+    0.5607887029647828,
+    0.0
+   ]
+  }
+ ],
+ "samplers": [
+  {
+   "magFilter": 9729,
+   "minFilter": 9987,
+   "wrapS": 10497,
+   "wrapT": 10497
+  },
+  {
+   "magFilter": 9729,
+   "minFilter": 9987,
+   "wrapS": 10497,
+   "wrapT": 10497
+  },
+  {
+   "magFilter": 9729,
+   "minFilter": 9987,
+   "wrapS": 10497,
+   "wrapT": 10497
+  }
+ ],
+ "scene": 0,
+ "scenes": [
+  {
+   "nodes": [
+    0
+   ]
+  }
+ ],
+ "textures": [
+  {
+   "sampler": 0,
+   "source": 0
+  },
+  {
+   "sampler": 1,
+   "source": 1
+  },
+  {
+   "sampler": 2,
+   "source": 2
+  }
+ ]
+}
