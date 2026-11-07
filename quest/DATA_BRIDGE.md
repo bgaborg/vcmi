@@ -129,6 +129,8 @@ The 2D animations must not slow the game down while the tabletop is shown, and t
 
 ### Sprites and textures
 
+Superseded by the milestone 3b research, [`MILESTONE_3B.md`](MILESTONE_3B.md) (indexed pages decoded with `CDefFile`, no `SDL_Surface`). The original plan, kept for history:
+
 - Godot asks for an animation by its table index. The bridge loads it through the game's cache (`ENGINE->renderHandler().loadAnimation`, `client/render/IRenderHandler.h:37-48`) at scale 1 (an xBRZ image can be an unfinished stand-in) and draws each frame into its own RGBA `SDL_Surface` on the game GUI thread.
 - Player colour mask: draw a frame twice with two `playerColored` colours; the pixels that differ are the mask. Godot applies the owner colour in a shader, so one texture serves all eight colours.
 - Godot packs the frames of many animations into a few large atlas pages (up to 1 852 animations on one map, milestone 0) and builds mipmaps; the bridge frees its surface once Godot has it. The decoded image also stays in the game's cache: that copy is counted in the memory budget.
@@ -247,7 +249,7 @@ In the game (`xr-minimap.sh`, `MAP_ROW=1`): the full list 4.7 ms once (53 808 ob
 0. **Baseline** (no code), **done 2026-11-06:** frame time, CPU and PSS on the heaviest map with xBRZ auto and `none`; object counts (section 4, Milestone 0 results).
 1. **Skeleton, done 2026-11-07:** `quest/bridge` with the table and version; the extension finds it after the game starts and logs the version; the lifecycle task survives new game, load, restart, replay and quit to menu; test command `bridge` in `main.gd`.
 2. **Minimap, done 2026-11-07:** tile snapshot and fog buffer into Godot textures on the war table; fog follows hero moves and the map reveal (section 4, Milestone 2 results). View Air / View Earth do not change the fog (`ViewWorldEffect.cpp` only reads it), so they are not a test for it.
-3. **Objects, in progress:** 3a, the object list and string table with markers on the minimap, done 2026-11-07 (section 4, Milestone 3a results); 3b, one atlas with the colour mask and the sprites in a MultiMesh on the minimap panel; 3c, the 3D-mode window and hero step timing through `waitForOngoingAnimations`.
+3. **Objects, in progress:** 3a, the object list and string table with markers on the minimap, done 2026-11-07 (section 4, Milestone 3a results); 3b, the sprites, researched in [`MILESTONE_3B.md`](MILESTONE_3B.md) (read it first; required checks in its section 1); 3c, the 3D-mode window and hero step timing through `waitForOngoingAnimations`.
 4. **Battle:** receiver, battle buffer and the blocking-confirmation timing.
 
 Phase 4 proper builds on 2 and 3; phase 5 on 4.

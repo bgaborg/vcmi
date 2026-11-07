@@ -38,7 +38,7 @@ Not closed yet:
 
 ### Next, in order
 
-1. **Data bridge milestone 3, objects:** 3b, the atlas with the colour mask and the sprites in a MultiMesh on the minimap; 3c, the 3D-mode window and hero step timing ([`DATA_BRIDGE.md` section 5](DATA_BRIDGE.md#5-milestones)).
+1. **Data bridge milestone 3, objects:** 3b, the map object sprites. **Read [`MILESTONE_3B.md`](MILESTONE_3B.md) first** (research findings, design and budgets). The next step is its section 1, the required checks, measured by plan step 1: the decode benchmark on the headset without the game (`.def` decode and atlas pack on the heaviest save). Then 3c, the 3D-mode window and hero step timing ([`DATA_BRIDGE.md` section 5](DATA_BRIDGE.md#5-milestones)).
 2. **Phase 4, tabletop adventure map:** builds on milestones 2 and 3.
 3. **Milestone 4, battle**, then **phase 5, battle diorama**.
 
