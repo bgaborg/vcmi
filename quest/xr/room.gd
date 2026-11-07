@@ -151,7 +151,23 @@ var _table_light := Vector3.ZERO ## where the candles on the war table light the
 var _materials := [] ## the tiled surface materials, for set_feature
 var _table := Transform3D() ## the war table, set in _build_props
 var _minimap: MeshInstance3D ## the game's minimap on the war table, from the data bridge (main.gd)
+var _markers: MultiMeshInstance3D ## heroes, towns and flaggable objects on the minimap, in unit space of the panel
 const MINIMAP_AREA := Vector2(0.8, 0.5) ## metres on the table inside the corner figures
+const MARKER_METRES := 0.012 ## width of an object marker on the minimap
+## markers sit in the fog unless their anchor or visitable tile is seen (INSTANCE_CUSTOM: both in minimap UV; the fog is x-major)
+const MARKER_SHADER := "shader_type spatial;
+render_mode unshaded, shadows_disabled;
+uniform sampler2D fog : filter_nearest;
+void vertex() {
+	float seen = max(textureLod(fog, INSTANCE_CUSTOM.yx, 0.0).r, textureLod(fog, INSTANCE_CUSTOM.wz, 0.0).r);
+	if (seen == 0.0) {
+		VERTEX = vec3(0.0);
+	}
+}
+void fragment() {
+	ALBEDO = COLOR.rgb;
+}
+"
 const MINIMAP_SHADER := "shader_type spatial;
 render_mode unshaded, shadows_disabled;
 uniform sampler2D terrain : source_color, filter_nearest_mipmap;
@@ -235,6 +251,26 @@ func _ready() -> void:
 	_minimap.transform = _table * Transform3D(Basis(), Vector3(0.0, TABLE_TOP + 0.015, 0.0))
 	_minimap.visible = false
 	_add(_minimap, "Minimap")
+	var marker_shader := Shader.new()
+	marker_shader.code = MARKER_SHADER
+	var marker_material := ShaderMaterial.new()
+	marker_material.shader = marker_shader
+	var marker_mesh := PlaneMesh.new()
+	marker_mesh.size = Vector2.ONE
+	marker_mesh.material = marker_material
+	var multimesh := MultiMesh.new()
+	multimesh.transform_format = MultiMesh.TRANSFORM_3D
+	multimesh.use_colors = true
+	multimesh.use_custom_data = true
+	multimesh.mesh = marker_mesh
+	# known bounds: Godot then skips computing them over every instance on each change
+	multimesh.custom_aabb = AABB(Vector3(-0.6, -0.1, -0.6), Vector3(1.2, 0.2, 1.2))
+	_markers = MultiMeshInstance3D.new()
+	_markers.multimesh = multimesh
+	_markers.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
+	_markers.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_markers.name = "Markers"
+	_minimap.add_child(_markers)
 
 
 ## The minimap from main.gd: new images when the game published them (else null), hidden outside a game
@@ -244,6 +280,7 @@ func set_minimap(terrain: Image, fog: Image, in_game: bool) -> void:
 		material.set_shader_parameter("terrain", ImageTexture.create_from_image(terrain))
 		var size := Vector2(terrain.get_size())
 		(_minimap.mesh as PlaneMesh).size = size * minf(MINIMAP_AREA.x / size.x, MINIMAP_AREA.y / size.y)
+		_markers.scale = Vector3(minimap_size().x, 1.0, minimap_size().y)
 	if fog != null:
 		var texture: ImageTexture = material.get_shader_parameter("fog")
 		if texture != null and texture.get_size() == Vector2(fog.get_size()):
@@ -251,6 +288,19 @@ func set_minimap(terrain: Image, fog: Image, in_game: bool) -> void:
 		else:
 			material.set_shader_parameter("fog", ImageTexture.create_from_image(fog))
 	_minimap.visible = in_game and material.get_shader_parameter("terrain") != null
+	var marker_material: ShaderMaterial = _markers.multimesh.mesh.material
+	if marker_material.get_shader_parameter("fog") != material.get_shader_parameter("fog"):
+		marker_material.set_shader_parameter("fog", material.get_shader_parameter("fog"))
+
+
+## metres of the minimap panel on the table
+func minimap_size() -> Vector2:
+	return (_minimap.mesh as PlaneMesh).size
+
+
+## the object markers, which VcmiData.update_markers fills (main.gd)
+func marker_multimesh() -> MultiMesh:
+	return _markers.multimesh
 
 
 func _make_environment() -> Environment:

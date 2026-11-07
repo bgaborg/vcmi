@@ -243,6 +243,8 @@ func _process(delta: float) -> void:
 	if vcmi_data != null:
 		var changed: int = vcmi_data.update()
 		room.set_minimap(vcmi_data.terrain_image() if changed & 1 else null, vcmi_data.fog_image() if changed & 2 else null, changed & 4 != 0)
+		if changed & (1 | 8): # the markers are placed by the map size, so new tiles move them too
+			vcmi_data.update_markers(room.marker_multimesh(), room.minimap_size(), room.MARKER_METRES)
 
 	for ray in rays:
 		ray.visible = false

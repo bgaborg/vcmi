@@ -29,6 +29,7 @@ As of 2026-11-07.
 | Data bridge milestone 0 | baseline on the heaviest map | [`DATA_BRIDGE.md`](DATA_BRIDGE.md#milestone-0-results-2026-11-06) |
 | Data bridge milestone 1 | skeleton: the Godot extension finds the game's table; lifecycle survives new game, load, restart, replay, quit | [`DATA_BRIDGE.md`](DATA_BRIDGE.md#milestone-1-results-2026-11-07) |
 | Data bridge milestone 2 | the game's minimap on the war table: tile snapshot and fog, within budget on the heaviest map | [`DATA_BRIDGE.md`](DATA_BRIDGE.md#milestone-2-results-2026-11-07) |
+| Data bridge milestone 3a | the object list: one full list per map (6 ms on the heaviest map), then the changed records (0.1 µs an object); markers on the minimap; `object-bench.sh` measures it on the headset without the game | [`DATA_BRIDGE.md`](DATA_BRIDGE.md#milestone-3a-results-2026-11-07-the-object-list) |
 | xBRZ default `none` | `VcmiBridge` writes `video.upscalingFilter: none` before the game starts when the player has not chosen a filter; no upstream change | [`DATA_BRIDGE.md`](DATA_BRIDGE.md#memory) |
 
 Not closed yet:
@@ -37,7 +38,7 @@ Not closed yet:
 
 ### Next, in order
 
-1. **Data bridge milestone 3, objects:** object buffer, atlas with colour mask, MultiMesh on the minimap, the 3D-mode window, hero step timing ([`DATA_BRIDGE.md` section 5](DATA_BRIDGE.md#5-milestones)).
+1. **Data bridge milestone 3, objects:** 3b, the atlas with the colour mask and the sprites in a MultiMesh on the minimap; 3c, the 3D-mode window and hero step timing ([`DATA_BRIDGE.md` section 5](DATA_BRIDGE.md#5-milestones)).
 2. **Phase 4, tabletop adventure map:** builds on milestones 2 and 3.
 3. **Milestone 4, battle**, then **phase 5, battle diorama**.
 

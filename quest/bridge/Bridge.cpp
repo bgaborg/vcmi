@@ -3,12 +3,15 @@
  * Compiled into libvcmiclient by clientapp/CMakeLists.txt when quest/bridge exists.
  * Milestone 1: the exported table, the lifecycle task and one map observer per game.
  * Milestone 2: the tile snapshot per map and the local team's fog, for the minimap in Godot.
+ * Milestone 3: the object list (ObjectScan), one full list per map and then the records the map events change.
  *
  * License: GNU General Public License v2.0 or later
  */
 #include "../../Global.h"
 
 #include "VcmiBridgeApi.h"
+// compiled here, so clientapp/CMakeLists.txt adds one file; the object benchmark compiles it on its own
+#include "ObjectScan.cpp"
 
 #include "../../client/CPlayerInterface.h"
 #include "../../client/GameEngine.h"
@@ -22,27 +25,37 @@
 #include "../../lib/TerrainHandler.h"
 #include "../../lib/callback/CCallback.h"
 #include "../../lib/int3.h"
+#include "../../lib/mapObjects/CGHeroInstance.h"
+#include "../../lib/mapObjects/MiscObjects.h"
+#include "../../lib/mapping/CMap.h"
 #include "../../lib/mapping/TerrainTile.h"
 
 namespace
 {
 
-// the game observes nothing yet; later milestones publish object state from these events
+void markObject(const CGObjectInstance * obj);
+void markRemoval(const CGObjectInstance * obj);
+void flushObjects();
+
+// Every event marks its object; the events after a change also publish it at once (hero step timing, milestone 3c
+// needs that), the others leave it to the next event or tick: before an erase or an owner change the old state is
+// still there. Owner changes come as InstantRemove + InstantAdd (NetPacksClient.cpp:731-753).
 class BridgeObserver final : public IMapObjectObserver
 {
 public:
 	bool hasOngoingAnimations() override { return false; }
-	void onObjectFadeIn(const CGObjectInstance *, const PlayerColor &) override {}
-	void onObjectFadeOut(const CGObjectInstance *, const PlayerColor &) override {}
-	void onObjectInstantAdd(const CGObjectInstance *, const PlayerColor &) override {}
-	void onObjectInstantRemove(const CGObjectInstance *, const PlayerColor &) override {}
-	void onHeroMoved(const CGHeroInstance *, const int3 &, const int3 &) override {}
-	void onBeforeHeroTeleported(const CGHeroInstance *, const int3 &, const int3 &) override {}
-	void onAfterHeroTeleported(const CGHeroInstance *, const int3 &, const int3 &) override {}
-	void onBeforeHeroEmbark(const CGHeroInstance *, const int3 &, const int3 &) override {}
-	void onAfterHeroEmbark(const CGHeroInstance *, const int3 &, const int3 &) override {}
-	void onBeforeHeroDisembark(const CGHeroInstance *, const int3 &, const int3 &) override {}
-	void onAfterHeroDisembark(const CGHeroInstance *, const int3 &, const int3 &) override {}
+	void onObjectFadeIn(const CGObjectInstance * obj, const PlayerColor &) override { markObject(obj); flushObjects(); }
+	void onObjectFadeOut(const CGObjectInstance * obj, const PlayerColor &) override { markRemoval(obj); }
+	void onObjectInstantAdd(const CGObjectInstance * obj, const PlayerColor &) override { markObject(obj); flushObjects(); }
+	void onObjectInstantRemove(const CGObjectInstance * obj, const PlayerColor &) override { markRemoval(obj); }
+	void onHeroMoved(const CGHeroInstance * hero, const int3 &, const int3 &) override { markObject(hero); flushObjects(); }
+	void onBeforeHeroTeleported(const CGHeroInstance * hero, const int3 &, const int3 &) override { markObject(hero); }
+	void onAfterHeroTeleported(const CGHeroInstance * hero, const int3 &, const int3 &) override { markObject(hero); flushObjects(); }
+	void onBeforeHeroEmbark(const CGHeroInstance * hero, const int3 &, const int3 &) override { markObject(hero); }
+	void onAfterHeroEmbark(const CGHeroInstance * hero, const int3 &, const int3 &) override { markObject(hero); flushObjects(); }
+	// the hero still has the boat here, not after
+	void onBeforeHeroDisembark(const CGHeroInstance * hero, const int3 &, const int3 &) override { markObject(hero); }
+	void onAfterHeroDisembark(const CGHeroInstance * hero, const int3 &, const int3 &) override { markObject(hero); flushObjects(); }
 };
 
 std::atomic<uint32_t> ticks{0};
@@ -63,6 +76,22 @@ std::array<uint32_t, VCMI_TERRAIN_COLOURS * 2> publishedColours{};
 VcmiGrid tilesGrid{};
 std::vector<uint8_t> publishedFog;
 VcmiGrid fogGrid{};
+std::vector<VcmiObject> publishedObjects;
+std::vector<std::string> publishedAnimations;
+std::deque<std::pair<uint32_t, int32_t>> changeLog; // sequence, object id; the oldest dropped past CHANGE_LOG
+constexpr size_t CHANGE_LOG = 4096;
+std::atomic<uint32_t> objectsSnapshot{0};
+std::atomic<uint32_t> objectsSequence{0};
+std::atomic<uint32_t> objectsMicros{0};
+std::atomic<uint32_t> changeMicros{0};
+
+// game threads, interfaceMutex held: the list of the map below, and the ids marked since the last flush
+ObjectScan scan;
+const CMap * scannedMap = nullptr;
+std::vector<int32_t> pendingIds;
+// objects about to be erased or changed with no event after it: encoded again each tick for 2 s, because the wait for
+// the 2D fade releases interfaceMutex before the erase (NetPacksClient.cpp:510-537), so a tick can see them unchanged
+std::vector<std::pair<int32_t, int>> removals; // id, ticks left
 
 // game thread only: the adventure map and size the tile snapshot was taken for
 std::weak_ptr<AdventureMapInterface> tilesMap;
@@ -134,6 +163,89 @@ void publishFog(const CCallback & cb, const int3 & size)
 	fogGrid = makeGrid(size, ++fogGeneration);
 }
 
+void markObject(const CGObjectInstance * obj)
+{
+	if(!obj)
+		return;
+	pendingIds.push_back(obj->id.getNum());
+	// a hero and its boat move and turn together
+	if(obj->ID == Obj::HERO)
+	{
+		const auto * hero = static_cast<const CGHeroInstance *>(obj);
+		if(hero->inBoat() && hero->getBoat())
+			pendingIds.push_back(hero->getBoat()->id.getNum());
+	}
+	else if(obj->ID == Obj::BOAT)
+		if(const auto * boat = dynamic_cast<const CGBoat *>(obj); boat && boat->getBoardedHero())
+			pendingIds.push_back(boat->getBoardedHero()->id.getNum());
+}
+
+void markRemoval(const CGObjectInstance * obj)
+{
+	markObject(obj);
+	if(obj)
+		removals.emplace_back(obj->id.getNum(), 20);
+	if(const auto * hero = dynamic_cast<const CGHeroInstance *>(obj); hero && hero->inBoat() && hero->getBoat())
+		removals.emplace_back(hero->getBoat()->id.getNum(), 20);
+}
+
+// game threads, interfaceMutex held: encodes the marked objects and publishes the records that changed
+void flushObjects()
+{
+	if(pendingIds.empty())
+		return;
+	const auto from = std::chrono::steady_clock::now();
+	const CMap * map = GAME->map().getMap();
+	if(map != scannedMap)
+	{
+		pendingIds.clear(); // the next tick takes the list of the new map
+		return;
+	}
+	std::sort(pendingIds.begin(), pendingIds.end());
+	pendingIds.erase(std::unique(pendingIds.begin(), pendingIds.end()), pendingIds.end());
+	std::erase_if(pendingIds, [map](int32_t id) { return !scan.update(*map, id); });
+	if(!pendingIds.empty())
+	{
+		const auto & records = scan.records();
+		std::lock_guard lock(publishedMutex);
+		if(publishedObjects.size() < records.size())
+			publishedObjects.resize(records.size());
+		uint32_t sequence = objectsSequence;
+		for(int32_t id : pendingIds)
+		{
+			publishedObjects[id] = records[id];
+			changeLog.emplace_back(++sequence, id);
+		}
+		while(changeLog.size() > CHANGE_LOG)
+			changeLog.pop_front();
+		for(size_t i = publishedAnimations.size(); i < scan.animations().size(); i++)
+			publishedAnimations.push_back(scan.animations()[i]);
+		objectsSequence = sequence;
+		changeMicros = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - from).count();
+	}
+	pendingIds.clear();
+}
+
+// game thread, interfaceMutex held: the whole list, once per map (and for each new observer, which may have missed
+// events)
+void publishObjectSnapshot()
+{
+	const auto from = std::chrono::steady_clock::now();
+	const CMap * map = GAME->map().getMap();
+	scan.snapshot(*map);
+	scannedMap = map;
+	pendingIds.clear();
+	removals.clear();
+	{
+		std::lock_guard lock(publishedMutex);
+		publishedObjects = scan.records();
+		publishedAnimations = scan.animations();
+		changeLog.clear();
+		++objectsSnapshot;
+	}
+	objectsMicros = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - from).count();
+}
+
 // on the game GUI thread, with interfaceMutex held
 void tick()
 {
@@ -148,6 +260,7 @@ void tick()
 	inGame = true;
 	const int3 size = GAME->interface() && GAME->interface()->cb ? GAME->interface()->cb->getMapSize() : int3();
 	mapSize = static_cast<uint32_t>(size.x) | static_cast<uint32_t>(size.y) << 12 | static_cast<uint32_t>(size.z) << 24;
+	bool listTaken = false;
 	if(size.x > 0 && size.y > 0 && size.z > 0)
 	{
 		const auto from = std::chrono::steady_clock::now();
@@ -164,6 +277,23 @@ void tick()
 		publishFog(cb, size);
 		if(newTiles || fogGeneration != fogBefore)
 			publishMicros = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - from).count();
+		listTaken = newTiles || scannedMap != GAME->map().getMap();
+		if(listTaken)
+			publishObjectSnapshot();
+		else
+		{
+			// a hero entering or leaving a garrison fires no map event (NetPacksClient.cpp:664-683): heroes are
+			// encoded again each tick, about 150 on a big map. Erased objects, marked by their FadeOut, flush here.
+			for(const ObjectInstanceID & hero : scannedMap->getHeroesOnMap())
+				pendingIds.push_back(hero.getNum());
+			for(auto & [id, left] : removals)
+			{
+				pendingIds.push_back(id);
+				left--;
+			}
+			std::erase_if(removals, [](const auto & removal) { return removal.second <= 0; });
+			flushObjects();
+		}
 	}
 	std::erase_if(observedMaps, [](const auto & map) { return map.expired(); });
 	for(const auto & map : observedMaps)
@@ -181,6 +311,8 @@ void tick()
 	// restores the old map with it still registered; a few dozen bytes per game. Freed if they ever hold buffers.
 	new BridgeObserver();
 	observers++;
+	if(!listTaken)
+		publishObjectSnapshot();
 
 	logGlobal->info("Quest bridge: observing a new adventure map %dx%dx%d (observer %d)", size.x, size.y, size.z, observers.load());
 }
@@ -229,6 +361,10 @@ void stats(VcmiBridgeStats * out)
 	out->tilesGeneration = tilesGeneration;
 	out->fogGeneration = fogGeneration;
 	out->publishMicros = publishMicros;
+	out->objectsSnapshot = objectsSnapshot;
+	out->objectsSequence = objectsSequence;
+	out->objectsMicros = objectsMicros;
+	out->changeMicros = changeMicros;
 }
 
 void copyTiles(VcmiTile * out, uint32_t capacity, uint32_t * colours, VcmiGrid * grid)
@@ -262,6 +398,60 @@ void copyFog(uint8_t * out, uint32_t capacity, VcmiGrid * grid)
 	std::copy(publishedFog.begin(), publishedFog.end(), out);
 }
 
+void copyObjects(VcmiObject * out, uint32_t capacity, VcmiObjectList * list)
+{
+	*list = {};
+	std::unique_lock lock(publishedMutex, std::try_to_lock);
+	if(!lock)
+		return;
+	list->count = publishedObjects.size();
+	list->animations = publishedAnimations.size();
+	if(capacity < publishedObjects.size())
+		return; // the count tells the caller how much to allocate
+	list->snapshot = objectsSnapshot;
+	list->sequence = objectsSequence;
+	std::copy(publishedObjects.begin(), publishedObjects.end(), out);
+}
+
+void copyObjectChanges(uint32_t snapshot, uint32_t since, VcmiObject * out, uint32_t capacity, VcmiObjectChanges * changes)
+{
+	*changes = {};
+	std::unique_lock lock(publishedMutex, std::try_to_lock);
+	if(!lock)
+		return;
+	const uint32_t sequence = objectsSequence;
+	changes->animations = publishedAnimations.size();
+	if(since == sequence && snapshot == objectsSnapshot)
+	{
+		changes->sequence = sequence;
+		return;
+	}
+	// the log must still hold every change after `since`
+	const auto first = std::upper_bound(changeLog.begin(), changeLog.end(), since, [](uint32_t value, const auto & entry) { return value < entry.first; });
+	const size_t count = changeLog.end() - first;
+	if(snapshot != objectsSnapshot || since > sequence || changeLog.empty() || changeLog.front().first > since + 1 || count > capacity)
+	{
+		changes->resync = 1;
+		return;
+	}
+	for(auto entry = first; entry != changeLog.end(); ++entry)
+		*out++ = publishedObjects[entry->second];
+	changes->count = count;
+	changes->sequence = sequence;
+}
+
+uint32_t copyAnimation(uint32_t index, char * out, uint32_t capacity)
+{
+	std::unique_lock lock(publishedMutex, std::try_to_lock);
+	if(!lock || index >= publishedAnimations.size() || capacity == 0)
+		return 0;
+	const std::string & name = publishedAnimations[index];
+	const size_t length = std::min<size_t>(name.size(), capacity - 1);
+	std::memcpy(out, name.data(), length);
+	out[length] = 0;
+	return length;
+}
+
 }
 
 extern "C" __attribute__((visibility("default"))) const VcmiBridgeApi vcmi_bridge_api = {
@@ -270,4 +460,7 @@ extern "C" __attribute__((visibility("default"))) const VcmiBridgeApi vcmi_bridg
 	stats,
 	copyTiles,
 	copyFog,
+	copyObjects,
+	copyObjectChanges,
+	copyAnimation,
 };

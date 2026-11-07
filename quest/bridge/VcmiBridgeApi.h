@@ -10,7 +10,7 @@
 #include <stdint.h>
 
 // raise on any change to the structs below; the extension refuses a table with another version
-#define VCMI_BRIDGE_VERSION 2
+#define VCMI_BRIDGE_VERSION 4
 
 typedef struct VcmiBridgeStats
 {
@@ -24,7 +24,49 @@ typedef struct VcmiBridgeStats
 	uint32_t tilesGeneration; // raised on each tile snapshot (new map), 0 before the first
 	uint32_t fogGeneration;   // raised each time the local team's fog changes
 	uint32_t publishMicros;   // game thread time of the last tile or fog publish
+	uint32_t objectsSnapshot;   // raised on each full object list (new map); 0 before the first
+	uint32_t objectsSequence;   // raised on each changed object record
+	uint32_t objectsMicros;     // game thread time of the last full object list
+	uint32_t changeMicros;      // game thread time of the last object change publish
 } VcmiBridgeStats;
+
+// one map object, as the 2D map draws it, at index `id` of the object list; the list holds every object, in the fog
+// or not: the reader hides those whose anchor and visitable tiles are both in the fog
+typedef struct VcmiObject
+{
+	uint32_t id;       // the game's object id, which is also its index in the list
+	uint16_t x, y;     // anchor tile: the bottom right of the object's sprite, as the game places it
+	uint8_t z;
+	uint8_t owner;     // player 0-7, 255 neutral, 254 unflaggable; a boat with a hero: the hero's owner
+	uint8_t group;     // animation group: the facing of heroes and boats, else 0
+	uint8_t visit;     // visitable tile = anchor - (visit >> 4, visit & 15)
+	uint16_t animation; // index into the animation names (VcmiBridgeApi.animation)
+	uint16_t flags;    // VCMI_OBJECT_*
+} VcmiObject;
+#define VCMI_OBJECT_HERO 1
+#define VCMI_OBJECT_BOAT 2
+#define VCMI_OBJECT_TOWN 4
+#define VCMI_OBJECT_FLAGGABLE 8 // drawn with the owner's colour
+#define VCMI_OBJECT_VISITABLE 16
+#define VCMI_OBJECT_PRESENT 32 // a drawn object; a record without it is an empty slot (no object, or erased)
+#define VCMI_OBJECT_HIDDEN 64  // a hero in a garrison or a boat: the 2D map does not draw it
+
+typedef struct VcmiObjectList
+{
+	uint32_t snapshot;   // 0: nothing copied (no map, buffer too small, or the game is writing: try next frame)
+	uint32_t sequence;   // the list includes every change up to this one
+	uint32_t count;      // records in the list
+	uint32_t animations; // animation names, indices 0 to animations - 1; a new snapshot starts the table again
+} VcmiObjectList;
+
+typedef struct VcmiObjectChanges
+{
+	uint32_t sequence;   // the changes copied run up to this one; 0 when nothing was copied
+	uint32_t count;      // records copied (one per change, so an object can appear more than once: apply in order)
+	uint32_t animations; // as VcmiObjectList
+	uint8_t resync;      // 1: the changes asked for are gone (another snapshot, or too many): take the whole list
+	uint8_t pad[3];
+} VcmiObjectChanges;
 
 // one tile as the game stores it; terrain, river and road are the game's ids
 typedef struct VcmiTile
@@ -58,4 +100,12 @@ typedef struct VcmiBridgeApi
 	void (*tiles)(VcmiTile * out, uint32_t capacity, uint32_t * colours, VcmiGrid * grid);
 	// copies the local team's fog, 1 byte per tile, nonzero where visible; never waits, any thread
 	void (*fog)(uint8_t * out, uint32_t capacity, VcmiGrid * grid);
+	// copies the object list (list->count records); never waits, any thread
+	void (*objects)(VcmiObject * out, uint32_t capacity, VcmiObjectList * list);
+	// copies the current records of the objects changed after sequence `since` of snapshot `snapshot`; never waits,
+	// any thread
+	void (*objectChanges)(uint32_t snapshot, uint32_t since, VcmiObject * out, uint32_t capacity, VcmiObjectChanges * changes);
+	// copies the name of animation `index` (an AnimationPath, NUL-terminated, cut to capacity) and returns its
+	// length, 0 when unknown or the game is writing; any thread
+	uint32_t (*animation)(uint32_t index, char * out, uint32_t capacity);
 } VcmiBridgeApi;

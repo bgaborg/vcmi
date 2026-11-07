@@ -1,6 +1,6 @@
 # Data bridge: game data from VCMI to Godot
 
-Status: option C chosen 2026-11-06; milestones 0, 1 and 2 done, milestone 3 (objects) is next ([section 5](#5-milestones), [`PROJECT_PLAN.md`](PROJECT_PLAN.md#0-status-and-next-steps)).
+Status: option C chosen 2026-11-06; milestones 0, 1 and 2 done, milestone 3 (objects) in progress: 3a, the object list, done ([section 5](#5-milestones), [`PROJECT_PLAN.md`](PROJECT_PLAN.md#0-status-and-next-steps)).
 
 Phases 4 (tabletop adventure map) and 5 (battle diorama) draw the game in 3D in Godot. Godot needs game data (tiles, objects, fog, heroes, battle stacks), not pixels. This plan picks how the data gets from the VCMI client to Godot, with the fewest changes to upstream VCMI and the lowest cost in CPU and memory on Quest 3.
 
@@ -85,15 +85,16 @@ Upstream change, `clientapp/CMakeLists.txt` (4 lines, inside its `if(ANDROID)`):
 
 ### Data flow: latest state, not event streams
 
-The whole state is small (below), so the bridge publishes full state instead of deltas:
+Tiles and fog are small, so the bridge publishes their full state; objects are many (64 743 on the heaviest map), so after one full list per map it publishes the records that changed:
 
 - **Published copy under a lock Godot only tries** (built in milestone 2 for tiles and fog): the game copies the full current state into the bridge's copy under a small mutex (never `interfaceMutex`) and raises a generation counter; Godot reads the counters each frame and copies only when one changed, with `try_lock`, so it never waits and simply tries again next frame when the game is writing. Simpler than the triple buffer planned first and enough at these sizes; a triple buffer (atomic index exchange) only if a milestone measures lock contention.
-- **When the game publishes:** in the 100 ms lifecycle task (objects later also at the end of each observer event), only if something changed (an object event happened or the team's `fogOfWarMap` differs from the last copy: a 127 KB compare, about 15 µs). The fog array covers every source: hero sight, spells, observatories, Cartographers, allied vision, Cover of Darkness.
+- **When the game publishes:** tiles and fog in the 100 ms lifecycle task, objects at the map events (below), only if something changed (an object event happened or the team's `fogOfWarMap` differs from the last copy: a 127 KB compare, about 15 µs). The fog array covers every source: hero sight, spells, observatories, Cartographers, allied vision, Cover of Darkness.
 - **Tiles:** one snapshot per map load (terrain does not change in play), as a plain array the extension reads once.
 - **Current animation:** one record in the object state (hero step from / to / duration, fade, teleport) with a sequence number. The game waits for each step (below), so at most one animation is pending; Godot echoes the sequence number to confirm it.
 - **One producer at a time:** publishes come from the network thread and the GUI thread, both holding `interfaceMutex`; the windows in which the lock is released are waits that publish nothing.
-- **Godot side:** each frame one atomic load per buffer; an apply only when fresh. Godot compares objects by id in native code.
-- **Hidden objects:** filtered as the 2D view does: an object is shown when its visitable tile or any of its tiles is visible for the local team.
+- **Objects (milestone 3a): one record per object id, then the changes.** `quest/bridge/ObjectScan` encodes the objects as the 2D map draws them, indexed by the game's object id (`CMap::objects`). The bridge publishes the whole list once per map (and for each new observer), then each map event marks its object (and a hero's boat); the events after a change (`onHeroMoved`, After*, FadeIn, InstantAdd) encode the marked objects at once and publish the records that changed, with a sequence number, into a log of the last 4 096 changes. Events before a change (FadeOut, InstantRemove, Before*) only mark: the old state is still there; the next event or tick publishes them. FadeOut and InstantRemove objects are encoded again on every tick for 2 s, because the wait for the 2D fade releases `interfaceMutex` before the erase (`NetPacksClient.cpp:510-537`) and no event follows it. A boat with a hero on board carries the hero's owner and stands in for the hero, whom the 2D map hides. Owner changes come as InstantRemove + InstantAdd (`NetPacksClient.cpp:731-753`), so no scan is needed for them; a hero entering or leaving a garrison fires no event (`NetPacksClient.cpp:664-683`), so the tick encodes the heroes on the map again (130 heroes: 5.5 µs). Godot asks for the changes after its sequence number and gets the whole list instead when the log no longer holds them (`resync`).
+- **Godot side:** each frame one call for the counters; a copy only when one changed. Object changes update only their MultiMesh instances (`set_instance_*`), with spare instances for objects that appear; a new list fills the whole MultiMesh once.
+- **Hidden objects:** heroes in a garrison or a boat are flagged hidden, as the 2D map hides them (`MapRendererBaseContext::objectTransparency`). Objects in the fog are hidden by the reader: the shader drops an object whose anchor and visitable tiles are both in the fog (the 2D view checks every tile of the object).
 - **Fog layout:** copied as the game stores it (x-major), straight into the Godot byte array; Godot uploads it as an H x (W x levels) texture and the shader swaps the axes (`UV.yx`). Reordering it in the extension cost 0.3-0.5 ms per update on the heaviest map.
 - **Tile layout:** the extension turns the snapshot into one RGBA image per map with the game's minimap colours (`TerrainType::minimapUnblocked` / `minimapBlocked`, sent in the snapshot), the levels side by side, mipmapped.
 
@@ -101,7 +102,7 @@ The whole state is small (below), so the bridge publishes full state instead of 
 
 ```
 struct VcmiTile   { uint8_t terrain, terrainView, river, riverDir, road, roadDir, flags, pad; };  // 8 bytes
-struct VcmiObject { uint32_t id; uint16_t x, y; uint8_t z, owner, group, frame;
+struct VcmiObject { uint32_t id; uint16_t x, y; uint8_t z, owner, group, visit;
                     uint16_t animation, flags; };                                                   // 16 bytes
 struct VcmiMove   { uint32_t sequence, object; uint16_t fromX, fromY, toX, toY; uint8_t fromZ, toZ, type, pad;
                     uint32_t durationMs; };                                                         // 24 bytes, one in the object state
@@ -109,8 +110,8 @@ struct VcmiMove   { uint32_t sequence, object; uint16_t fromX, fromY, toX, toY; 
 
 - Tiles: 127 008 x 8 bytes = 1 MB, once per map.
 - Fog: up to 127 KB (1 byte per tile, as the game stores it), three buffers: 381 KB.
-- Objects: 5 000 x 16 bytes = 80 KB, three buffers: 240 KB.
-- Animation names: a string table sent with the tile snapshot (`animation` is its index).
+- Objects: 64 743 x 16 bytes = 1 MB on the heaviest map (the bridge's table, its published copy and Godot's copy), plus a log of 4 096 changes. Frames advance in the shader from time, so the record has no frame; `visit` is the offset of the visitable tile.
+- Animation names: a string table published with the object list (`animation` is its index; 1 875 names on the heaviest map).
 - Battle: under 4 KB.
 
 ### Animation timing
@@ -219,10 +220,26 @@ Measured with `quest/tools/xr-perf.sh` on the heaviest map, [HotA] Might and Mag
 - First version: the fog image was reordered and mipmapped in the extension, 0.27-0.53 ms per update on the heaviest map, over budget; the shader's axis swap removed that.
 - Godot 4.7.2: a `Shader` whose code is set after it went into the `ShaderMaterial` draws flat grey; `room.gd` sets the code first.
 
+### Milestone 3a results (2026-11-07): the object list
+
+First version: a full scan of all objects on every map event and once a second (owner changes looked event-less), with a memcmp against the last list: 16 ms on the first scenario, because `visitablePos()` formats a debug log message for every scenery object; 6.3 ms on the heaviest map once that was avoided. Replaced by the record-per-id list with a change log (section 3).
+
+`quest/tools/object-bench.sh` runs `ObjectScan` on the headset without the game (a benchmark library started by `app_process`, about a minute per change); the heaviest map's autosave (64 743 object slots, 64 430 drawn, 130 heroes, 17 522 visitable, 1 557 minimap markers, 1 875 animations):
+
+| Item | Measured | Budget |
+|---|---|---|
+| Full list, once per map | 6.2 ms best, 6.7 ms mean | < 30 ms |
+| Tick: all heroes encoded again | 5.5 µs | < 50 µs |
+| Map event: one object encoded | 0.1 µs | < 0.3 ms |
+| Copy of the whole list (published for a new map) | 52-110 µs | |
+
+In the game (`xr-minimap.sh`, `MAP_ROW=1`): the full list 4.7 ms once (53 808 objects at the map start), a change publish 2-3 µs, Godot's update 0.14-0.15 ms per frame with fresh data (mostly the fog). An enemy turn on the first scenario published 32 changes; `xr-lifecycle.sh` takes one full list per new game, load, restart and replay pass. The markers (heroes, towns and flaggable objects in the player's colour, hidden in the fog by the shader) are the visible check until the sprites of milestone 3b.
+
 ### How to measure
 
 - `quest.sh sample` and `xr-perf.sh` ([`PHASE2.md`](PHASE2.md#working-on-the-headset)). A Perfetto trace (`adb shell perfetto`) only when a number needs explaining.
-- Bridge timers: producer and consumer timings, to be added to the stats the test command `bridge` prints (today: ticks, observers, in game, map).
+- Bridge timers: the test command `bridge` prints the stats, with the game-side times of the last tile/fog publish (`publish_us`), full object list (`objects_us`) and object change publish (`change_us`), and Godot's last update (`consume_us`).
+- `quest/tools/object-bench.sh` for the object list on the headset without the game: real timings in about a minute per change.
 - Each milestone records its numbers in this file. A milestone over budget is optimised before the next one starts.
 
 ## 5. Milestones
@@ -230,7 +247,7 @@ Measured with `quest/tools/xr-perf.sh` on the heaviest map, [HotA] Might and Mag
 0. **Baseline** (no code), **done 2026-11-06:** frame time, CPU and PSS on the heaviest map with xBRZ auto and `none`; object counts (section 4, Milestone 0 results).
 1. **Skeleton, done 2026-11-07:** `quest/bridge` with the table and version; the extension finds it after the game starts and logs the version; the lifecycle task survives new game, load, restart, replay and quit to menu; test command `bridge` in `main.gd`.
 2. **Minimap, done 2026-11-07:** tile snapshot and fog buffer into Godot textures on the war table; fog follows hero moves and the map reveal (section 4, Milestone 2 results). View Air / View Earth do not change the fog (`ViewWorldEffect.cpp` only reads it), so they are not a test for it.
-3. **Objects:** object buffer, string table, one atlas with the colour mask, a MultiMesh on the minimap panel; the 3D-mode window; hero step timing through `waitForOngoingAnimations`.
+3. **Objects, in progress:** 3a, the object list and string table with markers on the minimap, done 2026-11-07 (section 4, Milestone 3a results); 3b, one atlas with the colour mask and the sprites in a MultiMesh on the minimap panel; 3c, the 3D-mode window and hero step timing through `waitForOngoingAnimations`.
 4. **Battle:** receiver, battle buffer and the blocking-confirmation timing.
 
 Phase 4 proper builds on 2 and 3; phase 5 on 4.

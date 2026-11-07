@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Minimap test on the headset (quest/DATA_BRIDGE.md milestone 2): starts the first scenario, looks at the war table,
 # moves the hero a few tiles, then reveals the map with the vcmieagles cheat. After each step a screenshot and the
-# bridge stats; the fog generation must rise after the moves and after the cheat, the tile snapshot stays one.
+# bridge stats; the fog generation must rise after the moves and after the cheat, the object list after the moves,
+# the tile snapshot stays one.
 # Screenshots and the stats in quest/out/minimap-<time>/.
 # MAP_ROW=<n> plays row n of the G-size maps instead (1: the heaviest, as xr-perf.sh), PLAYER its first player (red).
 # Godot frame timings while the table shows the revealed map: sample.csv.
@@ -63,3 +64,6 @@ echo "$OUT"
 [ "$(fog 2-moved)" -gt "$(fog 1-start)" ] || { echo "fog did not change with the hero moves" >&2; exit 1; }
 [ "$(fog 3-revealed)" -gt "$(fog 2-moved)" ] || { echo "fog did not change with the cheat" >&2; exit 1; }
 [ "$(grep -c '"tiles_generation": 1,' "$OUT/stats.txt")" = 3 ] || { echo "tile snapshot not taken exactly once" >&2; exit 1; }
+objects() { sed -n "s/^$1:.*\"objects_sequence\": \([0-9]*\).*/\1/p" "$OUT/stats.txt"; }
+grep -q '"objects": [1-9]' "$OUT/stats.txt" || { echo "no objects" >&2; exit 1; }
+[ "$(objects 2-moved)" -gt "$(objects 1-start)" ] || { echo "objects did not change with the hero moves" >&2; exit 1; }

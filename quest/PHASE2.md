@@ -86,6 +86,7 @@ Keys and text into the game itself: its display id is in `dumpsys display` ("VCM
 | Script | What | When |
 |---|---|---|
 | `xr-smoke.sh [apk]` | start to the adventure map in ~20 s, screenshot per step (`quest/out/smoke-<time>/`); sets screen 2 m x 2.4 m and the war room | after every change to the host or the APK |
+| `object-bench.sh build` (WSL), `object-bench.sh run [save] [repeats]` | the bridge's object list (`quest/bridge/ObjectScan`) on the headset without the APK or a game: loads a save with VCMI's library through `app_process` and times the full list and the per-event updates, with a self-check; about a minute per change | after changes to `ObjectScan` |
 | `[MAP_ROW=1] xr-minimap.sh [apk]` | minimap on the war table: screenshots and bridge stats at the start, after hero moves and after the map reveal, GPU sample; fails when the fog does not follow; `MAP_ROW=1` on the heaviest G map for the budgets | after changes to the minimap, `quest/bridge` or the extension |
 | `xr-lifecycle.sh [apk]` | data bridge lifecycle: new game, save / load, restart, replay, quit; checks observer counts itself and fails on a difference | after changes to `quest/bridge` or the extension |
 | `xr-perf.sh <filter> [row] [rows] [player]` | the heaviest-map stress run (DATA_BRIDGE milestone 0), at most 15 min; sets `video.upscalingFilter` for the run and restores `settings.json` | only to compare a new view against the 2D baseline. The heaviest map ([HotA] Might and Magic, row 5) needs `"maps.famousmaps" : true` in the headset's `config/modSettings.json` |
