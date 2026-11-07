@@ -101,7 +101,7 @@ The goal: `git rebase upstream/develop` has no conflicts in normal weeks.
 1. New code goes only into new files: `quest/`, `android/vcmi-app/src/quest/`, `android/vcmi-app/quest.gradle`, `.github/workflows/quest.yml`.
 2. No change to VCMI C++ (`client/`, `clientsdl3/`, `lib/`, ...) unless a phase cannot work without it. Then a small generic hook, proposed upstream first.
 3. Every change to an upstream file is in the table below and is a few lines. Today they are spread over several commits; the next rebase squashes them into one `quest: upstream hooks` commit at the bottom of the series, so conflicts can only land there.
-4. Every Monday `quest.yml` rebases `quest` on vcmi/vcmi `develop` inside the runner and builds the APK; nothing is pushed. A failed run means the real rebase needs work. GitHub stops schedules after 60 days without repository activity.
+4. Planned, not set up yet: a weekly run of `quest.yml` that rebases `quest` on vcmi/vcmi `develop` inside the runner and builds the APK, without pushing. Schedules run from the default branch (`quest` on the fork); in GitHub expressions a bare `0` is falsy, so a conditional full checkout needs `'0'`.
 
 ### Changes to upstream files (keep this list short)
 
@@ -113,7 +113,7 @@ Checked against the merge base with `develop` on 2026-11-07; nothing else outsid
 | `android/vcmi-app/src/main/java/eu/vcmi/vcmi/ActivityLauncher.java` | Play starts the immersive activity if the build declares one, then closes the launcher task (16 lines) | the launcher starts `VcmiSDLActivity` by class |
 | `clientapp/CMakeLists.txt` | adds `quest/bridge/Bridge.cpp` to `vcmiclient` on Android when it exists (4 lines) | the data bridge must be in the game library to reach the client and its lock ([`DATA_BRIDGE.md`](DATA_BRIDGE.md)) |
 
-Remotes: `origin` is the fork, `upstream` is `https://github.com/vcmi/vcmi.git`. To rebase: `git fetch upstream develop && git rebase upstream/develop`.
+Remotes: `origin` is the fork. Planned: add `upstream` (`https://github.com/vcmi/vcmi.git`) for the first rebase: `git fetch upstream develop && git rebase upstream/develop`.
 
 ## 2. Constraints
 

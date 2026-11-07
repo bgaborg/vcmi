@@ -4,16 +4,12 @@ name: Quest Build
 # Signed with the daily key from CI/android, so the fork needs no secrets.
 # Steps mirror the android-64 job of github.yml.
 
-# Manual, and weekly on upstream: the scheduled run rebases `quest` on vcmi/vcmi `develop` inside the runner and builds,
-# so a conflict or a broken build shows up early. Nothing is pushed; the real rebase stays a manual step.
-# Schedules run from the default branch, which is `quest` on the fork.
+# Manual only for now; builds are local during phase 1. Add `push: branches: [quest]` in a later phase.
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 3 * * 1'
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -34,16 +30,6 @@ jobs:
       uses: actions/checkout@v7
       with:
         submodules: recursive
-        fetch-depth: ${{ github.event_name == 'schedule' && '0' || '1' }} # quoted: a bare 0 is falsy and would always give 1
-
-    - name: Rebase on upstream develop (weekly run)
-      if: github.event_name == 'schedule'
-      run: |
-        git config user.name "quest rebase check"
-        git config user.email "quest-rebase@localhost"
-        git fetch https://github.com/vcmi/vcmi.git develop
-        git rebase FETCH_HEAD
-        git submodule update --init --recursive
 
     - name: Free up disk space
       run: |
