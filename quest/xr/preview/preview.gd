@@ -62,6 +62,9 @@ func _ready() -> void:
 		fog.fill(Color8(1, 1, 1)) # all visible, to check the terrain
 		room.set_minimap(terrain, fog, true)
 	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("table_zoom="): # table_zoom=factor,u,v: the minimap's own zoom (room.set_zoom)
+			var v := arg.get_slice("=", 1).split(",")
+			room.set_zoom(float(v[0]), Vector2(float(v[1]), float(v[2])))
 		if arg.begins_with("zoom="):
 			ZOOM_TILE = Vector2(float(arg.get_slice("=", 1).get_slice(",", 0)), float(arg.get_slice("=", 1).get_slice(",", 1)))
 	if FileAccess.file_exists(SPRITES):
@@ -123,6 +126,7 @@ func _load_sprites(room: Node3D) -> void:
 	multimesh.instance_count = data.count
 	multimesh.buffer = data.buffer
 	room.set_sprites(layers, image.call(data.table), true)
+	room.show_sprites(true)
 	var minimap: Transform3D = room._table * Transform3D(Basis(), Vector3(0.0, room.TABLE_TOP, 0.0))
 	views["sprites"] = [minimap * Vector3(0.0, 0.45, 0.15), minimap.origin]
 	views["sprites-close"] = [minimap * Vector3(0.0, 0.25, 0.08), minimap.origin]

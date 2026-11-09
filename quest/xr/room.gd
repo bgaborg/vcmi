@@ -155,17 +155,23 @@ var _markers: MultiMeshInstance3D ## heroes, towns and flaggable objects on the 
 const MINIMAP_AREA := Vector2(0.8, 0.5) ## metres on the table inside the corner figures
 const MARKER_METRES := 0.012 ## width of an object marker on the minimap
 var _sprites: MultiMeshInstance3D ## the objects' sprites from the atlas (quest/MILESTONE_3B.md), VcmiData.update_sprites
+var zoom := 1.0 ## the minimap shows 1 / zoom of the map (set_zoom)
+var zoom_centre := Vector2(0.5, 0.5) ## in minimap UV: both levels side by side
+var map_cells := Vector2i.ZERO ## tiles of the terrain image: width * levels, height
 ## The sprites of the map objects from the atlas pages (VcmiData.update_sprites, quest/MILESTONE_3B.md): the quad of the
 ## current frame, built from the frame table; pixels -> panel by the instance transform. Premultiplied colour, drawn in
 ## instance order without depth (the order is the 2D map's). The owner colour goes on the mask of owned objects.
 const SPRITE_SHADER := "shader_type spatial;
 render_mode unshaded, shadows_disabled, blend_premul_alpha, depth_draw_never, cull_disabled;
-uniform sampler2DArray atlas : filter_linear_mipmap; // premultiplied sRGB: decoded after dividing by alpha
+uniform sampler2DArray atlas : source_color, filter_linear_mipmap; // premultiplied in linear light, sRGB-encoded (SpriteAtlas.h)
 uniform sampler2DArray masks : filter_linear_mipmap;
 uniform sampler2D frames : filter_nearest;
 uniform sampler2D fog : filter_nearest;
 uniform vec4 owner_colours[9];
 uniform bool precision_check = false;
+uniform mat4 world_to_panel; // the minimap's world transform, inverted: content outside the panel is cut
+uniform vec2 panel_half = vec2(1000.0);
+varying vec2 panel_xz;
 varying vec3 page_uv;
 varying flat int owner;
 varying flat float lost;
@@ -194,13 +200,17 @@ void vertex() {
 	if (seen == 0.0) {
 		VERTEX = vec3(0.0);
 	}
+	panel_xz = (world_to_panel * (MODEL_MATRIX * vec4(VERTEX, 1.0))).xz;
 }
 void fragment() {
+	if (abs(panel_xz.x) > panel_half.x || abs(panel_xz.y) > panel_half.y) {
+		discard;
+	}
 	vec4 c = texture(atlas, page_uv);
-	// sRGB to linear on the straight colour, then premultiplied again
-	vec3 straight = c.a > 0.0 ? c.rgb / c.a : vec3(0.0);
-	vec3 linear = mix(straight / 12.92, pow((straight + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), straight));
-	c.rgb = linear * c.a;
+	// most of a sprite's quad is clear: no blending there (MILESTONE_3B.md section 1e)
+	if (c.a < 0.004) {
+		discard;
+	}
 	if (owner < 9) {
 		c.rgb = mix(c.rgb, owner_colours[owner].rgb * c.a, texture(masks, page_uv).r);
 	}
@@ -215,13 +225,20 @@ void fragment() {
 const MARKER_SHADER := "shader_type spatial;
 render_mode unshaded, shadows_disabled;
 uniform sampler2D fog : filter_nearest;
+uniform mat4 world_to_panel; // the minimap's world transform, inverted: content outside the panel is cut
+uniform vec2 panel_half = vec2(1000.0);
+varying vec2 panel_xz;
 void vertex() {
 	float seen = max(textureLod(fog, INSTANCE_CUSTOM.yx, 0.0).r, textureLod(fog, INSTANCE_CUSTOM.wz, 0.0).r);
 	if (seen == 0.0) {
 		VERTEX = vec3(0.0);
 	}
+	panel_xz = (world_to_panel * (MODEL_MATRIX * vec4(VERTEX, 1.0))).xz;
 }
 void fragment() {
+	if (abs(panel_xz.x) > panel_half.x || abs(panel_xz.y) > panel_half.y) {
+		discard;
+	}
 	ALBEDO = COLOR.rgb;
 }
 "
@@ -229,9 +246,12 @@ const MINIMAP_SHADER := "shader_type spatial;
 render_mode unshaded, shadows_disabled;
 uniform sampler2D terrain : source_color, filter_nearest_mipmap;
 uniform sampler2D fog : filter_linear;
+uniform float zoom = 1.0; // set_zoom: the panel shows 1 / zoom of the map around centre
+uniform vec2 centre = vec2(0.5);
 void fragment() {
+	vec2 uv = (UV - 0.5) / zoom + centre;
 	// the fog image is x-major (VcmiData.fog_image), 1 of 255 where visible
-	ALBEDO = texture(terrain, UV).rgb * min(texture(fog, UV.yx).r * 255.0, 1.0) * 0.85;
+	ALBEDO = texture(terrain, uv).rgb * min(texture(fog, uv.yx).r * 255.0, 1.0) * 0.85;
 }
 "
 
@@ -352,6 +372,7 @@ func _ready() -> void:
 	_sprites.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
 	_sprites.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_sprites.name = "Sprites"
+	_sprites.visible = false
 	_minimap.add_child(_sprites)
 
 
@@ -362,8 +383,8 @@ func set_minimap(terrain: Image, fog: Image, in_game: bool) -> void:
 		material.set_shader_parameter("terrain", ImageTexture.create_from_image(terrain))
 		var size := Vector2(terrain.get_size())
 		(_minimap.mesh as PlaneMesh).size = size * minf(MINIMAP_AREA.x / size.x, MINIMAP_AREA.y / size.y)
-		_markers.scale = Vector3(minimap_size().x, 1.0, minimap_size().y)
-		_sprites.scale = _markers.scale
+		map_cells = Vector2i(terrain.get_size())
+		set_zoom(zoom, zoom_centre)
 	if fog != null:
 		var texture: ImageTexture = material.get_shader_parameter("fog")
 		if texture != null and texture.get_size() == Vector2(fog.get_size()):
@@ -377,6 +398,45 @@ func set_minimap(terrain: Image, fog: Image, in_game: bool) -> void:
 	var sprite_material: ShaderMaterial = _sprites.multimesh.mesh.material
 	if sprite_material.get_shader_parameter("fog") != material.get_shader_parameter("fog"):
 		sprite_material.set_shader_parameter("fog", material.get_shader_parameter("fog"))
+
+
+## The minimap shows 1 / `factor` of the map around `centre` (minimap UV), clamped to the map: the terrain by its UV,
+## the markers and sprites by their node's transform, cut at the panel's edge in their shaders. Test command
+## `table_zoom` (main.gd); grab and pinch come with phase 4. shortcut: markers grow with the zoom (sprites replace
+## them when close)
+func set_zoom(factor: float, centre: Vector2) -> void:
+	zoom = maxf(factor, 1.0)
+	var half := 0.5 / zoom
+	zoom_centre = Vector2(clampf(centre.x, half, 1.0 - half), clampf(centre.y, half, 1.0 - half))
+	var material: ShaderMaterial = _minimap.material_override
+	material.set_shader_parameter("zoom", zoom)
+	material.set_shader_parameter("centre", zoom_centre)
+	var size := minimap_size()
+	# a point at minimap UV u lands at (u - centre) * size * zoom
+	var content := Transform3D(Basis.from_scale(Vector3(size.x * zoom, 1.0, size.y * zoom)),
+			Vector3(-zoom_centre.x * size.x * zoom, 0.0, -zoom_centre.y * size.y * zoom))
+	_markers.transform = content * Transform3D(Basis(), Vector3(0.5, 0.0, 0.5))
+	_sprites.transform = _markers.transform
+	for node in [_markers, _sprites]:
+		var shader_material: ShaderMaterial = node.multimesh.mesh.material
+		shader_material.set_shader_parameter("world_to_panel", Projection(_minimap.global_transform.affine_inverse()))
+		shader_material.set_shader_parameter("panel_half", size * 0.5)
+
+
+## the tiles the minimap shows now, in map UV: position and size
+func visible_uv() -> Rect2:
+	return Rect2(zoom_centre - Vector2.ONE * 0.5 / zoom, Vector2.ONE / zoom)
+
+
+## the minimap's centre in the world
+func minimap_centre() -> Vector3:
+	return _minimap.global_position
+
+
+## sprites instead of markers, or back (main.gd: by the size of a tile on screen)
+func show_sprites(on: bool) -> void:
+	_sprites.visible = on
+	_markers.visible = not on
 
 
 ## metres of the minimap panel on the table
@@ -402,7 +462,6 @@ func set_sprites(textures: Array, table: Image, precision_check: bool) -> void:
 	material.set_shader_parameter("masks", textures[1])
 	material.set_shader_parameter("frames", ImageTexture.create_from_image(table))
 	material.set_shader_parameter("precision_check", precision_check)
-	_markers.visible = false
 
 
 func _make_environment() -> Environment:

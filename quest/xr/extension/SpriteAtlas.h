@@ -465,15 +465,70 @@ private:
 		f.height = uint16_t(h);
 	}
 
-	// colour times alpha: mipmaps then blend edges right, and the shader blends premultiplied
+	// sRGB byte -> linear, and linear (0..4095) -> sRGB byte
+	static const std::pair<std::array<float, 256>, std::array<uint8_t, 4096>> & srgbTables()
+	{
+		static const auto tables = []()
+		{
+			std::pair<std::array<float, 256>, std::array<uint8_t, 4096>> t;
+			for(int i = 0; i < 256; i++)
+			{
+				const float c = i / 255.0f;
+				t.first[i] = c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
+			}
+			for(int i = 0; i < 4096; i++)
+			{
+				const float l = i / 4095.0f;
+				const float c = l <= 0.0031308f ? l * 12.92f : 1.055f * std::pow(l, 1.0f / 2.4f) - 0.055f;
+				t.second[i] = uint8_t(std::lround(std::clamp(c, 0.0f, 1.0f) * 255.0f));
+			}
+			return t;
+		}();
+		return tables;
+	}
+
+	// colour times alpha in linear light, stored sRGB-encoded: the GPU's sRGB decode (source_color) then gives the
+	// premultiplied linear colour with no maths in the shader
 	static void premultiply(BakedFrame & f)
 	{
+		const auto & t = srgbTables();
 		for(size_t p = 0; p < f.rgba.size(); p += 4)
 		{
-			const int a = f.rgba[p + 3];
+			const float a = f.rgba[p + 3] / 255.0f;
 			for(int c = 0; c < 3; c++)
-				f.rgba[p + c] = uint8_t(f.rgba[p + c] * a / 255);
+				f.rgba[p + c] = t.second[size_t(t.first[f.rgba[p + c]] * a * 4095.0f + 0.5f)];
 		}
+	}
+
+	// a page with its mipmaps, each level the 2x2 average of the one above in linear light (Image::generate_mipmaps
+	// averages the encoded bytes, which darkens the premultiplied edges)
+	static PackedByteArray withLinearMipmaps(const PackedByteArray & base)
+	{
+		const auto & t = srgbTables();
+		PackedByteArray out = base;
+		std::vector<uint8_t> level(base.ptr(), base.ptr() + base.size());
+		for(int size = PAGE; size > 1; size /= 2)
+		{
+			const int half = size / 2;
+			std::vector<uint8_t> next(size_t(half) * half * 4);
+			for(int y = 0; y < half; y++)
+				for(int x = 0; x < half; x++)
+					for(int c = 0; c < 4; c++)
+					{
+						const uint8_t * p = &level[(size_t(2 * y) * size + 2 * x) * 4 + c];
+						const size_t row = size_t(size) * 4;
+						uint8_t & o = next[(size_t(y) * half + x) * 4 + c];
+						if(c == 3)
+							o = uint8_t((p[0] + p[4] + p[row] + p[row + 4] + 2) / 4);
+						else
+							o = t.second[size_t((t.first[p[0]] + t.first[p[4]] + t.first[p[row]] + t.first[p[row + 4]]) * 0.25f * 4095.0f + 0.5f)];
+					}
+			const int64_t at = out.size();
+			out.resize(at + int64_t(next.size()));
+			std::memcpy(out.ptrw() + at, next.data(), next.size());
+			level = std::move(next);
+		}
+		return out;
 	}
 
 	// under the mutex: shelf packing in page order, frames in decode order (an animation's frames have one size mostly)
@@ -569,8 +624,7 @@ private:
 			busy++;
 			lock.unlock();
 			const auto from = std::chrono::steady_clock::now();
-			Ref<Image> image = Image::create_from_data(PAGE, PAGE, false, Image::FORMAT_RGBA8, rgba);
-			image->generate_mipmaps();
+			Ref<Image> image = Image::create_from_data(PAGE, PAGE, true, Image::FORMAT_RGBA8, withLinearMipmaps(rgba));
 			Ref<Image> flag = Image::create_from_data(PAGE, PAGE, false, Image::FORMAT_R8, mask);
 			flag->generate_mipmaps();
 			const int64_t spent = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - from).count();

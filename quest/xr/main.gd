@@ -39,6 +39,14 @@ const PAD_RIGHT_Y := 3
 var bridge: Object
 var vcmi_data: RefCounted ## game data from the bridge in quest/bridge (quest/DATA_BRIDGE.md); null without the extension
 var atlas_task := -1 ## the worker of the test command `atlas -1`, waited for before another one and at exit
+const SPRITE_PIXELS := 12.0 ## sprites instead of markers from this many pixels per tile on screen (MILESTONE_3B.md 5)
+const PIXELS_PER_RADIAN := 1150.0 ## Quest 3: about 2064 eye-buffer pixels over 104 degrees
+var map_size := Vector3i.ZERO ## tiles of the map: width, height, levels (from the bridge stats at a new tile snapshot)
+var sprite_rect := Rect2i() ## the tiles and level the atlas was last asked for
+var sprite_level := -1
+var sprites_pending := false ## the atlas loads them; update_sprites when it is done
+var sprites_held := false ## the test command `sprites` set them: the view does not change them until `table_zoom`
+var atlas_refills := 0 ## of the atlas, at the last view: a refill moves the frames, so the sprites wait for the rebuild
 var origin: XROrigin3D
 var layer: OpenXRCompositionLayerCylinder
 var aims: Array[XRController3D] = []
@@ -226,6 +234,43 @@ func _save_sprites(path: String) -> void:
 	print("VCMI XR: sprites saved to ", path, ", ", file.get_length(), " bytes")
 
 
+## Sprites or markers on the minimap by the size of a tile on screen (MILESTONE_3B.md section 5, LOD); the atlas
+## follows the tiles the zoomed minimap shows, and the sprites are rebuilt once it has loaded them.
+## shortcut: the size is taken at the minimap's centre, from the head's distance; plan step 6 updates only changed
+## objects, and this only rebuilds on a new view
+func _update_sprite_view(head: Vector3) -> void:
+	if map_size.x == 0:
+		return
+	var tile_metres: float = room.minimap_size().x / (map_size.x * map_size.z) * room.zoom
+	var pixels := tile_metres / maxf(head.distance_to(room.minimap_centre()), 0.1) * PIXELS_PER_RADIAN
+	var view: Rect2 = room.visible_uv()
+	var level := clampi(int(view.get_center().x * map_size.z), 0, map_size.z - 1)
+	# the levels lie side by side: sprites only when the view shows one of them
+	var one_level := int(view.position.x * map_size.z) == int((view.end.x - 0.0001) * map_size.z)
+	var near := pixels >= SPRITE_PIXELS and one_level
+	if near:
+		var x0 := int(floor(view.position.x * map_size.x * map_size.z)) - level * map_size.x
+		var y0 := int(floor(view.position.y * map_size.y))
+		# 2 tiles more on every side: the view is asked for again only after moving 2 tiles
+		var tiles := Rect2i(x0 - 2, y0 - 2, int(ceil(view.size.x * map_size.x * map_size.z)) + 5, int(ceil(view.size.y * map_size.y)) + 5)
+		tiles = tiles.intersection(Rect2i(0, 0, map_size.x, map_size.y))
+		# a new request only when the view moved a few tiles or changed its size
+		if level != sprite_level or tiles.size != sprite_rect.size or (tiles.position - sprite_rect.position).length() > 2.0:
+			vcmi_data.atlas_view(tiles, level)
+			sprite_rect = tiles
+			sprite_level = level
+			sprites_pending = true
+			var refills: int = vcmi_data.atlas_stats().get("refills", 0)
+			if refills != atlas_refills: # the old instances point at frames the refill moves: markers until the rebuild
+				atlas_refills = refills
+				room.sprite_multimesh().instance_count = 0
+		if sprites_pending and not vcmi_data.atlas_busy():
+			vcmi_data.update_sprites(room.sprite_multimesh(), sprite_rect, sprite_level)
+			room.set_sprites(vcmi_data.atlas_textures(), vcmi_data.sprite_table(), false)
+			sprites_pending = false
+	room.show_sprites(near and (not sprites_pending or room.sprite_multimesh().instance_count > 0))
+
+
 func _exit_tree() -> void:
 	if atlas_task >= 0:
 		WorkerThreadPool.wait_for_task_completion(atlas_task)
@@ -273,6 +318,11 @@ func _process(delta: float) -> void:
 		room.set_minimap(vcmi_data.terrain_image() if changed & 1 else null, vcmi_data.fog_image() if changed & 2 else null, changed & 4 != 0)
 		if changed & (1 | 8): # the markers are placed by the map size, so new tiles move them too
 			vcmi_data.update_markers(room.marker_multimesh(), room.minimap_size(), room.MARKER_METRES)
+		if changed & 1:
+			map_size = vcmi_data.stats().get("map", Vector3i.ZERO)
+			sprite_level = -1 # a new map: ask for its view again, even of the same size
+		if changed & 4 and tracked != null and not sprites_held:
+			_update_sprite_view((origin.transform * (tracked as Transform3D)).origin)
 
 	for ray in rays:
 		ray.visible = false
@@ -434,6 +484,7 @@ func _place_screen() -> void:
 	screen_placed = true
 	# the room stands on the floor under the head, facing the screen
 	room.transform = Transform3D(screen_world.basis, Vector3(head.origin.x, 0.0, head.origin.z))
+	room.set_zoom(room.zoom, room.zoom_centre) # the markers' and sprites' clip follows the moved minimap
 	print("VCMI XR: screen placed at ", head.origin, " heading ", rad_to_deg(screen_world.basis.get_euler().y))
 
 
@@ -707,8 +758,14 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 			var count: int = vcmi_data.update_sprites(room.sprite_multimesh(), tiles, 0, true)
 			var fill_us := Time.get_ticks_usec() - started
 			room.set_sprites(vcmi_data.atlas_textures(), vcmi_data.sprite_table(), true)
+			room.show_sprites(true)
+			sprites_held = true
 			print("VCMI XR: sprites ", tiles, ": ", wanted, " animations, ", count, " instances in ", fill_us, " us, ", vcmi_data.atlas_stats())
 			_save_sprites("/sdcard/Android/data/is.xyz.vcmi.quest/files/sprites.bin")
+		"table_zoom": # the minimap shows 1 / a of the map around b, c (minimap UV, both levels side by side; 0: the centre)
+			room.set_zoom(a if a > 0.0 else 1.0, Vector2(b if b > 0.0 else 0.5, c if c > 0.0 else 0.5))
+			sprites_held = false
+			sprite_level = -1 # the view's own sprites again, instead of the test command's
 		"probe", "bridge":
 			pass
 		_:
