@@ -214,6 +214,11 @@ void fragment() {
 
 ## everything the sprites on the table are drawn from, for the preview on the PC (quest/tools/render-room.sh sprites):
 ## the minimap images, the atlas pages and masks, the frame table and the MultiMesh buffer, as one Variant file
+## the 2 texels of frame `index` in a sprite table (VcmiData.sprite_table), for the test command `sprites_check`
+func _table_frame(table: Image, index: int) -> Array:
+	return [table.get_pixel(2 * index % 512, 2 * index / 512), table.get_pixel((2 * index + 1) % 512, (2 * index + 1) / 512)]
+
+
 func _save_sprites(path: String) -> void:
 	var entry := func(image: Image) -> Array:
 		return [image.get_width(), image.get_height(), image.get_format(), image.get_data(), image.has_mipmaps()] if image != null else []
@@ -235,9 +240,9 @@ func _save_sprites(path: String) -> void:
 
 
 ## Sprites or markers on the minimap by the size of a tile on screen (MILESTONE_3B.md section 5, LOD); the atlas
-## follows the tiles the zoomed minimap shows, and the sprites are rebuilt once it has loaded them.
-## shortcut: the size is taken at the minimap's centre, from the head's distance; plan step 6 updates only changed
-## objects, and this only rebuilds on a new view
+## follows the tiles the zoomed minimap shows, and the sprites are rebuilt once it has loaded them; between views only
+## the changed objects' sprites are updated (plan step 6).
+## shortcut: the size is taken at the minimap's centre, from the head's distance
 func _update_sprite_view(head: Vector3) -> void:
 	if map_size.x == 0:
 		return
@@ -254,8 +259,12 @@ func _update_sprite_view(head: Vector3) -> void:
 		# 2 tiles more on every side: the view is asked for again only after moving 2 tiles
 		var tiles := Rect2i(x0 - 2, y0 - 2, int(ceil(view.size.x * map_size.x * map_size.z)) + 5, int(ceil(view.size.y * map_size.y)) + 5)
 		tiles = tiles.intersection(Rect2i(0, 0, map_size.x, map_size.y))
-		# a new request only when the view moved a few tiles or changed its size
-		if level != sprite_level or tiles.size != sprite_rect.size or (tiles.position - sprite_rect.position).length() > 2.0:
+		var changes: int = 0 if sprites_pending else vcmi_data.update_sprite_changes(room.sprite_multimesh())
+		if changes == 3: # the changed objects use frames the table did not have
+			room.set_sprites(vcmi_data.atlas_textures(), vcmi_data.sprite_table(), false)
+		# a new request when the changes need it (a new list, a new animation), or the view moved a few tiles or
+		# changed its size
+		if changes < 0 or level != sprite_level or tiles.size != sprite_rect.size or (tiles.position - sprite_rect.position).length() > 2.0:
 			vcmi_data.atlas_view(tiles, level)
 			sprite_rect = tiles
 			sprite_level = level
@@ -320,7 +329,6 @@ func _process(delta: float) -> void:
 			vcmi_data.update_markers(room.marker_multimesh(), room.minimap_size(), room.MARKER_METRES)
 		if changed & 1:
 			map_size = vcmi_data.stats().get("map", Vector3i.ZERO)
-			sprite_level = -1 # a new map: ask for its view again, even of the same size
 		if changed & 4 and tracked != null and not sprites_held:
 			_update_sprite_view((origin.transform * (tracked as Transform3D)).origin)
 
@@ -732,6 +740,7 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 			var size := int(c) if c > 0.0 else 30
 			var map: Vector3i = vcmi_data.stats().get("map", Vector3i.ZERO)
 			var at := Vector2i(int(a), int(b)) if a >= 0.0 else Vector2i(map.x / 2 - size / 2, map.y / 2 - size / 2)
+			sprites_held = true # as `sprites`: the view's sprites wait until `table_zoom`
 			var wanted: int = vcmi_data.atlas_view(Rect2i(at, Vector2i(size, size)), 0)
 			var from := Time.get_ticks_msec()
 			while vcmi_data.atlas_busy() and Time.get_ticks_msec() - from < 20000:
@@ -750,6 +759,7 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 				return
 			var map: Vector3i = vcmi_data.stats().get("map", Vector3i.ZERO)
 			var tiles := Rect2i(int(a), int(b), int(c), int(c)) if c > 0.0 else Rect2i(0, 0, map.x, map.y)
+			sprites_held = true # the view's sprites must not ask the atlas for their own view meanwhile
 			var wanted: int = vcmi_data.atlas_view(tiles, 0)
 			var from := Time.get_ticks_msec()
 			while vcmi_data.atlas_busy() and Time.get_ticks_msec() - from < 20000:
@@ -759,9 +769,29 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 			var fill_us := Time.get_ticks_usec() - started
 			room.set_sprites(vcmi_data.atlas_textures(), vcmi_data.sprite_table(), true)
 			room.show_sprites(true)
-			sprites_held = true
 			print("VCMI XR: sprites ", tiles, ": ", wanted, " animations, ", count, " instances in ", fill_us, " us, ", vcmi_data.atlas_stats())
 			_save_sprites("/sdcard/Android/data/is.xyz.vcmi.quest/files/sprites.bin")
+		"sprites_check": # plan step 6: the view's sprites after its change updates match a whole update_sprites of it
+			if vcmi_data == null or vcmi_data.sprite_table() == null or sprites_held or sprites_pending:
+				print("VCMI XR: sprites check skipped: no view's sprites, or they are held or loading")
+				return
+			var mm: MultiMesh = room.sprite_multimesh()
+			var kept: PackedFloat32Array = mm.buffer
+			var kept_table: Image = vcmi_data.sprite_table()
+			var stats: Dictionary = vcmi_data.atlas_stats()
+			vcmi_data.update_sprites(mm, sprite_rect, sprite_level)
+			var now: PackedFloat32Array = mm.buffer
+			var differ := -1 if kept.size() == now.size() else 0
+			for i in kept.size() if differ < 0 else 0:
+				# the first frame indexes each table, which the changes extend in their own order: compare the frames
+				var same := kept[i] == now[i] if i % 20 != 16 \
+						else _table_frame(kept_table, int(kept[i])) == _table_frame(vcmi_data.sprite_table(), int(now[i]))
+				if not same:
+					differ = i / 20
+					break
+			room.set_sprites(vcmi_data.atlas_textures(), vcmi_data.sprite_table(), false)
+			print("VCMI XR: sprites check ", "same" if differ < 0 else "DIFFERENT at instance %d" % differ, ", ", kept.size() / 20,
+					" -> ", now.size() / 20, " instances, ", stats)
 		"table_zoom": # the minimap shows 1 / a of the map around b, c (minimap UV, both levels side by side; 0: the centre)
 			room.set_zoom(a if a > 0.0 else 1.0, Vector2(b if b > 0.0 else 0.5, c if c > 0.0 else 0.5))
 			sprites_held = false

@@ -1,6 +1,6 @@
 # Data bridge milestone 3b: map object sprites (research findings)
 
-Status: 2026-11-09, plan steps 1-5 done: the decode benchmark changed the design (section 1a); the bridge decodes .def and PNG frames (section 1b); the atlas fills from the view (section 1c); the sprite shader draws the objects on the minimap (section 1d); a simple zoom and the LOD switch show them on the heaviest map (section 1e). **Read this before continuing 3b.** Next: plan step 6 (section 7). Context: [`DATA_BRIDGE.md`](DATA_BRIDGE.md) (sections 3-5, milestone 3a results).
+Status: 2026-11-09, plan steps 1-6 done, 3b complete: the decode benchmark changed the design (section 1a); the bridge decodes .def and PNG frames (section 1b); the atlas fills from the view (section 1c); the sprite shader draws the objects on the minimap (section 1d); a simple zoom and the LOD switch show them on the heaviest map (section 1e); object changes update only their sprites (section 1f), with the work left for phase 4 listed there. Next: milestone 3c (`DATA_BRIDGE.md` section 5). Context: [`DATA_BRIDGE.md`](DATA_BRIDGE.md) (sections 3-5, milestone 3a results).
 
 Original recommendation (revised in section 1a, keep for the facts): 8-bit indexed sprite pages with one palette row per animation, decoded by a new bridge function that calls `CDefFile` directly on a worker thread. Bodies in one alpha-scissor MultiMesh pass, shadows in one blended pass. Frames advance in the shader as the 2D map does. Sprites replace the markers only when a tile is at least ~12 px on screen. No changes to upstream files. This replaces the older plan in `DATA_BRIDGE.md` ("draw each frame twice into an `SDL_Surface`").
 
@@ -101,7 +101,25 @@ Measured on the Quest, heaviest map, new game (`quest/out/atlas-pages-512-crop.p
 
 - **GPU:** the sprites cost +0.74-1.1 ms at zoom 8 (run-to-run spread), over the +0.5 ms budget (section 6) and inside the frame (13.9 ms at 72 Hz, 7 ms left for the table). The first version decoded sRGB with `pow` in every pixel and blended the clear parts of every quad: +1.07 ms. Next, when the budget is needed: draw the opaque pixels first with depth writes and a lift per instance in drawing order, so hidden pixels are not shaded (the section 5 design), then blend only the semi-transparent ones.
 - **Check 4, shimmer:** mipmapped RGBA pages, and the LOD switch keeps sprites at 12 px a tile or more. Still frames look clean (`zoom8-b.jpg`); moving shimmer needs a person wearing the headset.
-- `shortcut:` the minimap's whole sprite set is rebuilt when the view moves (1.5-3.8 ms of the main thread, section 1d); plan step 6 updates only the changed objects.
+- The whole sprite set is rebuilt when the view moves; between views plan step 6 updates only the changed objects (section 1f).
+
+## 1f. Results of plan step 6: change updates
+
+- **Extension:** `VcmiData` keeps the view's sprites in drawing order, with their frame table. `update_sprite_changes(multimesh)` takes the objects changed since the last update (from the change log of milestone 3a), removes their sprites, inserts the new ones in order and writes the buffer again. It returns 1, or 3 when a changed object needs frames the table did not have (`main.gd` then sets the table again). It returns -1 when only a whole update will do: a new list or map, over 4 096 changes waiting (sprites not shown for long), or an animation that is not in the last `atlas_view`. `main.gd` then asks for the view again. Changes are applied only while the atlas is not loading. Animation names are kept in UTF-8 once instead of being converted per object, and the sprites carry no name string: together the full update got 1.4-2.5x faster. A full update that finds an object whose animation the view did not ask for (it changed while the atlas loaded) asks for the view again.
+- **Check:** the test command `sprites_check` runs a whole `update_sprites` of the same view and compares it with the change-updated buffer, instance by instance (frames compared by their table entries). It matched in all 38 runs: hero steps on the first scenario and on the heaviest map, and 10 pans of the heaviest map.
+- **Measured on the Quest** (`quest/out/sprites-step6/`):
+
+| | Instances | Full update | Change update, per hero step |
+|---|---|---|---|
+| First scenario, zoom 2 | 979-997 | 0.97-1.27 ms (was 1.5-2.7 ms) | 52-176 µs, once 438 µs |
+| Heaviest map, zoom 8 | 1 783-1 930 | 2.2-3.5 ms, of which the buffer 0.1-0.2 ms | 67-84 µs |
+
+  Panning the heaviest map in 10 steps (2 full updates each, with the check) held 71-73 fps (`heavy-pan.csv`).
+- **Left for phase 4**, measured and not blockers at 72 Hz, to do when phase 4's pan and zoom controls move the view all the time:
+  - The full update on a view change stays on the main thread: 2.2-3.5 ms once per view, mostly the loop over all 53 808 objects. No frame drop was measured. Fix: a worker builds the instances from a copy of the objects in the view, or a tile index of the objects.
+  - Change updates rewrite the whole buffer, so the slow ones reach 176 µs (once 438 µs), over the 0.1 ms budget. Fix: write only the range of instances that moved.
+  - On the heaviest map at zoom 8 every pan of about 5 tiles refills the atlas (the 32 pages overflow): about 620 ms of loading with markers shown. Fix: the LRU eviction of shelves (section 1c's shortcut).
+  - GPU: the sprites cost +0.74-1.1 ms against a +0.5 ms budget (section 1e). Measure again with phase 4's terrain tiles, then do the opaque-first pass of section 1e if needed.
 
 ## 2. How VCMI loads `.def` sprites
 
@@ -149,4 +167,4 @@ Measured on the Quest, heaviest map, new game (`quest/out/atlas-pages-512-crop.p
 3. **Done 2026-11-09, results in section 1c.** Extension workers and the view-driven page fill; main-thread upload timers in `atlas_stats`, and the real number of animations and pixels in a zoomed view. Texture memory is computed, not yet read with `quest.sh sample`.
 4. **Done 2026-11-09, results in section 1d.** Shader on the atlas pages (premultiplied blending; the owner colour on the mask only for owned objects; mirroring and TIME frames) on the objects of the first scenario; screenshot next to the 2D view. Check 2 (custom data precision) here.
 5. **Done 2026-11-09, results in section 1e.** All objects, the LOD switch with a simple zoom, on the heaviest map; check 4 (shimmer) and the GPU budget. Chunks, the depth lift and the shadow pass were not needed (section 1e).
-6. **Next.** Change log: update only the instances of changed records, and keep a view's rebuild off the main thread's frame.
+6. **Done 2026-11-09, results in section 1f.** Change log: update only the instances of changed records. Keeping a view's rebuild off the main thread's frame was measured and left for phase 4 (section 1f).

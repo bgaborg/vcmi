@@ -252,7 +252,7 @@ In the game (`xr-minimap.sh`, `MAP_ROW=1`): the full list 4.7 ms once (53 808 ob
 0. **Baseline** (no code), **done 2026-11-06:** frame time, CPU and PSS on the heaviest map with xBRZ auto and `none`; object counts (section 4, Milestone 0 results).
 1. **Skeleton, done 2026-11-07:** `quest/bridge` with the table and version; the extension finds it after the game starts and logs the version; the lifecycle task survives new game, load, restart, replay and quit to menu; test command `bridge` in `main.gd`.
 2. **Minimap, done 2026-11-07:** tile snapshot and fog buffer into Godot textures on the war table; fog follows hero moves and the map reveal (section 4, Milestone 2 results). View Air / View Earth do not change the fog (`ViewWorldEffect.cpp` only reads it), so they are not a test for it.
-3. **Objects, in progress:** 3a, the object list and string table with markers on the minimap, done 2026-11-07 (section 4, Milestone 3a results); 3b, the sprites, researched in [`MILESTONE_3B.md`](MILESTONE_3B.md) (read it first; required checks in its section 1); 3c, the 3D-mode window and hero step timing through `waitForOngoingAnimations`.
+3. **Objects, in progress:** 3a, the object list and string table with markers on the minimap, done 2026-11-07 (section 4, Milestone 3a results); 3b, the sprites, done 2026-11-09 ([`MILESTONE_3B.md`](MILESTONE_3B.md), with the work left for phase 4 in its section 1f); 3c, the 3D-mode window and hero step timing through `waitForOngoingAnimations`.
 4. **Battle:** receiver, battle buffer and the blocking-confirmation timing.
 
 Phase 4 proper builds on 2 and 3; phase 5 on 4.
