@@ -91,6 +91,11 @@ Keys and text into the game itself: its display id is in `dumpsys display` ("VCM
 | `xr-lifecycle.sh [apk]` | data bridge lifecycle: new game, save / load, restart, replay, quit; checks observer counts itself and fails on a difference | after changes to `quest/bridge` or the extension |
 | `xr-perf.sh <filter> [row] [rows] [player]` | the heaviest-map stress run (DATA_BRIDGE milestone 0), at most 15 min; sets `video.upscalingFilter` for the run and restores `settings.json` | only to compare a new view against the 2D baseline. The heaviest map ([HotA] Might and Magic, row 5) needs `"maps.famousmaps" : true` in the headset's `config/modSettings.json` |
 
+### Lint and pre-commit checks (Windows)
+
+- `quest/tools/lint.sh [files]` lints the fork's own code by type: GDScript with gdlint (`quest/xr/gdlintrc`), C++ with clang-format and the repository's `.clang-format` (`FIX=1` applies it), shell with shellcheck, Java with PMD 7 (`quest/tools/pmd-ruleset.xml`), Python with ruff. Without files it checks all of them, in about 5 s. The Python tools run pinned through `uvx`; PMD comes from `~/vcmi-tools/pmd-bin-7.7.0` and needs a JDK on the `PATH` (Android Studio's `jbr`).
+- `quest/tools/install-hooks.sh` installs the pre-commit hook once per checkout, next to the Git LFS hooks. The hook lints the staged Quest files and, when `quest/xr` changed, runs `test-local.sh`. `git commit --no-verify` skips it once.
+
 ### War room tools (Windows)
 
 `bake-room.sh` (rebake after changing anything static in `room.gd`; commit the `.lmbake`, the `.exr` and its `.import`) and `render-room.sh` (preview PNGs in `quest/out/room-preview/`, warns about geometry that could cover the screen; `render-room.sh sprites [name|near]` renders only the war table with the sprites the headset saved with the test command `sprites`, about 13 s, for shader and layout changes without an APK; `QUEST_ADDRESS=<ip>:5555` pulls the newest capture; see `MILESTONE_3B.md` section 1d) and `test-local.sh [name]` (the host's headless tests in `quest/xr/tests/*_test.gd`, such as the table picking maths, in about 6 s) run the Windows Godot 4.7.2 editor from `~/vcmi-tools/godot-4.7.2-win` in Git Bash. They need an active Windows desktop session (the editor hangs while it is disconnected or locked) and restore `project.godot`, which the editor rewrites.

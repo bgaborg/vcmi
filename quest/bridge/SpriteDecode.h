@@ -19,7 +19,7 @@ struct SpriteAnimation
 	std::vector<SpriteFrame> frames; // by group and frame; a frame a layout leaves out (a gap) is missing, not empty
 	std::vector<uint8_t> data; // per frame: palette indices row by row, or the bytes of a PNG file
 	std::array<uint8_t, 768> palette{}; // RGB of the .def palette
-	bool def = false;  // a .def file was found
+	bool def = false; // a .def file was found
 	bool json = false; // a mod's JSON layout replaces frames (with `file` or `sequences`)
 	uint32_t overruns = 0; // rows whose last run went past the row's end (cut, as the 2D map's loader does)
 };

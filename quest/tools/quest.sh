@@ -154,6 +154,7 @@ case "$cmd" in
 		# one row per loop, measured on the headset in one adb call: the compositor's VrApi line of the last second,
 		# thread CPU over 1 s (SDLThread: the game loop, VkThread: Godot), the memory summary
 		for ((i = 0; i < rows; i++)); do
+			# shellcheck disable=SC2016 # the single-quoted part expands on the headset
 			row="$(adb_shell "P=$PKG; "'
 p=$(pidof $P) || exit 1
 v=$(logcat -d -s VrApi:I | tail -1)

@@ -23,25 +23,26 @@
 #include "../../client/adventureMap/AdventureMapShortcuts.h"
 #include "../../client/gui/CIntObject.h"
 #include "../../client/gui/CursorHandler.h"
-#include "render/IImage.h"
 #include "../../client/gui/Shortcut.h"
 #include "../../client/gui/WindowHandler.h"
-#include "../../client/replay/GameplayReplayer.h"
 #include "../../client/mapView/IMapRendererObserver.h"
 #include "../../client/mapView/mapHandler.h"
+#include "../../client/replay/GameplayReplayer.h"
 #include "../../lib/CConfigHandler.h"
 #include "../../lib/CPlayerState.h"
-#include "../../lib/StartInfo.h"
 #include "../../lib/CThreadHelper.h"
-#include "../../lib/UnlockGuard.h"
 #include "../../lib/GameLibrary.h"
+#include "../../lib/StartInfo.h"
 #include "../../lib/TerrainHandler.h"
+#include "../../lib/UnlockGuard.h"
 #include "../../lib/callback/CCallback.h"
 #include "../../lib/int3.h"
 #include "../../lib/mapObjects/CGHeroInstance.h"
 #include "../../lib/mapObjects/MiscObjects.h"
 #include "../../lib/mapping/CMap.h"
 #include "../../lib/mapping/TerrainTile.h"
+#include "../../lib/pathfinder/CGPathNode.h"
+#include "render/IImage.h"
 
 namespace
 {
@@ -61,13 +62,36 @@ class BridgeObserver final : public IMapObjectObserver
 {
 public:
 	// a hero step the tabletop shows: the game waits for Godot as it waits for the 2D map's animation
-	bool hasOngoingAnimations() override { return moveWaiting(); }
-	void waitForOngoingAnimations() override { waitForMove(); }
-	void endNetwork() override { endMoves(); }
-	void onObjectFadeIn(const CGObjectInstance * obj, const PlayerColor &) override { markObject(obj); flushObjects(); }
-	void onObjectFadeOut(const CGObjectInstance * obj, const PlayerColor &) override { markRemoval(obj); }
-	void onObjectInstantAdd(const CGObjectInstance * obj, const PlayerColor &) override { markObject(obj); flushObjects(); }
-	void onObjectInstantRemove(const CGObjectInstance * obj, const PlayerColor &) override { markRemoval(obj); }
+	bool hasOngoingAnimations() override
+	{
+		return moveWaiting();
+	}
+	void waitForOngoingAnimations() override
+	{
+		waitForMove();
+	}
+	void endNetwork() override
+	{
+		endMoves();
+	}
+	void onObjectFadeIn(const CGObjectInstance * obj, const PlayerColor &) override
+	{
+		markObject(obj);
+		flushObjects();
+	}
+	void onObjectFadeOut(const CGObjectInstance * obj, const PlayerColor &) override
+	{
+		markRemoval(obj);
+	}
+	void onObjectInstantAdd(const CGObjectInstance * obj, const PlayerColor &) override
+	{
+		markObject(obj);
+		flushObjects();
+	}
+	void onObjectInstantRemove(const CGObjectInstance * obj, const PlayerColor &) override
+	{
+		markRemoval(obj);
+	}
 	void onHeroMoved(const CGHeroInstance * hero, const int3 & from, const int3 & dest) override
 	{
 		// the step before the record: the tabletop slides a hero whose record is at the destination, so it never sees
@@ -76,13 +100,34 @@ public:
 		markObject(hero);
 		flushObjects();
 	}
-	void onBeforeHeroTeleported(const CGHeroInstance * hero, const int3 &, const int3 &) override { markObject(hero); }
-	void onAfterHeroTeleported(const CGHeroInstance * hero, const int3 &, const int3 &) override { markObject(hero); flushObjects(); }
-	void onBeforeHeroEmbark(const CGHeroInstance * hero, const int3 &, const int3 &) override { markObject(hero); }
-	void onAfterHeroEmbark(const CGHeroInstance * hero, const int3 &, const int3 &) override { markObject(hero); flushObjects(); }
+	void onBeforeHeroTeleported(const CGHeroInstance * hero, const int3 &, const int3 &) override
+	{
+		markObject(hero);
+	}
+	void onAfterHeroTeleported(const CGHeroInstance * hero, const int3 &, const int3 &) override
+	{
+		markObject(hero);
+		flushObjects();
+	}
+	void onBeforeHeroEmbark(const CGHeroInstance * hero, const int3 &, const int3 &) override
+	{
+		markObject(hero);
+	}
+	void onAfterHeroEmbark(const CGHeroInstance * hero, const int3 &, const int3 &) override
+	{
+		markObject(hero);
+		flushObjects();
+	}
 	// the hero still has the boat here, not after
-	void onBeforeHeroDisembark(const CGHeroInstance * hero, const int3 &, const int3 &) override { markObject(hero); }
-	void onAfterHeroDisembark(const CGHeroInstance * hero, const int3 &, const int3 &) override { markObject(hero); flushObjects(); }
+	void onBeforeHeroDisembark(const CGHeroInstance * hero, const int3 &, const int3 &) override
+	{
+		markObject(hero);
+	}
+	void onAfterHeroDisembark(const CGHeroInstance * hero, const int3 &, const int3 &) override
+	{
+		markObject(hero);
+		flushObjects();
+	}
 };
 
 std::atomic<uint32_t> ticks{0};
@@ -125,12 +170,19 @@ std::vector<std::pair<int32_t, int>> removals; // id, ticks left
 class TabletopWindow final : public WindowBase
 {
 public:
-	TabletopWindow() : WindowBase(KEYBOARD) { pos = Rect(Point(), ENGINE->screenDimensions()); }
+	TabletopWindow() : WindowBase(KEYBOARD)
+	{
+		pos = Rect(Point(), ENGINE->screenDimensions());
+	}
 
-	// as AdventureOptions: the adventure map's enabled shortcut; AdventureMapInterface::keyPressed only scrolls
+	// as AdventureOptions: the adventure map's enabled shortcut; AdventureMapInterface::keyPressed only scrolls. Not the
+	// world view: the covered 2D map draws it, so it would show nothing (quest/PHASE4.md check 5)
 	void keyPressed(EShortcut key) override
 	{
-		if(!adventureInt)
+		static const std::set<EShortcut> worldView = {
+			EShortcut::ADVENTURE_VIEW_WORLD, EShortcut::ADVENTURE_VIEW_WORLD_X1, EShortcut::ADVENTURE_VIEW_WORLD_X2, EShortcut::ADVENTURE_VIEW_WORLD_X4
+		};
+		if(!adventureInt || worldView.count(key))
 			return;
 		for(const AdventureMapShortcutState & shortcut : adventureInt->getAdventureShortcuts().getShortcuts())
 			if(shortcut.shortcut == key && shortcut.isEnabled)
@@ -154,7 +206,10 @@ std::atomic<bool> stepPending{false}; // from the step until its wait ends
 std::atomic<uint32_t> waitMicros{0};
 std::atomic<uint32_t> moveTimeouts{0};
 
-bool moveWaiting() { return stepPending; }
+bool moveWaiting()
+{
+	return stepPending;
+}
 
 // network thread, interfaceMutex held (CPlayerInterface::heroMoved): publishes the step when the tabletop shows it,
 // with the 2D map's own rules for what is shown (MapViewController::isEventVisible, onHeroMoved)
@@ -168,16 +223,25 @@ void showMove(const CGHeroInstance * hero, const int3 & from, const int3 & dest)
 	const double ms = settings["adventure"][own ? "heroMoveTime" : "enemyMoveTime"].Float();
 	if(ms <= 1)
 		return; // instant movement
-	if(!own && (player->makingTurn
-		|| (player->cb->getStartInfo()->playerInfos.at(hero->getOwner()).isControlledByHuman() && !settings["session"]["adventureTrackHero"].Bool())))
+	if(!own
+	   && (player->makingTurn
+		   || (player->cb->getStartInfo()->playerInfos.at(hero->getOwner()).isControlledByHuman() && !settings["session"]["adventureTrackHero"].Bool())))
 		return;
 	if(!player->cb->isVisible(hero->convertToVisitablePos(from)) && !player->cb->isVisible(hero->convertToVisitablePos(dest)))
 		return;
 	const CGObjectInstance * moving = hero->inBoat() ? static_cast<const CGObjectInstance *>(hero->getBoat()) : hero;
 	std::lock_guard lock(moveMutex);
-	currentMove = VcmiMove{currentMove.sequence + 1, static_cast<uint32_t>(moving->id.getNum()),
-		static_cast<uint16_t>(from.x), static_cast<uint16_t>(from.y), static_cast<uint16_t>(dest.x), static_cast<uint16_t>(dest.y),
-		static_cast<uint8_t>(from.z), static_cast<uint8_t>(dest.z), static_cast<uint16_t>(std::min(ms, 65535.0))};
+	currentMove = VcmiMove{
+		currentMove.sequence + 1,
+		static_cast<uint32_t>(moving->id.getNum()),
+		static_cast<uint16_t>(from.x),
+		static_cast<uint16_t>(from.y),
+		static_cast<uint16_t>(dest.x),
+		static_cast<uint16_t>(dest.y),
+		static_cast<uint8_t>(from.z),
+		static_cast<uint8_t>(dest.z),
+		static_cast<uint16_t>(std::min(ms, 65535.0))
+	};
 	moveDeadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(currentMove.durationMs + 200);
 	stepPending = true;
 }
@@ -189,7 +253,14 @@ void waitForMove()
 	const auto from = std::chrono::steady_clock::now();
 	auto unlockInterface = vstd::makeUnlockGuard(ENGINE->interfaceMutex);
 	std::unique_lock lock(moveMutex);
-	if(!moveConfirmed.wait_until(lock, moveDeadline, []() { return confirmedMove >= currentMove.sequence; }))
+	if(!moveConfirmed.wait_until(
+		   lock,
+		   moveDeadline,
+		   []()
+		   {
+			   return confirmedMove >= currentMove.sequence;
+		   }
+	   ))
 		moveTimeouts++;
 	stepPending = false;
 	waitMicros = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - from).count();
@@ -220,6 +291,58 @@ void updateTabletop()
 	else if(!shown.empty() && windows.isTopWindow(shown.front()))
 		windows.popWindow(shown.front());
 	tabletopShown = !windows.findWindows<TabletopWindow>().empty();
+}
+
+std::atomic<uint32_t> selected{VCMI_NONE};
+std::atomic<uint32_t> pathGeneration{0};
+std::mutex pathMutex;
+std::vector<VcmiPathNode> publishedPath;
+
+// game thread, interfaceMutex held: the selection and the selected hero's path, published when it changed. The game
+// has no event for a new path, and the path shrinks with each step (HeroMovementController.cpp:149): read each tick
+void publishSelection()
+{
+	const CPlayerInterface * player = GAME->interface();
+	std::vector<VcmiPathNode> nodes;
+	uint32_t army = VCMI_NONE;
+	if(player && player->localState)
+	{
+		if(const CArmedInstance * current = player->localState->getCurrentArmy())
+			army = current->id.getNum();
+		const CGHeroInstance * hero = player->localState->getCurrentHero();
+		// getPath asserts without a path (PlayerLocalState.cpp:43-47); nodes run from the end back to the hero's tile,
+		// which is left out
+		if(hero && player->localState->hasPath(hero))
+		{
+			const CGPath & path = player->localState->getPath(hero);
+			for(size_t i = path.nodes.size(); i-- > 0;)
+			{
+				const CGPathNode & node = path.nodes[i];
+				if(i + 1 < path.nodes.size())
+					nodes.push_back(
+						VcmiPathNode{
+							static_cast<uint16_t>(node.coord.x), static_cast<uint16_t>(node.coord.y), static_cast<uint8_t>(node.coord.z), node.turns, 0
+						}
+					);
+			}
+		}
+	}
+	selected = army;
+	std::lock_guard lock(pathMutex);
+	if(nodes.size() != publishedPath.size()
+	   || !std::equal(
+		   nodes.begin(),
+		   nodes.end(),
+		   publishedPath.begin(),
+		   [](const VcmiPathNode & a, const VcmiPathNode & b)
+		   {
+			   return std::memcmp(&a, &b, sizeof(a)) == 0;
+		   }
+	   ))
+	{
+		publishedPath = std::move(nodes);
+		pathGeneration++;
+	}
 }
 
 std::atomic<uint8_t> windowsAbove{0};
@@ -268,7 +391,7 @@ void runTileInputs()
 		const CPlayerInterface * player = GAME->interface();
 		// per input: the click before may have opened a dialog in this same tick
 		if(tabletop.empty() || !windows.isTopWindow(tabletop.front()) || !player || !player->cb || !player->cb->isInTheMap(input.tile)
-			|| !player->localState->getCurrentArmy())
+		   || !player->localState->getCurrentArmy())
 		{
 			inputsDropped++;
 			continue;
@@ -281,8 +404,13 @@ void runTileInputs()
 				adventureInt->onTileHovered(input.tile);
 				// check 2 of PHASE4.md: the cursor the hover set
 				const auto image = ENGINE->cursor().getCurrentImage();
-				logGlobal->debug("Quest bridge: hover %s -> cursor %p %dx%d", input.tile.toString(), static_cast<const void *>(image.get()),
-					image ? image->width() : 0, image ? image->height() : 0);
+				logGlobal->debug(
+					"Quest bridge: hover %s -> cursor %p %dx%d",
+					input.tile.toString(),
+					static_cast<const void *>(image.get()),
+					image ? image->width() : 0,
+					image ? image->height() : 0
+				);
 				break;
 			}
 			case VCMI_TILE_CLICK:
@@ -405,7 +533,13 @@ void flushObjects()
 	}
 	std::sort(pendingIds.begin(), pendingIds.end());
 	pendingIds.erase(std::unique(pendingIds.begin(), pendingIds.end()), pendingIds.end());
-	std::erase_if(pendingIds, [map](int32_t id) { return !scan.update(*map, id); });
+	std::erase_if(
+		pendingIds,
+		[map](int32_t id)
+		{
+			return !scan.update(*map, id);
+		}
+	);
 	if(!pendingIds.empty())
 	{
 		const auto & records = scan.records();
@@ -458,11 +592,20 @@ void tick()
 		inGame = false;
 		mapSize = 0;
 		tabletopShown = false;
+		selected = VCMI_NONE;
+		windowsAbove = 0;
+		std::lock_guard lock(pathMutex);
+		if(!publishedPath.empty())
+		{
+			publishedPath.clear();
+			pathGeneration++;
+		}
 		return;
 	}
 	inGame = true;
 	updateTabletop();
 	runTileInputs();
+	publishSelection();
 	const int3 size = GAME->interface() && GAME->interface()->cb ? GAME->interface()->cb->getMapSize() : int3();
 	mapSize = static_cast<uint32_t>(size.x) | static_cast<uint32_t>(size.y) << 12 | static_cast<uint32_t>(size.z) << 24;
 	bool listTaken = false;
@@ -496,11 +639,23 @@ void tick()
 				pendingIds.push_back(id);
 				left--;
 			}
-			std::erase_if(removals, [](const auto & removal) { return removal.second <= 0; });
+			std::erase_if(
+				removals,
+				[](const auto & removal)
+				{
+					return removal.second <= 0;
+				}
+			);
 			flushObjects();
 		}
 	}
-	std::erase_if(observedMaps, [](const auto & map) { return map.expired(); });
+	std::erase_if(
+		observedMaps,
+		[](const auto & map)
+		{
+			return map.expired();
+		}
+	);
 	for(const auto & map : observedMaps)
 		if(map.lock() == adventureInt)
 			return;
@@ -524,33 +679,38 @@ void tick()
 
 void start()
 {
-	std::call_once(started, []()
-	{
-		// a thread posts the tick: a task that re-posts itself from dispatchMainThread could be run again in the
-		// same event poll, and the game has no timer to post it later
-		std::thread([]()
+	std::call_once(
+		started,
+		[]()
 		{
-			setThreadName("questBridge");
-			// shortcut: ENGINE is set once on startup and reset on quit without a lock; a tick posted while the game
-			// quits can find it null just before the process exits. A clean stop needs a quit hook in the game.
-			while(!ENGINE || !GAME)
-				std::this_thread::sleep_for(std::chrono::milliseconds(100));
-			logGlobal->info("Quest bridge %d started", VCMI_BRIDGE_VERSION);
-			auto postedAt = std::chrono::steady_clock::now();
-			for(;;)
-			{
-				// dispatchMainThread pushes its event before its task, so the game can take the event too early and
-				// drop it (InputHandler.cpp:522-547); a tick pending for a second gets another event
-				const auto now = std::chrono::steady_clock::now();
-				if(!tickPending.exchange(true) || now - postedAt > std::chrono::seconds(1))
+			// a thread posts the tick: a task that re-posts itself from dispatchMainThread could be run again in the
+			// same event poll, and the game has no timer to post it later
+			std::thread(
+				[]()
 				{
-					ENGINE->dispatchMainThread(tick);
-					postedAt = now;
+					setThreadName("questBridge");
+					// shortcut: ENGINE is set once on startup and reset on quit without a lock; a tick posted while the game
+					// quits can find it null just before the process exits. A clean stop needs a quit hook in the game.
+					while(!ENGINE || !GAME)
+						std::this_thread::sleep_for(std::chrono::milliseconds(100));
+					logGlobal->info("Quest bridge %d started", VCMI_BRIDGE_VERSION);
+					auto postedAt = std::chrono::steady_clock::now();
+					for(;;)
+					{
+						// dispatchMainThread pushes its event before its task, so the game can take the event too early and
+						// drop it (InputHandler.cpp:522-547); a tick pending for a second gets another event
+						const auto now = std::chrono::steady_clock::now();
+						if(!tickPending.exchange(true) || now - postedAt > std::chrono::seconds(1))
+						{
+							ENGINE->dispatchMainThread(tick);
+							postedAt = now;
+						}
+						std::this_thread::sleep_for(std::chrono::milliseconds(100));
+					}
 				}
-				std::this_thread::sleep_for(std::chrono::milliseconds(100));
-			}
-		}).detach();
-	});
+			).detach();
+		}
+	);
 }
 
 void stats(VcmiBridgeStats * out)
@@ -574,6 +734,8 @@ void stats(VcmiBridgeStats * out)
 	out->windowsAbove = windowsAbove;
 	out->inputsRun = inputsRun;
 	out->inputsDropped = inputsDropped;
+	out->selected = selected;
+	out->pathGeneration = pathGeneration;
 	out->waitMicros = waitMicros;
 	out->moveTimeouts = moveTimeouts;
 	std::lock_guard lock(moveMutex);
@@ -587,6 +749,16 @@ void tileInput(uint16_t x, uint16_t y, uint8_t z, uint8_t kind)
 		pendingHover = TileInput{int3(x, y, z), kind};
 	else if(pendingInputs.size() < 64) // shortcut: the tick drains them every 100 ms; more is a stuck game
 		pendingInputs.push_back(TileInput{int3(x, y, z), kind});
+}
+
+uint32_t copyPath(VcmiPathNode * out, uint32_t capacity)
+{
+	std::unique_lock lock(pathMutex, std::try_to_lock);
+	if(!lock)
+		return VCMI_NONE;
+	if(capacity >= publishedPath.size())
+		std::copy(publishedPath.begin(), publishedPath.end(), out);
+	return static_cast<uint32_t>(publishedPath.size());
 }
 
 void setTabletop(uint8_t shown)
@@ -667,7 +839,15 @@ void copyObjectChanges(uint32_t snapshot, uint32_t since, VcmiObject * out, uint
 		return;
 	}
 	// the log must still hold every change after `since`
-	const auto first = std::upper_bound(changeLog.begin(), changeLog.end(), since, [](uint32_t value, const auto & entry) { return value < entry.first; });
+	const auto first = std::upper_bound(
+		changeLog.begin(),
+		changeLog.end(),
+		since,
+		[](uint32_t value, const auto & entry)
+		{
+			return value < entry.first;
+		}
+	);
 	const size_t count = changeLog.end() - first;
 	if(snapshot != objectsSnapshot || since > sequence || changeLog.empty() || changeLog.front().first > since + 1 || count > capacity)
 	{
@@ -711,8 +891,7 @@ uint32_t decodeFrames(const char * name, VcmiAnimationData * out)
 		}
 	}
 	if(out)
-		*out = {anim.frames.data(), anim.data.data(), anim.palette.data(), static_cast<uint32_t>(anim.frames.size()),
-			static_cast<uint32_t>(anim.data.size())};
+		*out = {anim.frames.data(), anim.data.data(), anim.palette.data(), static_cast<uint32_t>(anim.frames.size()), static_cast<uint32_t>(anim.data.size())};
 	return static_cast<uint32_t>(anim.frames.size());
 }
 
@@ -720,6 +899,7 @@ uint32_t decodeFrames(const char * name, VcmiAnimationData * out)
 
 static_assert(sizeof(VcmiFrame) == 36, "VcmiFrame is part of the bridge ABI");
 static_assert(sizeof(VcmiMove) == 20, "VcmiMove is part of the bridge ABI");
+static_assert(sizeof(VcmiPathNode) == 8, "VcmiPathNode is part of the bridge ABI");
 
 extern "C" __attribute__((visibility("default"))) const VcmiBridgeApi vcmi_bridge_api = {
 	VCMI_BRIDGE_VERSION,
@@ -735,4 +915,5 @@ extern "C" __attribute__((visibility("default"))) const VcmiBridgeApi vcmi_bridg
 	copyMove,
 	confirmMove,
 	tileInput,
+	copyPath,
 };

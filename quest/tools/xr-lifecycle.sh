@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016 # the single-quoted commands run on the headset, where their $ expand
 # Data bridge lifecycle test on the headset (quest/DATA_BRIDGE.md milestone 1): new game, quick save and load,
 # restart, end turn and replay of the enemy turn, quit to the main menu. After each step the `bridge` test command
 # prints the bridge stats (ticks, observers, in_game, map); the observer count must grow by one per new game, load
@@ -71,4 +72,7 @@ sleep 3
 step 7-main-menu
 echo "$OUT"
 [ "$(sed -n 's/.*"observers": \([0-9]*\).*/\1/p' "$OUT/stats.txt" | xargs)" = "1 2 3 3 4 4 4" ] || { echo "wrong observer counts" >&2; exit 1; }
-[ "$(grep -c '"in_game": false' "$OUT/stats.txt")" = 1 ] && tail -1 "$OUT/stats.txt" | grep -q '"in_game": false' || { echo "in_game wrong" >&2; exit 1; }
+if ! { [ "$(grep -c '"in_game": false' "$OUT/stats.txt")" = 1 ] && tail -1 "$OUT/stats.txt" | grep -q '"in_game": false'; }; then
+	echo "in_game wrong" >&2
+	exit 1
+fi

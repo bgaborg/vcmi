@@ -38,7 +38,8 @@ func _bake(room: Node3D) -> void:
 	button.pressed.emit() # bakes before it returns
 	var data := lightmap.light_data
 	var users := data.get_user_count() if data != null else 0
-	print("room bake: ", users, " meshes into ", data.resource_path if data != null else "nothing", " in ", (Time.get_ticks_msec() - started) / 1000.0, " s")
+	print("room bake: ", users, " meshes into ", data.resource_path if data != null else "nothing", " in ",
+			(Time.get_ticks_msec() - started) / 1000.0, " s")
 	get_tree().quit(0 if users > 0 else 1)
 
 

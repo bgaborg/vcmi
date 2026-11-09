@@ -1,6 +1,6 @@
 # Phase 4: the tabletop adventure map (plan)
 
-Status: 2026-11-09, required checks 1, 2, 4, 5 and 6 done (section 3a); check 3 needs a person to hold a controller. Next: check 3, then milestone 4a (section 4).
+Status: 2026-11-09, required checks done except check 3, which waits for a person in the headset (section 3a); milestone 4a built and played on the Quest with a simulated ray (section 4a results; a battle, spells and the real buttons not yet checked). Next: milestone 4b.
 
 Goal (from [`PROJECT_PLAN.md`](PROJECT_PLAN.md#phase-4---tabletop-adventure-map-after-data-bridge-milestones-2-and-3)): the adventure map is fully playable on the war table, and one button goes back to the 2D screen.
 
@@ -124,6 +124,13 @@ Results on the Quest, first scenario, tabletop on (`quest/out/phase4-checks/`):
 
    All frames are in group 0, decoded on the atlas workers in 4c. Water and lava move in 2D by rotating palette colours (`adventure.terrainAnimation`), which baked RGBA frames lose; 4c animates them (a few baked rotations, or the palette in the shader).
 
+## 3b. Decisions taken (2026-11-09)
+
+- **D1:** a button switches tabletop mode: "Table / screen" on the wrist panel, and the right thumbstick click. That click toggled the 2D map's grid, which the table does not show.
+- **D2:** dialogs stay on the game screen, which shows only while one is open.
+- **D3:** in tabletop mode a tile is 1.5 cm on the table, at least the zoom that shows one map level. `shortcut:` 1.5 cm is a safe guess until check 3 measures the ray's jitter, with a person holding a controller; the value is `TABLE_TILE_METRES` in `main.gd`.
+- **The cursor image:** the game exports it only as a file (`IImage::exportBitmap`). So the table shows the ray's dot, the path and the selected hero's mark instead; the hover text and the cursor come with the side panel (4d).
+
 ## 4. Milestones, in order
 
 Each one is tested on the Quest, reviewed, and recorded here with its numbers before the next starts.
@@ -137,6 +144,39 @@ Each one is tested on the Quest, reviewed, and recorded here with its numbers be
 - **On the table:** the hero's path as discs, the cursor image at the hit, the selected hero marked.
 - **The screen policy** (decision 4): the screen comes forward when a dialog opens.
 - **Exit:** on the first scenario, heroes move, visit, pick up and fight from the table, and the turn ends from the wrist; no 2D map click is needed.
+
+#### 4a results (2026-11-09)
+
+- **Bridge, version 8:**
+  - `publishSelection` in the tick puts the selected hero or town (`stats.selected`) and the selected hero's path (`path`, `pathGeneration`) in the stats. The path runs from the first step to the end, with its turns.
+  - The tabletop window drops the world view shortcuts (check 5).
+- **Extension:** `update()` raises `PATH_CHANGED`; `path_nodes()`, `selected_tile()` (the visitable tile) and `windows_above()`.
+- **Godot:**
+  - `table_math.gd`: tile, map UV, zoom, following and level maths, tested on the PC (`tests/table_math_test.gd`).
+  - `room.gd`: `table_hit`; `set_path` draws the path as discs (green this turn, orange later, the end larger) and a white disc under the selected hero, with the markers' material (fog, clipped at the panel's edge).
+  - `main.gd`:
+    - `_set_tabletop` switches the mode and zooms in.
+    - `_update_table`: the path, following the selected hero once it leaves the middle 60 % of the table, and the screen shown only while `windows_above` > 0.
+    - `_table_pointer`: the ray hovers tiles.
+    - `_table_press`: trigger clicks, grip shows the popup while held.
+    - The screen's ray ignores the hidden screen.
+- **Local tests:** `test-local.sh` now runs three tests in about 7 s: the table maths, the picking maths, and whether the host scripts compile. The compile test caught a parse error that would otherwise have cost an APK build.
+- **On the Quest**, first scenario, with a simulated ray aimed from above the table (`quest/out/phase4a/`):
+  - Tabletop mode zoomed to 1.5 cm tiles around the hero, stopped at the map's edge (`1-table-on.jpg`).
+  - The first click drew the path (`2-path.jpg`), and the second walked the hero 5 steps (each waited for about 160 ms, no timeouts). The fog opened and the white mark moved with the hero (`3-walked.jpg`).
+  - The hero reached a chest: its dialog came forward on the game screen (`4-dialog-on-screen.jpg`). After A the screen hid again, and play went back to the table (`5-screen-hidden-again.jpg`).
+  - `tabletop 0` brought the 2D screen back.
+- **Fixed after the review:**
+  - The screen also shows while the tabletop window is missing: at a turn's start the game shows its dialogs (new week, the next player) before the tick puts the window back, and replays run without it.
+  - Leaving tabletop mode ends a table popup still held.
+  - At the game's end the bridge clears the dialog count and the path, and outside a game the screen always shows.
+  - Switching on before the map is known zooms in once it is.
+- **Not checked yet:**
+  - A battle started from the table. The battle window is above the tabletop window like any dialog, so the screen shows it.
+  - Spell casting.
+  - Switching with the real wrist button and stick click (only the test command was used).
+  - A real controller ray, which needs a person.
+  - The room's war-table flag prop stands over the map and hides a few tiles; 4c (the look) moves it.
 
 ### 4b. Moving around the map
 

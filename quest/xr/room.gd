@@ -7,6 +7,7 @@ extends Node3D
 ## After changing anything that does not move, rebake: quest/tools/bake-room.sh. Every node has a fixed name, as the
 ## lightmap finds its meshes by node path. Assets and licences: assets/room/LICENSES.md.
 
+const TableMath := preload("res://table_math.gd")
 const SIZE := Vector3(12.0, 5.0, 10.0) ## width, height, depth in metres
 const BACK := -6.0 ## z of the wall behind the screen
 const FRONT := BACK + SIZE.z
@@ -21,15 +22,19 @@ const ROOM := "res://assets/room/"
 const TEX := ROOM + "textures/"
 ## albedo, normal, ORM (ambient occlusion, roughness, metallic; "" = flat), height ("" = none)
 const SETS := {
-	"stone": ["castle_wall_slates_diff_2k.jpg", "castle_wall_slates_nor_gl_2k.jpg", "castle_wall_slates_arm_2k.jpg", "castle_wall_slates_disp_2k.jpg"],
-	"floor": ["monastery_stone_floor_diff_2k.jpg", "monastery_stone_floor_nor_gl_2k.jpg", "monastery_stone_floor_arm_2k.jpg", "monastery_stone_floor_disp_2k.jpg"],
-	"planks": ["dark_wooden_planks_diff_2k.jpg", "dark_wooden_planks_nor_gl_2k.jpg", "dark_wooden_planks_arm_2k.jpg", ""],
+	"stone": ["castle_wall_slates_diff_2k.jpg", "castle_wall_slates_nor_gl_2k.jpg", "castle_wall_slates_arm_2k.jpg",
+			"castle_wall_slates_disp_2k.jpg"],
+	"floor": ["monastery_stone_floor_diff_2k.jpg", "monastery_stone_floor_nor_gl_2k.jpg",
+			"monastery_stone_floor_arm_2k.jpg", "monastery_stone_floor_disp_2k.jpg"],
+	"planks": ["dark_wooden_planks_diff_2k.jpg", "dark_wooden_planks_nor_gl_2k.jpg", "dark_wooden_planks_arm_2k.jpg",
+			""],
 	"beam": ["medieval_wood_diff_2k.jpg", "medieval_wood_nor_gl_2k.jpg", "medieval_wood_arm_2k.jpg", ""],
 	"fabric": ["quatrefoil_jacquard_fabric_grey_1k.jpg", "quatrefoil_jacquard_fabric_nor_gl_1k.jpg", "", ""],
 	"carpet": ["Carpet015_1K-JPG_Color.jpg", "Carpet015_1K-JPG_NormalGL.jpg", "", ""],
 }
 ## the eight player colours: red, blue, tan, green, orange, purple, teal, pink (linear, times the grey fabric)
-const PLAYER_COLOURS := [Color(0.6, 0.03, 0.02), Color(0.03, 0.09, 0.55), Color(0.55, 0.38, 0.18), Color(0.04, 0.3, 0.05),
+const PLAYER_COLOURS := [Color(0.6, 0.03, 0.02), Color(0.03, 0.09, 0.55), Color(0.55, 0.38, 0.18), Color(0.04, 0.3,
+		0.05),
 	Color(0.8, 0.25, 0.02), Color(0.28, 0.04, 0.4), Color(0.02, 0.35, 0.35), Color(0.85, 0.28, 0.42)]
 const FLAME := Color(1.0, 0.68, 0.42) ## torch and candle light: warm, not orange, so the moonlight reads as cool
 ## public-domain paintings (assets/room/LICENSES.md): file, centre, wall normal, width; the height follows the image
@@ -44,9 +49,9 @@ const WINDOW := Rect2(-0.65, 1.3, 1.3, 2.6) ## x from the window centre, y from 
 const REVEAL := 0.45 ## depth of the window openings
 const TABLE_TOP := 0.8 ## height of the map on the war table (meshy war_table at its scale)
 const TORCH_PLATE := 0.137 ## metres from the wall plate to the torch origin (meshy wall_torch at its scale)
-
-const FLAME_SHADER := "shader_type spatial;
-render_mode unshaded, blend_premul_alpha, depth_draw_never, cull_disabled, shadows_disabled, skip_vertex_transform, fog_disabled;
+const FLAME_SHADER := """shader_type spatial;
+render_mode unshaded, blend_premul_alpha, depth_draw_never, cull_disabled, shadows_disabled, skip_vertex_transform,
+	fog_disabled;
 // every flame is a quad of four vertices at its base; CUSTOM0 = width, height, phase, brightness
 varying vec2 uv;
 varying vec2 seed;
@@ -55,7 +60,8 @@ float noise(vec2 p) {
 	vec2 i = floor(p);
 	vec2 f = fract(p);
 	f = f * f * (3.0 - 2.0 * f);
-	return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0)), f.x), f.y);
+	return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
+		mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0)), f.x), f.y);
 }
 void vertex() {
 	vec3 base = (MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
@@ -80,9 +86,9 @@ void fragment() {
 	ALBEDO = colour * body * seed.y * flicker;
 	ALPHA = 0.0; // adds light, leaves the eye buffer alpha alone: the game layer behind stays visible
 }
-"
+"""
 ## the night sky behind the windows, at infinity (by the view direction in room space): stars, a moon, mountain ridges
-const SKY_SHADER := "shader_type spatial;
+const SKY_SHADER := """shader_type spatial;
 render_mode unshaded, cull_back, shadows_disabled, fog_disabled;
 varying vec3 direction;
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -102,24 +108,25 @@ void fragment() {
 	colour += vec3(0.85, 0.9, 1.0) * star * (0.75 + 0.25 * sin(TIME * 2.3 + h * 60.0));
 	vec3 moon = normalize(vec3(0.5, 0.24, -0.83));
 	float m = dot(d, moon);
-	colour += vec3(1.0, 0.97, 0.88) * smoothstep(0.99955, 0.9997, m) * 2.5 + vec3(0.12, 0.16, 0.3) * pow(max(m, 0.0), 300.0);
+	colour += vec3(1.0, 0.97, 0.88) * smoothstep(0.99955, 0.9997, m) * 2.5
+		+ vec3(0.12, 0.16, 0.3) * pow(max(m, 0.0), 300.0);
 	float far = 0.07 + 0.045 * sin(azimuth * 7.0) + 0.025 * sin(azimuth * 17.0 + 1.0) + 0.012 * sin(azimuth * 43.0);
 	float near = 0.015 + 0.03 * sin(azimuth * 4.0 + 2.0) + 0.012 * sin(azimuth * 23.0 + 0.5);
 	colour = mix(colour, vec3(0.025, 0.035, 0.07), smoothstep(far + 0.002, far - 0.002, elevation));
 	colour = mix(colour, vec3(0.006, 0.008, 0.016), smoothstep(near + 0.002, near - 0.002, elevation));
 	ALBEDO = colour;
 }
-"
-
+"""
 ## faint moonlight shafts: additive, soft at the sides, fading towards the floor, with slowly moving dust
-const SHAFT_SHADER := "shader_type spatial;
+const SHAFT_SHADER := """shader_type spatial;
 render_mode unshaded, blend_premul_alpha, depth_draw_never, cull_disabled, shadows_disabled, fog_disabled;
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float noise(vec2 p) {
 	vec2 i = floor(p);
 	vec2 f = fract(p);
 	f = f * f * (3.0 - 2.0 * f);
-	return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0)), f.x), f.y);
+	return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
+		mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0)), f.x), f.y);
 }
 void fragment() {
 	float edges = smoothstep(0.0, 0.25, UV.x) * smoothstep(1.0, 0.75, UV.x);
@@ -128,42 +135,34 @@ void fragment() {
 	ALBEDO = vec3(0.35, 0.45, 0.8) * 0.07 * edges * along * shimmer;
 	ALPHA = 0.0; // additive, as the flames
 }
-"
-
+"""
 ## embers and dust: soft dots facing the eye, additive like the flames (no alpha written)
-const SPARK_SHADER := "shader_type spatial;
+const SPARK_SHADER := """shader_type spatial;
 render_mode unshaded, blend_premul_alpha, depth_draw_never, cull_disabled, shadows_disabled, fog_disabled;
 uniform vec4 tint = vec4(1.0);
 uniform sampler2D dot_texture : filter_linear;
 void vertex() {
 	MODELVIEW_MATRIX = VIEW_MATRIX * mat4(INV_VIEW_MATRIX[0], INV_VIEW_MATRIX[1], INV_VIEW_MATRIX[2], MODEL_MATRIX[3]);
-	MODELVIEW_MATRIX = MODELVIEW_MATRIX * mat4(vec4(length(MODEL_MATRIX[0].xyz), 0.0, 0.0, 0.0), vec4(0.0, length(MODEL_MATRIX[1].xyz), 0.0, 0.0), vec4(0.0, 0.0, length(MODEL_MATRIX[2].xyz), 0.0), vec4(0.0, 0.0, 0.0, 1.0));
+	MODELVIEW_MATRIX = MODELVIEW_MATRIX * mat4(
+		vec4(length(MODEL_MATRIX[0].xyz), 0.0, 0.0, 0.0),
+		vec4(0.0, length(MODEL_MATRIX[1].xyz), 0.0, 0.0),
+		vec4(0.0, 0.0, length(MODEL_MATRIX[2].xyz), 0.0),
+		vec4(0.0, 0.0, 0.0, 1.0));
 }
 void fragment() {
 	ALBEDO = tint.rgb * COLOR.rgb * texture(dot_texture, UV).a * COLOR.a;
 	ALPHA = 0.0;
 }
-"
-
-var environment := _make_environment() ## main.gd shows the room with this environment
-var _flames := [] ## [base position, width, height, brightness]
-var _table_light := Vector3.ZERO ## where the candles on the war table light the map from
-var _materials := [] ## the tiled surface materials, for set_feature
-var _table := Transform3D() ## the war table, set in _build_props
-var _minimap: MeshInstance3D ## the game's minimap on the war table, from the data bridge (main.gd)
-var _markers: MultiMeshInstance3D ## heroes, towns and flaggable objects on the minimap, in unit space of the panel
+"""
 const MINIMAP_AREA := Vector2(0.8, 0.5) ## metres on the table inside the corner figures
 const MARKER_METRES := 0.012 ## width of an object marker on the minimap
-var _sprites: MultiMeshInstance3D ## the objects' sprites from the atlas (quest/MILESTONE_3B.md), VcmiData.update_sprites
-var zoom := 1.0 ## the minimap shows 1 / zoom of the map (set_zoom)
-var zoom_centre := Vector2(0.5, 0.5) ## in minimap UV: both levels side by side
-var map_cells := Vector2i.ZERO ## tiles of the terrain image: width * levels, height
 ## The sprites of the map objects from the atlas pages (VcmiData.update_sprites, quest/MILESTONE_3B.md): the quad of the
 ## current frame, built from the frame table; pixels -> panel by the instance transform. Premultiplied colour, drawn in
 ## instance order without depth (the order is the 2D map's). The owner colour goes on the mask of owned objects.
-const SPRITE_SHADER := "shader_type spatial;
+const SPRITE_SHADER := """shader_type spatial;
 render_mode unshaded, shadows_disabled, blend_premul_alpha, depth_draw_never, cull_disabled;
-uniform sampler2DArray atlas : source_color, filter_linear_mipmap; // premultiplied in linear light, sRGB-encoded (SpriteAtlas.h)
+// premultiplied in linear light, sRGB-encoded (SpriteAtlas.h)
+uniform sampler2DArray atlas : source_color, filter_linear_mipmap;
 uniform sampler2DArray masks : filter_linear_mipmap;
 uniform sampler2D frames : filter_nearest;
 uniform sampler2D fog : filter_nearest;
@@ -220,9 +219,10 @@ void fragment() {
 	ALBEDO = c.rgb;
 	ALPHA = c.a;
 }
-"
-## markers sit in the fog unless their anchor or visitable tile is seen (INSTANCE_CUSTOM: both in minimap UV; the fog is x-major)
-const MARKER_SHADER := "shader_type spatial;
+"""
+## markers sit in the fog unless their anchor or visitable tile is seen (INSTANCE_CUSTOM: both in minimap UV; the fog is
+## x-major)
+const MARKER_SHADER := """shader_type spatial;
 render_mode unshaded, shadows_disabled;
 uniform sampler2D fog : filter_nearest;
 uniform mat4 world_to_panel; // the minimap's world transform, inverted: content outside the panel is cut
@@ -241,8 +241,8 @@ void fragment() {
 	}
 	ALBEDO = COLOR.rgb;
 }
-"
-const MINIMAP_SHADER := "shader_type spatial;
+"""
+const MINIMAP_SHADER := """shader_type spatial;
 render_mode unshaded, shadows_disabled;
 uniform sampler2D terrain : source_color, filter_nearest_mipmap;
 uniform sampler2D fog : filter_linear;
@@ -253,17 +253,37 @@ void fragment() {
 	// the fog image is x-major (VcmiData.fog_image), 1 of 255 where visible
 	ALBEDO = texture(terrain, uv).rgb * min(texture(fog, uv.yx).r * 255.0, 1.0) * 0.85;
 }
-"
+"""
+
+var environment := _make_environment() ## main.gd shows the room with this environment
+var zoom := 1.0 ## the minimap shows 1 / zoom of the map (set_zoom)
+var zoom_centre := Vector2(0.5, 0.5) ## in minimap UV: both levels side by side
+var map_cells := Vector2i.ZERO ## tiles of the terrain image: width * levels, height
+
+var _spark_texture: GradientTexture2D ## made by _spark on first use
+var _dirt_texture: NoiseTexture2D ## made by _dirt on first use
+var _flames := [] ## [base position, width, height, brightness]
+var _table_light := Vector3.ZERO ## where the candles on the war table light the map from
+var _materials := [] ## the tiled surface materials, for set_feature
+var _table := Transform3D() ## the war table, set in _build_props
+var _minimap: MeshInstance3D ## the game's minimap on the war table, from the data bridge (main.gd)
+var _markers: MultiMeshInstance3D ## heroes, towns and flaggable objects on the minimap, in unit space of the panel
+## the selected hero's path as discs and its tile marked, in the markers' space (set_path)
+var _path: MultiMeshInstance3D
+## the objects' sprites from the atlas (quest/MILESTONE_3B.md), VcmiData.update_sprites
+var _sprites: MultiMeshInstance3D
 
 
-## Test command `gfx <feature> <0|1>` (main.gd): switches one costly part off or on, to measure its GPU time on the headset
+## Test command `gfx <feature> <0|1>` (main.gd): switches one costly part off or on, to measure its GPU time on the
+## headset
 ## with `quest.sh sample`. 0 glow (off by default), 1 parallax, 2 normal maps, 3 dirt detail, 4 probe reflections on the
 ## walls and floor too (off by default), 6 reflection probe, 7 decor props, 8 effects (particles, flames, shafts)
 func set_feature(feature: int, on: bool) -> void:
 	match feature:
 		0: environment.glow_enabled = on
 		1, 2, 3:
-			var flag: int = [BaseMaterial3D.FEATURE_HEIGHT_MAPPING, BaseMaterial3D.FEATURE_NORMAL_MAPPING, BaseMaterial3D.FEATURE_DETAIL][feature - 1]
+			var flag: int = [BaseMaterial3D.FEATURE_HEIGHT_MAPPING, BaseMaterial3D.FEATURE_NORMAL_MAPPING,
+					BaseMaterial3D.FEATURE_DETAIL][feature - 1]
 			for material in _materials:
 				material.set_feature(flag, on)
 		4: get_node("Reflections").reflection_mask = LAYER | DECOR if on else DECOR
@@ -299,7 +319,9 @@ func _ready() -> void:
 	probe.box_projection = true
 	probe.interior = true
 	probe.cull_mask = LAYER | DECOR
-	probe.reflection_mask = DECOR # only the decor (frames, banner gold, candles, books, logs, table pieces): a box-projected lookup on every wall and floor pixel costs ~1 ms on the Quest
+	# only the decor (frames, banner gold, candles, books, logs, table pieces): a box-projected lookup on every wall and
+	# floor pixel costs ~1 ms on the Quest
+	probe.reflection_mask = DECOR
 	probe.ambient_mode = ReflectionProbe.AMBIENT_DISABLED # the lightmap gives the ambient light
 	_add(probe, "Reflections")
 	var lightmap := LightmapGI.new()
@@ -310,7 +332,8 @@ func _ready() -> void:
 	lightmap.environment_mode = LightmapGI.ENVIRONMENT_MODE_DISABLED
 	lightmap.texel_scale = 1.0
 	lightmap.max_texture_size = 2048
-	lightmap.generate_probes_subdiv = LightmapGI.GENERATE_PROBES_SUBDIV_8 # light for the controllers and the small props
+	# light for the controllers and the small props
+	lightmap.generate_probes_subdiv = LightmapGI.GENERATE_PROBES_SUBDIV_8
 	if ResourceLoader.exists(LIGHTMAP):
 		lightmap.light_data = load(LIGHTMAP)
 	_add(lightmap, "Lightmap") # last: it looks up the meshes when it enters the tree
@@ -348,6 +371,27 @@ func _ready() -> void:
 	_markers.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_markers.name = "Markers"
 	_minimap.add_child(_markers)
+
+	# the path: discs with the markers' material (fog, clip at the panel's edge), a little above the sprites
+	var disc := CylinderMesh.new()
+	disc.top_radius = 0.5
+	disc.bottom_radius = 0.5
+	disc.height = 0.001
+	disc.radial_segments = 16
+	disc.rings = 1
+	disc.material = marker_material
+	var path_multimesh := MultiMesh.new()
+	path_multimesh.transform_format = MultiMesh.TRANSFORM_3D
+	path_multimesh.use_colors = true
+	path_multimesh.use_custom_data = true
+	path_multimesh.mesh = disc
+	path_multimesh.custom_aabb = multimesh.custom_aabb
+	_path = MultiMeshInstance3D.new()
+	_path.multimesh = path_multimesh
+	_path.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
+	_path.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_path.name = "Path"
+	_minimap.add_child(_path)
 
 	var sprite_shader := Shader.new()
 	sprite_shader.code = SPRITE_SHADER
@@ -417,6 +461,7 @@ func set_zoom(factor: float, centre: Vector2) -> void:
 			Vector3(-zoom_centre.x * size.x * zoom, 0.0, -zoom_centre.y * size.y * zoom))
 	_markers.transform = content * Transform3D(Basis(), Vector3(0.5, 0.0, 0.5))
 	_sprites.transform = _markers.transform
+	_path.transform = _markers.transform
 	for node in [_markers, _sprites]:
 		var shader_material: ShaderMaterial = node.multimesh.mesh.material
 		shader_material.set_shader_parameter("world_to_panel", Projection(_minimap.global_transform.affine_inverse()))
@@ -428,20 +473,55 @@ func visible_uv() -> Rect2:
 	return Rect2(zoom_centre - Vector2.ONE * 0.5 / zoom, Vector2.ONE / zoom)
 
 
-## where a ray from `from` along `direction` hits the minimap, in map UV (both levels side by side, through the
-## zoom); Vector2(-1, -1) when it misses
-func table_uv(from: Vector3, direction: Vector3) -> Vector2:
+## where a ray from `from` along `direction` hits the minimap's plane, in the world; Vector3.INF when it does not
+func table_hit(from: Vector3, direction: Vector3) -> Vector3:
 	var to_panel := _minimap.global_transform.affine_inverse()
 	var start := to_panel * from
 	var along := to_panel.basis * direction
 	if absf(along.y) < 0.000001 or -start.y / along.y <= 0.0:
+		return Vector3.INF
+	return _minimap.global_transform * (start + along * (-start.y / along.y))
+
+
+## where a ray from `from` along `direction` hits the minimap, in map UV (both levels side by side, through the
+## zoom); Vector2(-1, -1) when it misses
+func table_uv(from: Vector3, direction: Vector3) -> Vector2:
+	var world := table_hit(from, direction)
+	if world == Vector3.INF:
 		return Vector2(-1.0, -1.0)
-	var hit := start + along * (-start.y / along.y)
+	var hit := _minimap.global_transform.affine_inverse() * world
 	var panel := Vector2(hit.x, hit.z) / minimap_size() + Vector2(0.5, 0.5)
 	if panel.x < 0.0 or panel.x > 1.0 or panel.y < 0.0 or panel.y > 1.0:
 		return Vector2(-1.0, -1.0)
 	var view := visible_uv()
 	return view.position + panel * view.size
+
+
+## the selected hero's path (VcmiData.path_nodes: Vector4i x, y, level, turns) as discs, green for this turn and
+## orange after, the end larger; `selected` (a tile, or x < 0 for none) gets a white disc under the hero's sprite
+func set_path(nodes: Array, selected: Vector3i, map: Vector3i) -> void:
+	var multimesh := _path.multimesh
+	multimesh.instance_count = 0
+	if map.x <= 0:
+		return
+	var tiles: Array = []
+	if selected.x >= 0:
+		tiles.append([selected, 0.8, Color(0.95, 0.95, 0.85)])
+	for i in nodes.size():
+		var node: Vector4i = nodes[i]
+		tiles.append([Vector3i(node.x, node.y, node.z), 0.55 if i == nodes.size() - 1 else 0.3,
+				Color(0.25, 0.85, 0.3) if node.w == 0 else Color(0.95, 0.55, 0.1)])
+	multimesh.instance_count = tiles.size()
+	var tile_size := Vector2(1.0 / (map.x * map.z), 1.0 / map.y) # in the markers' space, 1 per map width
+	for i in tiles.size():
+		var uv: Vector2 = TableMath.tile_uv(tiles[i][0], map)
+		var scale: float = tiles[i][1]
+		multimesh.set_instance_transform(i, Transform3D(Basis.from_scale(Vector3(tile_size.x * scale, 1.0,
+				tile_size.y * scale)),
+				# the selected hero's mark under the sprites (0.003), the path over them
+				Vector3(uv.x - 0.5, 0.001 if i == 0 and selected.x >= 0 else 0.004, uv.y - 0.5)))
+		multimesh.set_instance_color(i, tiles[i][2])
+		multimesh.set_instance_custom_data(i, Color(uv.x, uv.y, uv.x, uv.y)) # the fog test, as the markers'
 
 
 ## the minimap's centre in the world
@@ -510,21 +590,27 @@ func _build_shell() -> void:
 	# the back wall around the two windows
 	var x0 := WINDOW_X + WINDOW.position.x
 	var x1 := WINDOW_X + WINDOW.end.x
-	var pieces := [Rect2(-HALF, 0.0, HALF - x1, SIZE.y), Rect2(-x0, 0.0, 2.0 * x0, SIZE.y), Rect2(x1, 0.0, HALF - x1, SIZE.y)]
+	var pieces := [Rect2(-HALF, 0.0, HALF - x1, SIZE.y), Rect2(-x0, 0.0, 2.0 * x0, SIZE.y), Rect2(x1, 0.0, HALF - x1,
+			SIZE.y)]
 	for side in [-1.0, 1.0]:
 		var left := x0 if side > 0.0 else -x1
 		pieces.append(Rect2(left, 0.0, WINDOW.size.x, WINDOW.position.y))
 		pieces.append(Rect2(left, WINDOW.end.y, WINDOW.size.x, SIZE.y - WINDOW.end.y))
 	for i in pieces.size():
 		var piece: Rect2 = pieces[i]
-		_panel("WallBack%d" % i, Vector3(piece.position.x, piece.position.y, BACK), Vector3.RIGHT, piece.size, "stone", 3.2, Vector2(piece.position.x + HALF, piece.position.y))
+		_panel("WallBack%d" % i, Vector3(piece.position.x, piece.position.y, BACK), Vector3.RIGHT, piece.size, "stone",
+				3.2, Vector2(piece.position.x + HALF, piece.position.y))
 	# dark oak panelling to 1.1 m with a rail, on the walls around the head
 	var wood := Color(0.75, 0.6, 0.5)
-	_panel("PanelLeft", Vector3(-HALF + 0.02, 0.0, FRONT), Vector3.FORWARD, Vector2(SIZE.z, 1.1), "beam", 1.4, Vector2.ZERO, wood)
-	_panel("PanelRight", Vector3(HALF - 0.02, 0.0, BACK), Vector3.BACK, Vector2(SIZE.z, 1.1), "beam", 1.4, Vector2.ZERO, wood)
-	_panel("PanelFront", Vector3(HALF, 0.0, FRONT - 0.02), Vector3.LEFT, Vector2(SIZE.x, 1.1), "beam", 1.4, Vector2.ZERO, wood)
+	_panel("PanelLeft", Vector3(-HALF + 0.02, 0.0, FRONT), Vector3.FORWARD, Vector2(SIZE.z, 1.1), "beam", 1.4,
+			Vector2.ZERO, wood)
+	_panel("PanelRight", Vector3(HALF - 0.02, 0.0, BACK), Vector3.BACK, Vector2(SIZE.z, 1.1), "beam", 1.4, Vector2.ZERO,
+			wood)
+	_panel("PanelFront", Vector3(HALF, 0.0, FRONT - 0.02), Vector3.LEFT, Vector2(SIZE.x, 1.1), "beam", 1.4,
+			Vector2.ZERO, wood)
 	# a course of dressed stones where the back wall meets the floor
-	_box("Plinth", Vector3(SIZE.x, 0.28, 0.1), Vector3(0.0, 0.14, BACK + 0.05), _material("stone", Vector2.ONE * 0.5, Vector2.ZERO, Color(0.8, 0.75, 0.7), true))
+	_box("Plinth", Vector3(SIZE.x, 0.28, 0.1), Vector3(0.0, 0.14, BACK + 0.05), _material("stone", Vector2.ONE * 0.5,
+			Vector2.ZERO, Color(0.8, 0.75, 0.7), true))
 	var beam := _material("beam", Vector2.ONE * 0.6, Vector2.ZERO, Color(0.6, 0.48, 0.4), true)
 	_box("RailLeft", Vector3(0.06, 0.08, SIZE.z), Vector3(-HALF + 0.03, 1.12, MIDDLE), beam)
 	_box("RailRight", Vector3(0.06, 0.08, SIZE.z), Vector3(HALF - 0.03, 1.12, MIDDLE), beam)
@@ -533,7 +619,8 @@ func _build_shell() -> void:
 	for i in 5:
 		_box("Beam%d" % i, Vector3(SIZE.x, 0.32, 0.28), Vector3(0.0, SIZE.y - 0.16, BACK + 1.0 + 2.0 * i), beam)
 	for side in [-1.0, 1.0]:
-		_box("WallPlate%d" % int(side), Vector3(0.3, 0.3, SIZE.z), Vector3(side * (HALF - 0.15), SIZE.y - 0.15, MIDDLE), beam)
+		_box("WallPlate%d" % int(side), Vector3(0.3, 0.3, SIZE.z), Vector3(side * (HALF - 0.15), SIZE.y - 0.15, MIDDLE),
+				beam)
 	# a red rug with a golden border in front of the head, flat on the floor
 	var rug := Rect2(-1.6, -3.0, 3.2, 4.2) # x, z
 	var carpet := PlaneMesh.new()
@@ -571,12 +658,17 @@ func _build_windows() -> void:
 		var glass := QuadMesh.new()
 		glass.size = WINDOW.size
 		glass.material = sky
-		var pane := _mesh("Sky%s" % tag, glass, Transform3D(Basis(), Vector3(cx, WINDOW.get_center().y, BACK - REVEAL + 0.05)))
+		var pane := _mesh("Sky%s" % tag, glass, Transform3D(Basis(), Vector3(cx, WINDOW.get_center().y,
+				BACK - REVEAL + 0.05)))
 		pane.gi_mode = GeometryInstance3D.GI_MODE_DISABLED # not a wall to the bake: the moonlight comes through
-		_box("Mullion%s" % tag, Vector3(0.09, WINDOW.size.y, 0.12), Vector3(cx, WINDOW.get_center().y, BACK - REVEAL + 0.15), stone)
-		_box("Transom%s" % tag, Vector3(WINDOW.size.x, 0.09, 0.12), Vector3(cx, WINDOW.position.y + WINDOW.size.y * 0.62, BACK - REVEAL + 0.15), stone)
-		_box("Lintel%s" % tag, Vector3(WINDOW.size.x + 0.3, 0.22, 0.12), Vector3(cx, WINDOW.end.y + 0.11, BACK + 0.06), stone)
-		_box("SillStone%s" % tag, Vector3(WINDOW.size.x + 0.3, 0.1, 0.18), Vector3(cx, WINDOW.position.y - 0.05, BACK + 0.09), stone)
+		_box("Mullion%s" % tag, Vector3(0.09, WINDOW.size.y, 0.12), Vector3(cx, WINDOW.get_center().y,
+				BACK - REVEAL + 0.15), stone)
+		_box("Transom%s" % tag, Vector3(WINDOW.size.x, 0.09, 0.12), Vector3(cx,
+				WINDOW.position.y + WINDOW.size.y * 0.62, BACK - REVEAL + 0.15), stone)
+		_box("Lintel%s" % tag, Vector3(WINDOW.size.x + 0.3, 0.22, 0.12), Vector3(cx, WINDOW.end.y + 0.11, BACK + 0.06),
+				stone)
+		_box("SillStone%s" % tag, Vector3(WINDOW.size.x + 0.3, 0.1, 0.18), Vector3(cx, WINDOW.position.y - 0.05,
+				BACK + 0.09), stone)
 
 
 ## The fireplace in the left wall: hearth, jambs, mantel, chimney breast, logs, embers and the fire
@@ -588,7 +680,8 @@ func _build_fireplace() -> void:
 	for side in [-1.0, 1.0]:
 		_box("Jamb%d" % int(side), Vector3(0.6, 1.3, 0.5), Vector3(wall + 0.3, 0.77, FIRE_Z + side * 0.85), stone)
 	_box("FireLintel", Vector3(0.65, 0.3, 2.3), Vector3(wall + 0.325, 1.57, FIRE_Z), stone)
-	_box("Mantel", Vector3(0.8, 0.08, 2.7), Vector3(wall + 0.4, 1.76, FIRE_Z), _material("beam", Vector2.ONE * 0.6, Vector2.ZERO, Color(0.5, 0.38, 0.3), true))
+	_box("Mantel", Vector3(0.8, 0.08, 2.7), Vector3(wall + 0.4, 1.76, FIRE_Z), _material("beam", Vector2.ONE * 0.6,
+			Vector2.ZERO, Color(0.5, 0.38, 0.3), true))
 	_box("Chimney", Vector3(0.45, SIZE.y - 1.8, 2.1), Vector3(wall + 0.225, 1.8 + (SIZE.y - 1.8) / 2.0, FIRE_Z), stone)
 	_box("Firebox", Vector3(0.08, 1.3, 1.2), Vector3(wall + 0.06, 0.77, FIRE_Z), soot)
 	var embers := PlaneMesh.new()
@@ -616,7 +709,8 @@ func _build_fireplace() -> void:
 		log_mesh.height = 0.75 - i * 0.1
 		log_mesh.radial_segments = 10
 		var turn := Basis(Vector3.RIGHT, PI / 2.0).rotated(Vector3.UP, [0.15, -0.2, 0.05][i])
-		logs.append([log_mesh, Transform3D(turn, Vector3(wall + 0.25 + i * 0.1, 0.19 + (0.1 if i == 2 else 0.0), FIRE_Z + [-0.1, 0.12, 0.0][i])), bark])
+		logs.append([log_mesh, Transform3D(turn, Vector3(wall + 0.25 + i * 0.1, 0.19 + (0.1 if i == 2 else 0.0),
+				FIRE_Z + [-0.1, 0.12, 0.0][i])), bark])
 	var log_material := StandardMaterial3D.new()
 	log_material.vertex_color_use_as_albedo = true
 	log_material.roughness = 0.9
@@ -640,9 +734,12 @@ func _build_fireplace() -> void:
 	wax_material.roughness = 0.5
 	_merged("Candles", wax, wax_material)
 	var face := wall + 0.45
-	_prop("Axe", "polyhaven/wooden_axe/wooden_axe.gltf", Vector3(face + 0.03, 2.25, FIRE_Z), Basis(Vector3.UP, PI / 2.0).rotated(Vector3.RIGHT, 0.6), 1.5)
-	_prop("Mace", "polyhaven/ornate_medieval_mace/ornate_medieval_mace.gltf", Vector3(face + 0.03, 2.25, FIRE_Z), Basis(Vector3.UP, PI / 2.0).rotated(Vector3.RIGHT, -0.6), 1.5)
-	_prop("Shield", "polyhaven/kite_shield/kite_shield.gltf", Vector3(face + 0.08, 2.15, FIRE_Z), Basis(Vector3.UP, PI / 2.0), 0.8)
+	_prop("Axe", "polyhaven/wooden_axe/wooden_axe.gltf", Vector3(face + 0.03, 2.25, FIRE_Z), Basis(Vector3.UP,
+			PI / 2.0).rotated(Vector3.RIGHT, 0.6), 1.5)
+	_prop("Mace", "polyhaven/ornate_medieval_mace/ornate_medieval_mace.gltf", Vector3(face + 0.03, 2.25, FIRE_Z),
+			Basis(Vector3.UP, PI / 2.0).rotated(Vector3.RIGHT, -0.6), 1.5)
+	_prop("Shield", "polyhaven/kite_shield/kite_shield.gltf", Vector3(face + 0.08, 2.15, FIRE_Z), Basis(Vector3.UP,
+			PI / 2.0), 0.8)
 
 
 ## Banners in the eight player colours high on the side walls, and a tapestry above the screen
@@ -656,7 +753,8 @@ func _build_banners() -> void:
 		var side := -1.0 if i < 4 else 1.0
 		var z: float = [-5.0, -3.4, 1.0, 2.6][i % 4]
 		var along := Vector3.FORWARD if side < 0.0 else Vector3.BACK
-		spots.append([Vector3(side * (HALF - 0.04), 4.45, z) - along * 0.45, along, PLAYER_COLOURS[i] * 1.5, Vector2(0.9, 2.1), 0.35])
+		spots.append([Vector3(side * (HALF - 0.04), 4.45, z) - along * 0.45, along, PLAYER_COLOURS[i] * 1.5,
+				Vector2(0.9, 2.1), 0.35])
 	spots.append([Vector3(-1.5, 4.8, BACK + 0.04), Vector3.RIGHT, PLAYER_COLOURS[0] * 1.5, Vector2(3.0, 1.25), 0.0])
 	for i in spots.size():
 		var spot: Array = spots[i]
@@ -664,7 +762,8 @@ func _build_banners() -> void:
 		var along: Vector3 = spot[1]
 		var size: Vector2 = spot[3]
 		var normal := along.cross(Vector3.UP)
-		_banner(cloth, top, along, normal, size, spot[4], spot[2], Rect2((i % 3) / 3.0, (i / 3) / 3.0, 1.0 / 3.0, 1.0 / 3.0))
+		_banner(cloth, top, along, normal, size, spot[4], spot[2], Rect2((i % 3) / 3.0, (i / 3) / 3.0, 1.0 / 3.0,
+				1.0 / 3.0))
 		# the golden pole, its knobs and an emblem
 		var pole := CylinderMesh.new()
 		pole.top_radius = 0.022
@@ -672,7 +771,8 @@ func _build_banners() -> void:
 		pole.height = size.x + 0.2
 		pole.radial_segments = 8
 		var centre := top + along * size.x / 2.0 + normal * 0.03
-		trim.append([pole, Transform3D(Basis(along.cross(normal), along, normal), centre), gold]) # the cylinder axis along the wall
+		# the cylinder axis along the wall
+		trim.append([pole, Transform3D(Basis(along.cross(normal), along, normal), centre), gold])
 		for end in [-1.0, 1.0]:
 			var knob := SphereMesh.new()
 			knob.radius = 0.045
@@ -683,10 +783,12 @@ func _build_banners() -> void:
 		var emblem := BoxMesh.new()
 		emblem.size = Vector3(0.22, 0.22, 0.012) * (2.2 if spot[4] == 0.0 else 1.0)
 		var emblem_at := top + along * size.x / 2.0 + Vector3.DOWN * size.y * 0.4 + normal * 0.012
-		trim.append([emblem, Transform3D(Basis(along, Vector3.UP, normal) * Basis(Vector3.FORWARD, PI / 4.0), emblem_at), gold])
+		trim.append([emblem, Transform3D(Basis(along, Vector3.UP, normal) * Basis(Vector3.FORWARD, PI / 4.0),
+				emblem_at), gold])
 		var stripe := BoxMesh.new()
 		stripe.size = Vector3(size.x, 0.05, 0.01)
-		trim.append([stripe, Transform3D(Basis(along, Vector3.UP, normal), top + along * size.x / 2.0 + Vector3.DOWN * 0.12 + normal * 0.01), gold])
+		trim.append([stripe, Transform3D(Basis(along, Vector3.UP, normal),
+				top + along * size.x / 2.0 + Vector3.DOWN * 0.12 + normal * 0.01), gold])
 	cloth.generate_tangents()
 	var mesh := cloth.commit()
 	mesh.lightmap_size_hint = Vector2i(384, 384)
@@ -702,7 +804,8 @@ func _build_banners() -> void:
 
 ## A banner of `size` hanging down from `top` along the wall, with a swallowtail of `tail` metres, into `cloth`
 ## with its lightmap UVs in `cell`
-func _banner(cloth: SurfaceTool, top: Vector3, along: Vector3, normal: Vector3, size: Vector2, tail: float, colour: Color, cell: Rect2) -> void:
+func _banner(cloth: SurfaceTool, top: Vector3, along: Vector3, normal: Vector3, size: Vector2, tail: float,
+		colour: Color, cell: Rect2) -> void:
 	var rows := 8
 	var grid := []
 	for r in rows + 1:
@@ -714,7 +817,8 @@ func _banner(cloth: SurfaceTool, top: Vector3, along: Vector3, normal: Vector3, 
 			if r == rows and c == 1:
 				drop -= tail
 			var ripple := sin(u * TAU * 1.5 + v * 2.0) * 0.025 * (0.3 + v)
-			row.append([top + along * u * size.x + Vector3.DOWN * drop + normal * ripple, Vector2(u * size.x, drop) / 0.6, cell.position + Vector2(u, drop / size.y) * cell.size * 0.9])
+			row.append([top + along * u * size.x + Vector3.DOWN * drop + normal * ripple, Vector2(u * size.x,
+					drop) / 0.6, cell.position + Vector2(u, drop / size.y) * cell.size * 0.9])
 		grid.append(row)
 	for r in rows:
 		for c in 2:
@@ -729,18 +833,24 @@ func _banner(cloth: SurfaceTool, top: Vector3, along: Vector3, normal: Vector3, 
 
 ## Furniture and props: war table, lord's chair, bookshelves, weapon rack, chest, barrels, door, chandelier, torches
 func _build_props() -> void:
-	# long side to the user, the nearest corner at 56 degrees: outside every screen size main.gd allows (preview.gd checks)
+	# long side to the user, the nearest corner at 56 degrees: outside every screen size main.gd allows (preview.gd
+	# checks)
 	var table := Transform3D(Basis(Vector3.UP, -PI / 2.0), Vector3(2.6, 0.0, -0.3))
 	_table = table
 	_prop("WarTable", "meshy/war_table.gltf", table.origin, table.basis)
-	# castles, towers and flags of four players on the corners of the campaign map (lit by the probes, too small to bake)
-	for piece in [["building_castle_red", Vector3(-0.66, 0.0, 0.36), 0.05, 0.0], ["building_castle_blue", Vector3(0.68, 0.0, -0.34), 0.05, 2.6],
-			["building_tower_A_green", Vector3(0.66, 0.0, 0.38), 0.08, 1.0], ["building_tower_A_yellow", Vector3(-0.64, 0.0, -0.38), 0.08, 4.0],
+	# castles, towers and flags of four players on the corners of the campaign map (lit by the probes, too small to
+	# bake)
+	for piece in [["building_castle_red", Vector3(-0.66, 0.0, 0.36), 0.05, 0.0], ["building_castle_blue", Vector3(0.68,
+			0.0, -0.34), 0.05, 2.6],
+			["building_tower_A_green", Vector3(0.66, 0.0, 0.38), 0.08, 1.0], ["building_tower_A_yellow", Vector3(-0.64,
+					0.0, -0.38), 0.08, 4.0],
 			["flag_red", Vector3(-0.44, 0.0, 0.3), 0.55, 0.3], ["flag_blue", Vector3(0.46, 0.0, -0.24), 0.55, 2.0],
 			["flag_green", Vector3(0.42, 0.0, 0.42), 0.55, 1.2], ["flag_yellow", Vector3(-0.4, 0.0, -0.42), 0.55, 3.5]]:
-		var lift: float = -1.278 * piece[2] if "tower" in piece[0] else 0.0 # the tower model starts above its (left out) base
+		# the tower model starts above its (left out) base
+		var lift: float = -1.278 * piece[2] if "tower" in piece[0] else 0.0
 		var at: Vector3 = table * (piece[1] + Vector3(0.0, TABLE_TOP + lift, 0.0))
-		var figure := _prop(piece[0].capitalize().replace(" ", ""), "kaykit/%s.gltf" % piece[0], at, table.basis * Basis(Vector3.UP, piece[3]), piece[2])
+		var figure := _prop(piece[0].capitalize().replace(" ", ""), "kaykit/%s.gltf" % piece[0], at,
+				table.basis * Basis(Vector3.UP, piece[3]), piece[2])
 		for mesh in figure.find_children("*", "GeometryInstance3D", true, false):
 			mesh.gi_mode = GeometryInstance3D.GI_MODE_DYNAMIC
 	# two candles on the map side next to the chair, and their light on the map
@@ -762,15 +872,20 @@ func _build_props() -> void:
 	_prop("LordsChair", "meshy/lords_chair.gltf", table * Vector3(0.0, 0.0, -1.35), table.basis)
 	_prop("WeaponRack", "meshy/weapon_rack.gltf", Vector3(HALF - 0.35, 0.0, 0.3), Basis(Vector3.UP, -PI / 2.0))
 	for i in 2:
-		_prop("Bookshelf%d" % i, "polyhaven/wooden_bookshelf_worn/wooden_bookshelf_worn.gltf", _bookshelf(i).origin, _bookshelf(i).basis)
+		_prop("Bookshelf%d" % i, "polyhaven/wooden_bookshelf_worn/wooden_bookshelf_worn.gltf", _bookshelf(i).origin,
+				_bookshelf(i).basis)
 	_prop("Chest", "meshy/treasure_chest.gltf", Vector3(-2.3, 0.0, FRONT - 0.55), Basis(Vector3.UP, PI))
-	_prop("Door", "polyhaven/large_castle_door/large_castle_door.gltf", Vector3(0.0, 0.0, FRONT - 0.02), Basis(Vector3.UP, PI))
-	for barrel in [[Vector3(-HALF + 0.5, 0.0, FRONT - 0.55), 0.3], [Vector3(-HALF + 1.3, 0.0, FRONT - 0.5), 1.2], [Vector3(HALF - 0.55, 0.0, FRONT - 0.6), 2.0]]:
-		_prop("Barrel%d" % int(barrel[1] * 10), "polyhaven/wine_barrel_01/wine_barrel_01.gltf", barrel[0], Basis(Vector3.UP, barrel[1]))
+	_prop("Door", "polyhaven/large_castle_door/large_castle_door.gltf", Vector3(0.0, 0.0, FRONT - 0.02),
+			Basis(Vector3.UP, PI))
+	for barrel in [[Vector3(-HALF + 0.5, 0.0, FRONT - 0.55), 0.3], [Vector3(-HALF + 1.3, 0.0, FRONT - 0.5), 1.2],
+			[Vector3(HALF - 0.55, 0.0, FRONT - 0.6), 2.0]]:
+		_prop("Barrel%d" % int(barrel[1] * 10), "polyhaven/wine_barrel_01/wine_barrel_01.gltf", barrel[0],
+				Basis(Vector3.UP, barrel[1]))
 	_prop("Chandelier", "polyhaven/Chandelier_02/Chandelier_02.gltf", Vector3(0.0, SIZE.y - 1.15, -1.5), Basis(), 1.35)
 	for torch in _torches():
 		var side: float = signf(torch.x)
-		_prop("Torch%d%d" % [int(side), int(torch.z)], "meshy/wall_torch.gltf", torch, Basis(Vector3.UP, -side * PI / 2.0))
+		_prop("Torch%d%d" % [int(side), int(torch.z)], "meshy/wall_torch.gltf", torch, Basis(Vector3.UP,
+				-side * PI / 2.0))
 		_flames.append([torch + Vector3(-side * 0.075, 0.43, 0.0), 0.13, 0.32, 1.5])
 
 
@@ -803,7 +918,8 @@ func _build_books() -> void:
 				if rng.randf() < 0.5: # a gilt band across the spine
 					var band := BoxMesh.new()
 					band.size = Vector3(thickness + 0.002, 0.012, 0.004)
-					parts.append([band, shelf * Transform3D(Basis(), at + Vector3(0.0, height * 0.3, depth / 2.0)), Color(0.55, 0.4, 0.12)])
+					parts.append([band, shelf * Transform3D(Basis(), at + Vector3(0.0, height * 0.3, depth / 2.0)),
+							Color(0.55, 0.4, 0.12)])
 				x += thickness + 0.002
 	var material := StandardMaterial3D.new()
 	material.vertex_color_use_as_albedo = true
@@ -839,12 +955,15 @@ func _build_paintings() -> void:
 			for side in 4:
 				var vertical := side >= 2
 				var bar := BoxMesh.new()
-				var reach := 2.0 * width if inner == 0.0 else 0.0 # the gilt meets at the corners, the lip stays inside it
+				# the gilt meets at the corners, the lip stays inside it
+				var reach := 2.0 * width if inner == 0.0 else 0.0
 				bar.size = Vector3(width, size.y + reach, depth) if vertical else Vector3(size.x + reach, width, depth)
-				var offset := Vector3((size.x + width) / 2.0 + inner, 0.0, 0.0) if vertical else Vector3(0.0, (size.y + width) / 2.0 + inner, 0.0)
+				var offset := Vector3((size.x + width) / 2.0 + inner, 0.0, 0.0) if vertical else Vector3(0.0,
+						(size.y + width) / 2.0 + inner, 0.0)
 				if side % 2 == 1:
 					offset = -offset
-				frames.append([bar, Transform3D(basis, centre + basis * (offset + Vector3(0.0, 0.0, depth / 2.0 - 0.025))), ring[2]])
+				frames.append([bar, Transform3D(basis, centre + basis * (offset + Vector3(0.0, 0.0,
+						depth / 2.0 - 0.025))), ring[2]])
 	var gilt := StandardMaterial3D.new()
 	gilt.vertex_color_use_as_albedo = true
 	gilt.metallic = 1.0
@@ -854,7 +973,8 @@ func _build_paintings() -> void:
 
 ## Living light: embers above the fire, dust in the moonlight, and faint light shafts from the windows
 func _build_effects() -> void:
-	var embers := _particles("EmberSparks", 64, 1.8, Vector3(-HALF + 0.35, 0.3, FIRE_Z), Vector3(0.12, 0.05, 0.4), Color(4.0, 1.5, 0.35), 0.022)
+	var embers := _particles("EmberSparks", 64, 1.8, Vector3(-HALF + 0.35, 0.3, FIRE_Z), Vector3(0.12, 0.05, 0.4),
+			Color(4.0, 1.5, 0.35), 0.022)
 	var process: ParticleProcessMaterial = embers.process_material
 	process.direction = Vector3(0.35, 1.0, 0.0)
 	process.spread = 25.0
@@ -865,7 +985,8 @@ func _build_effects() -> void:
 	process.turbulence_noise_strength = 0.4
 	process.turbulence_noise_scale = 2.0
 	for side in [-1.0, 1.0]:
-		var dust := _particles("Dust%d" % int(side), 40, 9.0, Vector3(side * 3.6, 1.5, -4.3), Vector3(0.6, 1.2, 1.3), Color(0.6, 0.7, 1.0), 0.009)
+		var dust := _particles("Dust%d" % int(side), 40, 9.0, Vector3(side * 3.6, 1.5, -4.3), Vector3(0.6, 1.2, 1.3),
+				Color(0.6, 0.7, 1.0), 0.009)
 		var drift: ParticleProcessMaterial = dust.process_material
 		drift.gravity = Vector3(0.0, -0.004, 0.0)
 		drift.initial_velocity_min = 0.0
@@ -890,7 +1011,8 @@ func _build_effects() -> void:
 				while Vector2(top.x + direction.x * length, top.z + direction.z * length).length() < 4.3:
 					length -= 0.05 # ends (faded out) before it could pass in front of a screen up to 4 m away
 				corners.append([top, top + direction * length])
-			var quad := [[corners[0][0], Vector2(0, 0)], [corners[1][0], Vector2(1, 0)], [corners[1][1], Vector2(1, 1)], [corners[0][1], Vector2(0, 1)]]
+			var quad := [[corners[0][0], Vector2(0, 0)], [corners[1][0], Vector2(1, 0)], [corners[1][1], Vector2(1, 1)],
+					[corners[0][1], Vector2(0, 1)]]
 			for k in [0, 1, 2, 0, 2, 3]:
 				surface.set_uv(quad[k][1])
 				surface.add_vertex(quad[k][0])
@@ -908,7 +1030,8 @@ func _moon_target(side: float) -> Vector3:
 
 
 ## Small additive glowing particles rising or drifting in a box
-func _particles(name_: String, amount: int, lifetime: float, at: Vector3, extents: Vector3, colour: Color, size: float) -> GPUParticles3D:
+func _particles(name_: String, amount: int, lifetime: float, at: Vector3, extents: Vector3, colour: Color,
+		size: float) -> GPUParticles3D:
 	var particles := GPUParticles3D.new()
 	particles.amount = amount
 	particles.lifetime = lifetime
@@ -942,7 +1065,6 @@ func _particles(name_: String, amount: int, lifetime: float, at: Vector3, extent
 	return _add(particles, name_)
 
 
-var _spark_texture: GradientTexture2D
 ## a soft round dot
 func _spark() -> GradientTexture2D:
 	if _spark_texture == null:
@@ -972,7 +1094,8 @@ func _torches() -> Array:
 
 
 func _build_lights() -> void:
-	# all baked: a dynamic light costs every lit pixel on the Quest (up to 1.8 ms for the former flicker lights); the flames flicker in their shader
+	# all baked: a dynamic light costs every lit pixel on the Quest (up to 1.8 ms for the former flicker lights); the
+	# flames flicker in their shader
 	_light("FireLight", Vector3(-HALF + 0.75, 0.6, FIRE_Z), Color(1.0, 0.5, 0.22), 5.0, 8.0, 0.4)
 	for torch in _torches():
 		var side := signf(torch.x) if absf(torch.x) > HALF - 1.0 else 0.0
@@ -980,9 +1103,11 @@ func _build_lights() -> void:
 		var tag := "%d%d" % [int(signf(torch.x)), int(torch.z)]
 		_light("TorchLight" + tag, torch + out, FLAME, 2.0 if torch.z < -2.0 else 1.6, 6.0, 0.15)
 	for side in [-1.0, 1.0]: # moonlight scattered into the room: cool fill in the shadows
-		_light("MoonFill%d" % int(side), Vector3(side * WINDOW_X, 2.6, BACK + 1.2), Color(0.35, 0.45, 0.9), 0.6, 9.0, 1.5)
+		_light("MoonFill%d" % int(side), Vector3(side * WINDOW_X, 2.6, BACK + 1.2), Color(0.35, 0.45, 0.9), 0.6, 9.0,
+				1.5)
 	_light("TableLight", _table_light, FLAME, 0.9, 3.5, 0.3)
-	_light("TapestryLight", Vector3(0.0, 4.75, BACK + 0.9), FLAME, 0.7, 2.5, 0.3) # a soft wash, the screen stays brighter
+	# a soft wash, the screen stays brighter
+	_light("TapestryLight", Vector3(0.0, 4.75, BACK + 0.9), FLAME, 0.7, 2.5, 0.3)
 	_light("ChandelierLight", Vector3(0.0, SIZE.y - 1.25, -1.5), Color(1.0, 0.72, 0.45), 3.2, 8.0, 0.8)
 	for side in [-1.0, 1.0]:
 		var moon := SpotLight3D.new()
@@ -1052,13 +1177,16 @@ func _mesh(name_: String, mesh: Mesh, at: Transform3D, material: Material = null
 	return _add(instance, name_)
 
 
-## A wall-like quad from `start` (its lower left corner seen from the front) along `along`, the texture continuous across pieces
-func _panel(name_: String, start: Vector3, along: Vector3, size: Vector2, set: String, tile: float, uv_start := Vector2.ZERO, tint := Color.WHITE) -> void:
+## A wall-like quad from `start` (its lower left corner seen from the front) along `along`, the texture continuous
+## across pieces
+func _panel(name_: String, start: Vector3, along: Vector3, size: Vector2, texture_set: String, tile: float,
+		uv_start := Vector2.ZERO, tint := Color.WHITE) -> void:
 	var quad := QuadMesh.new()
 	quad.size = size
-	quad.material = _material(set, size / tile, Vector2(uv_start.x, -(uv_start.y + size.y)) / tile, tint)
+	quad.material = _material(texture_set, size / tile, Vector2(uv_start.x, -(uv_start.y + size.y)) / tile, tint)
 	var normal := along.cross(Vector3.UP)
-	_mesh(name_, quad, Transform3D(Basis(along, Vector3.UP, normal), start + along * size.x / 2.0 + Vector3.UP * size.y / 2.0))
+	_mesh(name_, quad, Transform3D(Basis(along, Vector3.UP, normal),
+			start + along * size.x / 2.0 + Vector3.UP * size.y / 2.0))
 
 
 ## A horizontal quad centred at `at` facing `facing` (up or down)
@@ -1104,8 +1232,9 @@ func _prop(name_: String, path: String, at: Vector3, basis: Basis, scale_ := 1.0
 
 ## A tiling PBR material; `triplanar` maps it in object space at `uv_scale.x` repeats per metre.
 ## Large surfaces get a faint dirt variation over their lightmap UVs, so the tiling does not show.
-func _material(set: String, uv_scale: Vector2, uv_offset := Vector2.ZERO, tint := Color.WHITE, triplanar := false) -> BaseMaterial3D:
-	var maps: Array = SETS[set]
+func _material(texture_set: String, uv_scale: Vector2, uv_offset := Vector2.ZERO, tint := Color.WHITE,
+		triplanar := false) -> BaseMaterial3D:
+	var maps: Array = SETS[texture_set]
 	# an ORM material without its texture would read occlusion 0: black under baked light
 	var material: BaseMaterial3D = ORMMaterial3D.new() if maps[2] != "" else StandardMaterial3D.new()
 	material.albedo_texture = load(TEX + maps[0])
@@ -1134,7 +1263,6 @@ func _material(set: String, uv_scale: Vector2, uv_offset := Vector2.ZERO, tint :
 	return material
 
 
-var _dirt_texture: NoiseTexture2D
 func _dirt() -> NoiseTexture2D:
 	if _dirt_texture == null:
 		_dirt_texture = NoiseTexture2D.new()

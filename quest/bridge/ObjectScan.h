@@ -22,9 +22,15 @@ public:
 	bool update(const CMap & map, int32_t id);
 
 	/// by object id; a record with flags 0 is no object
-	const std::vector<VcmiObject> & records() const { return table; }
+	const std::vector<VcmiObject> & records() const
+	{
+		return table;
+	}
 	/// VcmiObject.animation indexes this; names are only appended until the next snapshot
-	const std::vector<std::string> & animations() const { return names; }
+	const std::vector<std::string> & animations() const
+	{
+		return names;
+	}
 
 private:
 	VcmiObject encode(const CGObjectInstance * obj);

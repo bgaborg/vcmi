@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<!-- PMD 7 rules for the Quest fork's Java (quest/tools/lint.sh): bug patterns and best practices, not style. PMD reads
+     the source alone, so it needs no Android or Godot classpath. -->
+<ruleset name="vcmi-quest"
+	xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
+	<description>Error-prone code and best practices in the Quest Java</description>
+	<rule ref="category/java/errorprone.xml">
+		<!-- Android and JNI code names its constants and fields as the platform does -->
+		<exclude name="AvoidFieldNameMatchingMethodName"/>
+		<exclude name="AvoidLiteralsInIfCondition"/>
+		<!-- releasing a display or surface by setting its field to null is how Android code frees them -->
+		<exclude name="NullAssignment"/>
+	</rule>
+	<rule ref="category/java/bestpractices.xml">
+		<!-- the activities log through android.util.Log, which this rule does not know -->
+		<exclude name="GuardLogStatement"/>
+	</rule>
+</ruleset>

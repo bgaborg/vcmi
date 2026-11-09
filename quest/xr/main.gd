@@ -2,16 +2,28 @@ extends Node3D
 ## Shows the VCMI game activity on a curved layer and passes the controller ray to it as a mouse.
 ## Test commands from adb (VcmiBridge `test_command`, quest/tools/quest.sh test) simulate the head, the aim and clicks.
 
-const SCREEN_DISTANCE := Vector2(1.0, 4.0) ## metres from the head, min and max; the cylinder radius, so a nearer screen curves more
+## VcmiData.tile_input kinds and the update() flag of a new path (VcmiData's constants, VCMI_TILE_* of the bridge)
+enum { TILE_HOVER, TILE_CLICK, TILE_POPUP, TILE_POPUP_END }
+
+## metres from the head, min and max; the cylinder radius, so a nearer screen curves more
+const SCREEN_DISTANCE := Vector2(1.0, 4.0)
 const SCREEN_WIDTH := Vector2(1.0, 4.0) ## metres of arc, min and max
-const SCREEN_MAX_ANGLE := 2.0 ## radians of arc, about the headset field of view: a near screen does not wrap around the head
+## radians of arc, about the headset field of view: a near screen does not wrap around the head
+const SCREEN_MAX_ANGLE := 2.0
 const SCREEN_SPEED := 0.8 ## metres per second at full left thumbstick
 const SETTINGS_PATH := "user://screen.cfg"
 const SURFACE_SIZE := Vector2i(2560, 1440) ## pixels of the game window
+const TableMath := preload("res://table_math.gd")
+## a tile on the table in tabletop mode (quest/PHASE4.md decision D3). shortcut: check 3 (ray jitter against tile size)
+## needs a person holding a controller; 1.5 cm is a safe guess until it is measured
+const TABLE_TILE_METRES := 0.015
+const PATH_CHANGED := 16
+const TABLE_KEEP := 0.6 ## the view follows the selected hero once it leaves the middle 60 % of the table
 const BUTTON_LEFT := 1 ## MotionEvent.BUTTON_PRIMARY
 const BUTTON_RIGHT := 2 ## MotionEvent.BUTTON_SECONDARY
 const NO_HIT := Vector2(-1.0, -1.0)
-## controller buttons to the SDL gamepad (KeyEvent.KEYCODE_BUTTON_*); the game binds them in config/keyBindingsConfig.json "joystickButtons"
+## controller buttons to the SDL gamepad (KeyEvent.KEYCODE_BUTTON_*); the game binds them in
+## config/keyBindingsConfig.json "joystickButtons"
 const PAD_BUTTONS := {
 	"1:ax_button": 96, # right A -> A: accept
 	"1:by_button": 97, # right B -> B: cancel
@@ -19,32 +31,42 @@ const PAD_BUTTONS := {
 	"0:by_button": 103, # left Y -> right shoulder: next town
 	"0:menu_button": 108, # left menu -> start: options
 	"0:primary_click": 106, # left stick click -> left stick: map level
-	"1:primary_click": 107, # right stick click -> right stick: grid
 }
-const MENU_HOLD_MS := 600 ## holding the left menu button this long switches the environment instead of opening the game options
-## the wrist panel: label and Android KeyEvent.KEYCODE_*, the game's own keys from config/keyBindingsConfig.json "keyboard";
+## holding the left menu button this long switches the environment instead of opening the game options
+const MENU_HOLD_MS := 600
+## the wrist panel: label and Android KeyEvent.KEYCODE_*, the game's own keys from config/keyBindingsConfig.json
+## "keyboard";
 ## the labels name the key because other screens bind it to something else (in battle D is defend)
 const HOTKEYS := [
 	["End turn (E)", 33], ["Spells (C)", 31],
 	["Kingdom (K)", 39], ["Quests (Q)", 45],
 	["Sleep (Z)", 54], ["Dig (D)", 32],
 	["Quick save (F8)", 138], ["Quick load (F9)", 139],
+	["Table / screen", -1], ["Next hero (H)", 36], # -1: switches tabletop mode in Godot (also the right stick click)
 ]
 const HOTKEY_SIZE := Vector2(0.08, 0.025) ## metres per button
 ## above the back of the left controller, tilted towards the eyes like a watch face
 const HOTKEY_PANEL_POSE := Transform3D(Basis(Vector3.RIGHT, deg_to_rad(-45.0)), Vector3(0.0, 0.05, 0.07))
-const PAD_RIGHT_X := 2 ## the right thumbstick is the gamepad right stick: the game scrolls the map with it ("mouseSwipe")
+## the right thumbstick is the gamepad right stick: the game scrolls the map with it ("mouseSwipe")
+const PAD_RIGHT_X := 2
 const PAD_RIGHT_Y := 3
-
-var bridge: Object
-var vcmi_data: RefCounted ## game data from the bridge in quest/bridge (quest/DATA_BRIDGE.md); null without the extension
-var atlas_task := -1 ## the worker of the test command `atlas -1`, waited for before another one and at exit
 const SPRITE_PIXELS := 12.0 ## sprites instead of markers from this many pixels per tile on screen (MILESTONE_3B.md 5)
 const PIXELS_PER_RADIAN := 1150.0 ## Quest 3: about 2064 eye-buffer pixels over 104 degrees
+const ENVIRONMENTS := ["war room", "passthrough", "black"] ## around the screen; a long left menu press goes to the next
+
+var bridge: Object
+## game data from the bridge in quest/bridge (quest/DATA_BRIDGE.md); null without the extension
+var vcmi_data: RefCounted
+var atlas_task := -1 ## the worker of the test command `atlas -1`, waited for before another one and at exit
 var map_size := Vector3i.ZERO ## tiles of the map: width, height, levels (from the bridge stats at a new tile snapshot)
 var sprite_rect := Rect2i() ## the tiles and level the atlas was last asked for
 var sprite_level := -1
 var sprites_pending := false ## the atlas loads them; update_sprites when it is done
+## the map is played on the war table (quest/PHASE4.md milestone 4a); the screen shows dialogs only
+var tabletop := false
+var table_tile := TableMath.NO_TILE ## the tile under the active ray on the table, sent to the game as a hover
+var table_popup := false ## the grip opened a tile's popup from the table: its release closes it
+var shown_selection := Vector3i(-2, -2, -2) ## the selected hero's tile the table last followed and marked
 var sprites_held := false ## the test command `sprites` set them: the view does not change them until `table_zoom`
 var atlas_refills := 0 ## of the atlas, at the last view: a refill moves the frames, so the sprites wait for the rebuild
 var origin: XROrigin3D
@@ -55,7 +77,8 @@ var models: Array[Node3D] = []
 var rays: Array[MeshInstance3D] = []
 var pointer_dot: Node3D ## where the active ray hits the screen
 var active_hand := 1
-var screen_world := Transform3D() ## screen pose in the world; the layer node is under the origin, which a simulated head moves
+## screen pose in the world; the layer node is under the origin, which a simulated head moves
+var screen_world := Transform3D()
 var screen_placed := false
 var game_started := false
 var surface_pending := true ## the layer creates a new Android surface for each OpenXR session
@@ -63,10 +86,10 @@ var last_pointer := Vector2i(-1, -1) ## last pointer position sent to the game, 
 var screen_distance := 2.0
 var screen_width := 2.4
 var screen_stick := Vector2.ZERO ## left thumbstick: y = distance, x = width
-const ENVIRONMENTS := ["war room", "passthrough", "black"] ## around the screen; a long left menu press goes to the next
 var environment_name: String = ENVIRONMENTS[0]
 var room: Node3D
-var screen_occluder: ShaderMaterial ## on the screen: writes depth and leaves the pixels transparent, so the game layer shows through
+## on the screen: writes depth and leaves the pixels transparent, so the game layer shows through
+var screen_occluder: ShaderMaterial
 var menu_pressed_at := -1 ## Time.get_ticks_msec() of a left menu press not yet handled, or -1
 var environment: Environment ## around the screen when it is not the war room, which has its own
 var world: WorldEnvironment
@@ -77,7 +100,8 @@ var hotkey_pressed := false ## the right trigger went down on the panel: its rel
 var test_wrist := false ## the panel held in front of the head instead of on the controller
 var test_head: Variant = null ## Transform3D: simulated head pose in the world, null for the tracked head
 var test_head_start: Variant = null ## Transform3D: tracked head when the simulated head was set
-var test_aim: Variant = null ## Vector2: simulated aim of the active hand from the head, yaw and pitch in degrees from the screen centre
+## Vector2: simulated aim of the active hand from the head, yaw and pitch in degrees from the screen centre
+var test_aim: Variant = null
 
 
 func _ready() -> void:
@@ -103,15 +127,16 @@ func _ready() -> void:
 	room = preload("res://room.gd").new()
 	add_child(room)
 	# Godot's hole punch does not write depth, so the room behind the screen would draw over the game.
-	# Multiplying by 0 clears colour and alpha whatever the opaque room drew there; its depth keeps what is behind it out later.
+	# Multiplying by 0 clears colour and alpha whatever the opaque room drew there; its depth keeps what is behind it
+	# out later.
 	var shader := Shader.new()
-	shader.code = "shader_type spatial;
+	shader.code = """shader_type spatial;
 render_mode unshaded, blend_mul, depth_draw_always, cull_disabled, shadows_disabled;
 void fragment() {
 	ALBEDO = vec3(0.0);
 	ALPHA = 0.0;
 }
-"
+"""
 	screen_occluder = ShaderMaterial.new()
 	screen_occluder.shader = shader
 	screen_occluder.render_priority = -1 # first of the transparent pass, after the opaque room, before the flames
@@ -146,7 +171,8 @@ void fragment() {
 		push_error("VCMI XR: the VcmiData extension is missing, no game data")
 	var settings := ConfigFile.new()
 	if settings.load(SETTINGS_PATH) == OK:
-		_size_screen(settings.get_value("screen", "distance", screen_distance), settings.get_value("screen", "width", screen_width))
+		_size_screen(settings.get_value("screen", "distance", screen_distance), settings.get_value("screen", "width",
+				screen_width))
 		_set_environment(settings.get_value("screen", "environment", ENVIRONMENTS[0]))
 	else:
 		_size_screen(screen_distance, screen_width)
@@ -217,23 +243,21 @@ func _table_tile(hand: int) -> Vector3i:
 	var ray := _aim_ray(hand)
 	if ray.is_empty() or map_size.x == 0:
 		return Vector3i(-1, -1, -1)
-	var uv: Vector2 = room.table_uv(ray[0], ray[1])
-	if uv.x < 0.0:
-		return Vector3i(-1, -1, -1)
-	var column := mini(int(uv.x * map_size.x * map_size.z), map_size.x * map_size.z - 1)
-	return Vector3i(column % map_size.x, mini(int(uv.y * map_size.y), map_size.y - 1), column / map_size.x)
+	return TableMath.uv_to_tile(room.table_uv(ray[0], ray[1]), map_size)
 
 
 ## the 2 texels of frame `index` in a sprite table (VcmiData.sprite_table), for the test command `sprites_check`
 func _table_frame(table: Image, index: int) -> Array:
-	return [table.get_pixel(2 * index % 512, 2 * index / 512), table.get_pixel((2 * index + 1) % 512, (2 * index + 1) / 512)]
+	return [table.get_pixel(2 * index % 512, 2 * index / 512), table.get_pixel((2 * index + 1) % 512,
+			(2 * index + 1) / 512)]
 
 
 ## everything the sprites on the table are drawn from, for the preview on the PC (quest/tools/render-room.sh sprites):
 ## the minimap images, the atlas pages and masks, the frame table and the MultiMesh buffer, as one Variant file
 func _save_sprites(path: String) -> void:
 	var entry := func(image: Image) -> Array:
-		return [image.get_width(), image.get_height(), image.get_format(), image.get_data(), image.has_mipmaps()] if image != null else []
+		return [image.get_width(), image.get_height(), image.get_format(), image.get_data(),
+				image.has_mipmaps()] if image != null else []
 	var textures: Array = vcmi_data.atlas_textures()
 	var pages := []
 	var masks := []
@@ -246,8 +270,10 @@ func _save_sprites(path: String) -> void:
 		masks.append(entry.call(mask))
 	var multimesh: MultiMesh = room.sprite_multimesh()
 	var file := FileAccess.open(path, FileAccess.WRITE)
-	file.store_var({"terrain": entry.call(vcmi_data.terrain_image()), "fog": entry.call(vcmi_data.fog_image()), "pages": pages,
-			"masks": masks, "table": entry.call(vcmi_data.sprite_table()), "count": multimesh.instance_count, "buffer": multimesh.buffer, "names": vcmi_data.sprite_names()})
+	file.store_var({"terrain": entry.call(vcmi_data.terrain_image()), "fog": entry.call(vcmi_data.fog_image()),
+			"pages": pages,
+			"masks": masks, "table": entry.call(vcmi_data.sprite_table()), "count": multimesh.instance_count,
+			"buffer": multimesh.buffer, "names": vcmi_data.sprite_names()})
 	print("VCMI XR: sprites saved to ", path, ", ", file.get_length(), " bytes")
 
 
@@ -269,14 +295,16 @@ func _update_sprite_view(head: Vector3) -> void:
 		var x0 := int(floor(view.position.x * map_size.x * map_size.z)) - level * map_size.x
 		var y0 := int(floor(view.position.y * map_size.y))
 		# 2 tiles more on every side: the view is asked for again only after moving 2 tiles
-		var tiles := Rect2i(x0 - 2, y0 - 2, int(ceil(view.size.x * map_size.x * map_size.z)) + 5, int(ceil(view.size.y * map_size.y)) + 5)
+		var tiles := Rect2i(x0 - 2, y0 - 2, int(ceil(view.size.x * map_size.x * map_size.z)) + 5,
+				int(ceil(view.size.y * map_size.y)) + 5)
 		tiles = tiles.intersection(Rect2i(0, 0, map_size.x, map_size.y))
 		var changes: int = 0 if sprites_pending else vcmi_data.update_sprite_changes(room.sprite_multimesh())
 		if changes == 3: # the changed objects use frames the table did not have
 			room.set_sprites(vcmi_data.atlas_textures(), vcmi_data.sprite_table(), false)
 		# a new request when the changes need it (a new list, a new animation), or the view moved a few tiles or
 		# changed its size
-		if changes < 0 or level != sprite_level or tiles.size != sprite_rect.size or (tiles.position - sprite_rect.position).length() > 2.0:
+		var moved := (tiles.position - sprite_rect.position).length() > 2.0
+		if changes < 0 or level != sprite_level or tiles.size != sprite_rect.size or moved:
 			vcmi_data.atlas_view(tiles, level)
 			sprite_rect = tiles
 			sprite_level = level
@@ -313,7 +341,8 @@ func _process(delta: float) -> void:
 		var width := screen_width
 		if screen_stick.x != 0.0:
 			# widening stops at the arc limit; the width is kept when only the distance changes
-			width = minf(width + screen_stick.x * SCREEN_SPEED * delta, maxf(screen_width, screen_distance * SCREEN_MAX_ANGLE))
+			width = minf(width + screen_stick.x * SCREEN_SPEED * delta, maxf(screen_width,
+					screen_distance * SCREEN_MAX_ANGLE))
 		_size_screen(screen_distance + screen_stick.y * SCREEN_SPEED * delta, width)
 	if menu_pressed_at >= 0 and Time.get_ticks_msec() - menu_pressed_at >= MENU_HOLD_MS:
 		menu_pressed_at = -1
@@ -323,7 +352,8 @@ func _process(delta: float) -> void:
 	if not screen_placed:
 		_place_screen()
 	layer.transform = origin.transform.affine_inverse() * screen_world
-	# shortcut: the layer's internal hole punch mesh (Godot 4.7.2) carries the occluder, as it already matches the screen; build an own cylinder mesh if Godot changes it
+	# shortcut: the layer's internal hole punch mesh (Godot 4.7.2) carries the occluder, as it already matches the
+	# screen; build an own cylinder mesh if Godot changes it
 	var hole_punch := layer.get_child(0, true) as MeshInstance3D if layer.get_child_count(true) > 0 else null
 	if hole_punch != null and hole_punch.material_override != screen_occluder:
 		hole_punch.material_override = screen_occluder
@@ -337,13 +367,17 @@ func _process(delta: float) -> void:
 
 	if vcmi_data != null:
 		var changed: int = vcmi_data.update()
-		room.set_minimap(vcmi_data.terrain_image() if changed & 1 else null, vcmi_data.fog_image() if changed & 2 else null, changed & 4 != 0)
+		room.set_minimap(vcmi_data.terrain_image() if changed & 1 else null,
+				vcmi_data.fog_image() if changed & 2 else null, changed & 4 != 0)
 		if changed & (1 | 8): # the markers are placed by the map size, so new tiles move them too
 			vcmi_data.update_markers(room.marker_multimesh(), room.minimap_size(), room.MARKER_METRES)
 		if changed & 1:
 			map_size = vcmi_data.stats().get("map", Vector3i.ZERO)
 		if changed & 4 and tracked != null and not sprites_held:
 			_update_sprite_view((origin.transform * (tracked as Transform3D)).origin)
+		_update_table(changed)
+		if changed & 4 == 0 and not layer.visible: # out of the game (main menu, loading): always the screen
+			layer.visible = true
 
 	for ray in rays:
 		ray.visible = false
@@ -351,10 +385,71 @@ func _process(delta: float) -> void:
 	if hotkey_hover >= 0 and active_hand == 1:
 		pointer_dot.visible = false
 		return
+	if tabletop and not layer.visible:
+		_table_pointer()
+		return
 	var hit := _pointer_hit(active_hand)
 	pointer_dot.visible = hit != NO_HIT
 	if hit != NO_HIT:
 		_move_pointer(hit)
+
+
+## Tabletop mode on or off (the wrist button, the right stick click, test command `tabletop`): the game keeps its
+## tabletop window over the adventure map (milestone 3c), and the table zooms to a playable tile size around the
+## selected hero
+func _set_tabletop(on: bool) -> void:
+	if vcmi_data == null or on == tabletop:
+		return
+	tabletop = on
+	vcmi_data.set_tabletop(on)
+	table_tile = TableMath.NO_TILE
+	if table_popup: # its grip release would otherwise end up on the screen, or the screen's on the table
+		table_popup = false
+		vcmi_data.tile_input(Vector3i.ZERO, TILE_POPUP_END)
+	shown_selection = Vector3i(-2, -2, -2) # zoom in, follow and mark the selected hero again (_update_table)
+	if not on:
+		layer.visible = true
+	print("VCMI XR: tabletop ", on)
+
+
+## Each frame in game: the path and the selected hero's mark, the view following it, and the screen only while a
+## dialog is open over the tabletop window
+func _update_table(changed: int) -> void:
+	if map_size.x == 0:
+		return
+	var selected: Vector3i = vcmi_data.selected_tile()
+	if tabletop and shown_selection == Vector3i(-2, -2, -2): # just switched on, or the map was not known then
+		room.set_zoom(TableMath.zoom_for(TABLE_TILE_METRES, room.minimap_size().x, map_size), room.zoom_centre)
+	if changed & PATH_CHANGED or selected != shown_selection:
+		room.set_path(vcmi_data.path_nodes(), selected, map_size)
+	if tabletop and selected.x >= 0 and selected != shown_selection:
+		var centre := TableMath.follow(room.visible_uv(), TableMath.tile_uv(selected, map_size), TABLE_KEEP)
+		room.set_zoom(room.zoom, TableMath.on_level(centre, room.zoom, selected.z, map_size.z))
+	shown_selection = selected
+	if tabletop:
+		# also without the tabletop window: at a turn's start the game shows its dialogs (new week, the next player)
+		# before the bridge can put the window back, and replays run without it
+		var dialog: bool = vcmi_data.windows_above() > 0 or not vcmi_data.tabletop_shown()
+		if layer.visible != dialog:
+			layer.visible = dialog
+			table_tile = TableMath.NO_TILE
+
+
+## The active ray on the table in tabletop mode: drawn to its hit, and the tile under it sent to the game as a hover
+func _table_pointer() -> void:
+	var ray := _aim_ray(active_hand)
+	var hit: Vector3 = room.table_hit(ray[0], ray[1]) if not ray.is_empty() else Vector3.INF
+	var tile := _table_tile(active_hand) if hit != Vector3.INF else TableMath.NO_TILE
+	pointer_dot.visible = tile.x >= 0
+	if tile.x < 0:
+		table_tile = tile
+		return
+	var direction: Vector3 = ray[1].normalized()
+	_show_ray(active_hand, ray[0], direction, ray[0].distance_to(hit))
+	pointer_dot.global_position = hit + Vector3.UP * 0.005
+	if tile != table_tile:
+		table_tile = tile
+		vcmi_data.tile_input(tile, TILE_HOVER)
 
 
 ## Sends the pointer to the game when it moved by a pixel or more
@@ -367,7 +462,8 @@ func _move_pointer(hit: Vector2) -> void:
 
 
 func _head_moved(from: Transform3D, to: Transform3D) -> bool:
-	return from.origin.distance_to(to.origin) > 0.15 or rad_to_deg(from.basis.get_rotation_quaternion().angle_to(to.basis.get_rotation_quaternion())) > 15.0
+	var turned := from.basis.get_rotation_quaternion().angle_to(to.basis.get_rotation_quaternion())
+	return from.origin.distance_to(to.origin) > 0.15 or rad_to_deg(turned) > 15.0
 
 
 func _end_test_head() -> void:
@@ -380,7 +476,8 @@ func _end_test_head() -> void:
 	screen_placed = false
 
 
-## Head pose in the origin space from the head tracker, or null; not the XRCamera3D node, which moves after this _process
+## Head pose in the origin space from the head tracker, or null; not the XRCamera3D node, which moves after this
+## _process
 func _tracked_head() -> Variant:
 	var head := XRServer.get_tracker("head") as XRPositionalTracker
 	var pose := head.get_pose("default") if head != null else null
@@ -438,7 +535,7 @@ func _build_hotkey_panel() -> void:
 ## Button `i` centre in the panel: two columns, rows from the top
 @warning_ignore("integer_division")
 func _hotkey_centre(i: int) -> Vector3:
-	var rows := HOTKEYS.size() / 2
+	var rows := (HOTKEYS.size() + 1) / 2
 	return Vector3((i % 2 - 0.5) * HOTKEY_SIZE.x, ((rows - 1) / 2.0 - i / 2) * HOTKEY_SIZE.y, 0.0)
 
 
@@ -454,7 +551,11 @@ func _update_hotkey_panel() -> void:
 		if not test_wrist:
 			hotkey_panel.transform = HOTKEY_PANEL_POSE
 		# hidden with a simulated head, like the controller models: the real controller may lie in front of the eyes
-		hotkey_panel.visible = test_head == null and grips[0].get_has_tracking_data() and tracked != null and 				hotkey_panel.global_basis.z.dot(((origin.transform * tracked).origin - hotkey_panel.global_position).normalized()) > 0.6
+		var facing := false
+		if tracked != null:
+			var to_eyes: Vector3 = ((origin.transform * tracked).origin - hotkey_panel.global_position).normalized()
+			facing = hotkey_panel.global_basis.z.dot(to_eyes) > 0.6
+		hotkey_panel.visible = test_head == null and grips[0].get_has_tracking_data() and facing
 	if hotkey_panel.visible:
 		var ray := _aim_ray(1)
 		if not ray.is_empty():
@@ -527,10 +628,11 @@ func _aim_ray(hand: int) -> Array:
 ## Layer UV where the aim ray of `hand` hits, or NO_HIT; shows the ray up to the hit
 func _pointer_hit(hand: int) -> Vector2:
 	var ray := _aim_ray(hand)
-	if ray.is_empty():
+	if ray.is_empty() or not layer.visible: # hidden in tabletop mode while no dialog is open
 		return NO_HIT
 	# in screen space: the cylinder axis is Y, the screen centre lies at -Z
-	# shortcut: own intersection because OpenXRCompositionLayerCylinder.intersects_ray in Godot 4.7.2 takes aspect_ratio as height / width; use it once that is fixed
+	# shortcut: own intersection because OpenXRCompositionLayerCylinder.intersects_ray in Godot 4.7.2 takes aspect_ratio
+	# as height / width; use it once that is fixed
 	var to_screen := screen_world.affine_inverse()
 	var from: Vector3 = to_screen * ray[0]
 	var direction: Vector3 = (to_screen.basis * ray[1]).normalized()
@@ -561,6 +663,10 @@ func _on_button(button_name: String, hand: int, pressed: bool) -> void:
 	match button_name:
 		"trigger_click": _press(BUTTON_LEFT, hand, pressed)
 		"grip_click": _press(BUTTON_RIGHT, hand, pressed)
+		"primary_click" when hand == 1:
+			if pressed:
+				_set_tabletop(not tabletop)
+				_pulse(hand, 0.25)
 		"menu_button" when hand == 0:
 			# a short press is the game's options button, a long one switches the environment (in _process)
 			if pressed:
@@ -612,10 +718,17 @@ func _press(button: int, hand: int, pressed: bool) -> void:
 			active_hand = hand
 			var keycode: int = HOTKEYS[hotkey_hover][1]
 			print("VCMI XR: hotkey ", HOTKEYS[hotkey_hover][0])
+			if keycode < 0:
+				_set_tabletop(not tabletop)
+				_pulse(hand, 0.25)
+				return
 			bridge.key(keycode, true)
 			_pulse(hand, 0.25)
 			await get_tree().create_timer(0.1).timeout
 			bridge.key(keycode, false)
+		return
+	if tabletop and (not layer.visible or (button == BUTTON_RIGHT and not pressed and table_popup)):
+		_table_press(button, hand, pressed)
 		return
 	if pressed:
 		active_hand = hand
@@ -627,6 +740,30 @@ func _press(button: int, hand: int, pressed: bool) -> void:
 	bridge.pointerButton(button, pressed)
 
 
+## Trigger and grip on the table: a click on the tile under the ray, or its popup while the grip is held
+func _table_press(button: int, hand: int, pressed: bool) -> void:
+	if button == BUTTON_RIGHT and not pressed:
+		if table_popup:
+			table_popup = false
+			vcmi_data.tile_input(Vector3i.ZERO, TILE_POPUP_END)
+		return
+	if not pressed:
+		return
+	active_hand = hand
+	var tile := _table_tile(hand)
+	if tile.x < 0:
+		return
+	if tile != table_tile: # the other hand's ray, or the first frame: the game hovers before it clicks, as in 2D
+		table_tile = tile
+		vcmi_data.tile_input(tile, TILE_HOVER)
+	if button == BUTTON_LEFT:
+		vcmi_data.tile_input(tile, TILE_CLICK)
+	else:
+		table_popup = true
+		vcmi_data.tile_input(tile, TILE_POPUP)
+	_pulse(hand, 0.5)
+
+
 ## A short click on the controller of `hand`; the game's own hapticFeedback() is called for touch input only
 func _pulse(hand: int, amplitude: float) -> void:
 	# the game's "Haptic feedback" option; read on each pulse, so a change in the game applies at once
@@ -636,8 +773,11 @@ func _pulse(hand: int, amplitude: float) -> void:
 	print("VCMI XR: haptic pulse ", hand, " ", amplitude)
 
 
-## head yaw pitch height | head_off | recenter | aim yaw pitch | aim_off | click | rclick | pad keycode | stick x y | lstick x y | screen distance width | env index | lmenu seconds | wrist 1/0 | gfx feature on | probe | bridge | minimap;
+## head yaw pitch height | head_off | recenter | aim yaw pitch | aim_off | click | rclick | pad keycode | stick x y |
+## lstick x y | screen distance width | env index | lmenu seconds | wrist 1/0 | gfx feature on | probe | bridge |
+## minimap;
 ## angles in degrees, height in metres, stick values -1..1 with y up, as the right (stick) and left (lstick) thumbstick
+# gdlint: disable=max-returns
 func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 	if command.begins_with("decode:"): # decode:<animation>: its frames through the bridge (PHASE4.md check 6)
 		var decoded: Dictionary = vcmi_data.decode_animation(command.substr(7)) if vcmi_data else {}
@@ -645,19 +785,24 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 		for frame in decoded.get("frames", []):
 			groups[frame["group"]] = groups.get(frame["group"], 0) + 1
 		print("VCMI XR: decode ", command.substr(7), ": ", decoded.get("frames", []).size(), " frames, groups ", groups,
-				", first ", (decoded["frames"][0]["image"] as Image).get_size() if not decoded.get("frames", []).is_empty() else "none",
-				", png ", decoded["frames"][0]["png"] if not decoded.get("frames", []).is_empty() else false, ", ", decoded.get("bridge_us", 0), " us")
+				", first ", (decoded["frames"][0]["image"] as Image).get_size() if not decoded.get("frames",
+						[]).is_empty() else "none",
+				", png ", decoded["frames"][0]["png"] if not decoded.get("frames",
+						[]).is_empty() else false, ", ", decoded.get("bridge_us", 0), " us")
 		return
 	match command:
-		"head", "table_view": # table_view: above the minimap, looking down at it; a the height above the table (default 0.45 m)
+		# table_view: above the minimap, looking down at it; a the height above the table (default 0.45 m)
+		"head", "table_view":
 			if command == "head":
-				test_head = Transform3D(Basis.from_euler(Vector3(deg_to_rad(b), deg_to_rad(a), 0.0)), Vector3(0.0, c if c > 0.0 else 1.6, 0.0))
+				test_head = Transform3D(Basis.from_euler(Vector3(deg_to_rad(b), deg_to_rad(a), 0.0)), Vector3(0.0,
+						c if c > 0.0 else 1.6, 0.0))
 			else:
 				var minimap: Transform3D = room._table * Transform3D(Basis(), Vector3(0.0, room.TABLE_TOP, 0.0))
 				var eye := minimap * Vector3(0.0, a if a > 0.0 else 0.45, 0.15)
 				test_head = Transform3D(Basis(), eye).looking_at(minimap.origin, Vector3.UP)
 			test_head_start = null
-			# the real controllers lie next to the real headset; moved with a simulated head they can end up in front of the eyes
+			# the real controllers lie next to the real headset; moved with a simulated head they can end up in front of
+			# the eyes
 			for model in models:
 				model.visible = false
 		"head_off":
@@ -687,7 +832,8 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 			await get_tree().create_timer(a).timeout
 			_on_button("menu_button", 0, false)
 		"screen", "env":
-			# shortcut: not saved, so a test run keeps the user's choice for the next launch; a later stick release or long menu press saves the test values, reset by hand if that matters
+			# shortcut: not saved, so a test run keeps the user's choice for the next launch; a later stick release or
+			# long menu press saves the test values, reset by hand if that matters
 			if command == "screen":
 				_size_screen(a, b)
 			else:
@@ -706,18 +852,22 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 				if image[1] != null:
 					var path := "/sdcard/Android/data/is.xyz.vcmi.quest/files/minimap-%s.png" % image[0]
 					print("VCMI XR: minimap ", image[0], " ", image[1].get_size(), " saved ", image[1].save_png(path))
-		"atlas": # a >= 0: saves the frames of animation a (in full frames, the owner flag in red) where adb can pull them;
+		# a >= 0: saves the frames of animation a (in full frames, the owner flag in red) where adb can pull them;
+		"atlas":
 				# a < 0: decodes every animation of the map and prints the times (quest/MILESTONE_3B.md)
 			if vcmi_data == null:
 				return
 			var names: PackedStringArray = vcmi_data.animation_names()
 			if a < 0.0:
-				# on a worker, as the atlas will be filled: the main thread must keep rendering, or the system closes the app
+				# on a worker, as the atlas will be filled: the main thread must keep rendering, or the system closes
+				# the app
 				if atlas_task >= 0:
 					WorkerThreadPool.wait_for_task_completion(atlas_task)
 				atlas_task = WorkerThreadPool.add_task(func():
-					var totals := {"animations": 0, "frames": 0, "bridge_us": 0, "bake_us": 0, "slowest_us": 0, "slowest": "",
-							"png": [], "def_flag": [], "png_flag": []} # the first indices of each kind, to pick for `atlas <i>`
+					var totals := {"animations": 0, "frames": 0, "bridge_us": 0, "bake_us": 0, "slowest_us": 0,
+							"slowest": "",
+							# the first indices of each kind, to pick for `atlas <i>`
+							"png": [], "def_flag": [], "png_flag": []}
 					var from := Time.get_ticks_usec()
 					for i in names.size():
 						var decoded: Dictionary = vcmi_data.decode_animation(names[i])
@@ -734,7 +884,8 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 							totals.slowest_us = spent
 							totals.slowest = names[i]
 						if i % 200 == 199:
-							print("VCMI XR: atlas progress ", i + 1, " in ", (Time.get_ticks_usec() - from) / 1000, " ms")
+							print("VCMI XR: atlas progress ", i + 1, " in ", (Time.get_ticks_usec() - from) / 1000,
+									" ms")
 					totals.wall_ms = (Time.get_ticks_usec() - from) / 1000
 					print("VCMI XR: atlas all ", totals))
 			else:
@@ -742,7 +893,8 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 				var dir := "/sdcard/Android/data/is.xyz.vcmi.quest/files/atlas"
 				DirAccess.make_dir_recursive_absolute(dir)
 				var decoded: Dictionary = vcmi_data.decode_animation(names[i]) if i < names.size() else {"frames": []}
-				print("VCMI XR: atlas ", i, " ", names[i] if i < names.size() else "?", ": ", decoded.frames.size(), " frames, bridge ", decoded.get("bridge_us", 0), " us, bake ", decoded.get("bake_us", 0), " us")
+				print("VCMI XR: atlas ", i, " ", names[i] if i < names.size() else "?", ": ", decoded.frames.size(),
+						" frames, bridge ", decoded.get("bridge_us", 0), " us, bake ", decoded.get("bake_us", 0), " us")
 				for f in decoded.frames:
 					var full := Image.create_empty(f.full_size.x, f.full_size.y, false, Image.FORMAT_RGBA8)
 					full.fill(Color(0.5, 0.5, 0.5))
@@ -755,8 +907,10 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 								if flag.get_pixel(x, y).r > 0.5:
 									full.set_pixel(x + f.left, y + f.top, Color.RED)
 					full.save_png("%s/%d_%d_%d.png" % [dir, i, f.group, f.frame])
-		"atlas-view": # the sprite atlas for a view (quest/MILESTONE_3B.md, plan step 3): a, b the top-left tile (a < 0: the
-				# map's centre), c the size in tiles (default 30), level 0; waits until loaded, prints the stats, saves page 0
+		# the sprite atlas for a view (quest/MILESTONE_3B.md, plan step 3): a, b the top-left tile (a < 0: the
+		"atlas-view":
+				# map's centre), c the size in tiles (default 30), level 0; waits until loaded, prints the stats, saves
+				# page 0
 			if vcmi_data == null:
 				return
 			var size := int(c) if c > 0.0 else 30
@@ -775,8 +929,10 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 				if page != null:
 					sheet.blit_rect(page, Rect2i(Vector2i.ZERO, page.get_size()), Vector2i(layer % 4, layer / 4) * 512)
 			sheet.save_png("/sdcard/Android/data/is.xyz.vcmi.quest/files/atlas-pages.png")
-		"sprites": # the object sprites on the minimap (quest/MILESTONE_3B.md, plan step 4): a, b the top-left tile, c the
-				# size in tiles (default: the whole map), level 0; loads the atlas, waits, fills the sprites, checks precision
+		# the object sprites on the minimap (quest/MILESTONE_3B.md, plan step 4): a, b the top-left tile, c the
+		"sprites":
+				# size in tiles (default: the whole map), level 0; loads the atlas, waits, fills the sprites, checks
+				# precision
 			if vcmi_data == null:
 				return
 			var map: Vector3i = vcmi_data.stats().get("map", Vector3i.ZERO)
@@ -791,7 +947,8 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 			var fill_us := Time.get_ticks_usec() - started
 			room.set_sprites(vcmi_data.atlas_textures(), vcmi_data.sprite_table(), true)
 			room.show_sprites(true)
-			print("VCMI XR: sprites ", tiles, ": ", wanted, " animations, ", count, " instances in ", fill_us, " us, ", vcmi_data.atlas_stats())
+			print("VCMI XR: sprites ", tiles, ": ", wanted, " animations, ", count, " instances in ", fill_us, " us, ",
+					vcmi_data.atlas_stats())
 			_save_sprites("/sdcard/Android/data/is.xyz.vcmi.quest/files/sprites.bin")
 		"sprites_check": # plan step 6: the view's sprites after its change updates match a whole update_sprites of it
 			if vcmi_data == null or vcmi_data.sprite_table() == null or sprites_held or sprites_pending:
@@ -807,20 +964,25 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 			for i in kept.size() if differ < 0 else 0:
 				# the first frame indexes each table, which the changes extend in their own order: compare the frames
 				var same := kept[i] == now[i] if i % 20 != 16 \
-						else _table_frame(kept_table, int(kept[i])) == _table_frame(vcmi_data.sprite_table(), int(now[i]))
+						else _table_frame(kept_table, int(kept[i])) == _table_frame(vcmi_data.sprite_table(),
+								int(now[i]))
 				if not same:
 					differ = i / 20
 					break
 			room.set_sprites(vcmi_data.atlas_textures(), vcmi_data.sprite_table(), false)
-			print("VCMI XR: sprites check ", "same" if differ < 0 else "DIFFERENT at instance %d" % differ, ", ", kept.size() / 20,
+			print("VCMI XR: sprites check ", "same" if differ < 0 else "DIFFERENT at instance %d" % differ, ", ",
+					kept.size() / 20,
 					" -> ", now.size() / 20, " instances, ", stats)
-		"tabletop": # a 1: the game shows the map on the tabletop only (milestone 3c): the 2D map stops, hero steps wait for the table; 0: back
-			if vcmi_data:
-				vcmi_data.set_tabletop(a > 0.0)
-		"tile": # a, b the tile of level 0, c the kind (0 hover, 1 click, 2 popup, 3 popup end): through the bridge (PHASE4.md)
+		# a 1: the game shows the map on the tabletop only (milestone 3c): the 2D map stops, hero steps wait for the
+		# table; 0: back
+		"tabletop":
+			_set_tabletop(a > 0.0)
+		# a, b the tile of level 0, c the kind (0 hover, 1 click, 2 popup, 3 popup end): through the bridge (PHASE4.md)
+		"tile":
 			if vcmi_data:
 				vcmi_data.tile_input(Vector3i(int(a), int(b), 0), int(c))
-		"table_pick": # for a seconds (default 5): the tile under the active hand's ray on the table each frame (PHASE4.md
+		# for a seconds (default 5): the tile under the active hand's ray on the table each frame (PHASE4.md
+		"table_pick":
 				# check 3): how often it changes with the controller held still
 			var tiles := {}
 			var changes := 0
@@ -840,7 +1002,8 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 					changes += 1
 				last = tile
 			var metres: float = room.minimap_size().x / (map_size.x * map_size.z) * room.zoom if map_size.x > 0 else 0.0
-			print("VCMI XR: table pick ", frames, " frames, ", misses, " off the table, ", changes, " changes, tiles ", tiles,
+			print("VCMI XR: table pick ", frames, " frames, ", misses, " off the table, ", changes, " changes, tiles ",
+					tiles,
 					", tile ", snappedf(metres * 100.0, 0.01), " cm at zoom ", room.zoom)
 		"heroes": # prints the heroes on the map
 			print("VCMI XR: heroes ", vcmi_data.heroes() if vcmi_data else [])
@@ -857,10 +1020,13 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 				if now.size() == last.size():
 					for i in now.size() / 20:
 						if now[i * 20 + 3] != last[i * 20 + 3] or now[i * 20 + 11] != last[i * 20 + 11]:
-							print("VCMI XR: move trace %d ms instance %d at %.2f, %.2f tiles" % [Time.get_ticks_msec() - start, i,
-									(now[i * 20 + 3] + 0.5) * map_size.x * map_size.z, (now[i * 20 + 11] + 0.5) * map_size.y])
+							var x := (now[i * 20 + 3] + 0.5) * map_size.x * map_size.z
+							var y := (now[i * 20 + 11] + 0.5) * map_size.y
+							print("VCMI XR: move trace %d ms instance %d at %.2f, %.2f tiles" % [
+									Time.get_ticks_msec() - start, i, x, y])
 				last = now
-		"table_zoom": # the minimap shows 1 / a of the map around b, c (minimap UV, both levels side by side; 0: the centre)
+		# the minimap shows 1 / a of the map around b, c (minimap UV, both levels side by side; 0: the centre)
+		"table_zoom":
 			room.set_zoom(a if a > 0.0 else 1.0, Vector2(b if b > 0.0 else 0.5, c if c > 0.0 else 0.5))
 			sprites_held = false
 			sprite_level = -1 # the view's own sprites again, instead of the test command's
@@ -873,7 +1039,11 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 	var hit := _pointer_hit(active_hand)
-	print("VCMI XR test: ", command, " -> screen ", screen_world.origin, " heading ", rad_to_deg(screen_world.basis.get_euler().y), " distance ", screen_distance, " width ", screen_width, " environment ", environment_name,
+	print("VCMI XR test: ", command, " -> screen ", screen_world.origin, " heading ",
+			rad_to_deg(screen_world.basis.get_euler().y), " distance ", screen_distance, " width ", screen_width,
+			" environment ", environment_name,
 			", pointer ", Vector2i(hit * Vector2(SURFACE_SIZE)) if hit != NO_HIT else "off screen",
-			", hotkey ", HOTKEYS[hotkey_hover][0] if hotkey_hover >= 0 else "none", ", controllers tracked ", aims.map(func(aim): return aim.get_has_tracking_data()),
+			", hotkey ", HOTKEYS[hotkey_hover][0] if hotkey_hover >= 0 else "none",
+			", controllers tracked ", aims.map(func(aim): return aim.get_has_tracking_data()),
 			", bridge ", vcmi_data.stats() if vcmi_data else "no extension")
+# gdlint: enable=max-returns

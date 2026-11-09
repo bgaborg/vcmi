@@ -44,8 +44,14 @@ public:
 		anim.data.reserve(anim.data.size() + f.size);
 		rowStart = anim.data.size();
 	}
-	void load(size_t size, const ui8 * data) override { anim.data.insert(anim.data.end(), data, data + size); }
-	void load(size_t size, ui8 color) override { anim.data.insert(anim.data.end(), size, color); }
+	void load(size_t size, const ui8 * data) override
+	{
+		anim.data.insert(anim.data.end(), data, data + size);
+	}
+	void load(size_t size, ui8 color) override
+	{
+		anim.data.insert(anim.data.end(), size, color);
+	}
 	// a row's last run can be longer than what is left of the row; the SDL loader skips to the next row, as here
 	void endLine() override
 	{
@@ -111,7 +117,13 @@ Layout readLayout(const AnimationPath & path)
 		for(const JsonNode & group : config["sequences"].Vector())
 		{
 			const size_t id = group["group"].Integer();
-			std::erase_if(files, [id](const auto & entry) { return entry.first.first == id; });
+			std::erase_if(
+				files,
+				[id](const auto & entry)
+				{
+					return entry.first.first == id;
+				}
+			);
 			layout.replaced.insert(id);
 			size_t frame = 0;
 			for(const JsonNode & file : group["frames"].Vector())
@@ -130,7 +142,10 @@ std::pair<uint16_t, uint16_t> pngSize(const uint8_t * png, uint32_t size)
 	static const uint8_t signature[8] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
 	if(size < 24 || std::memcmp(png, signature, 8) != 0)
 		return {0, 0};
-	const auto be32 = [png](int at) { return (uint32_t(png[at]) << 24) | (uint32_t(png[at + 1]) << 16) | (uint32_t(png[at + 2]) << 8) | png[at + 3]; };
+	const auto be32 = [png](int at)
+	{
+		return (uint32_t(png[at]) << 24) | (uint32_t(png[at + 1]) << 16) | (uint32_t(png[at + 2]) << 8) | png[at + 3];
+	};
 	return {static_cast<uint16_t>(std::min<uint32_t>(be32(16), UINT16_MAX)), static_cast<uint16_t>(std::min<uint32_t>(be32(20), UINT16_MAX))};
 }
 }

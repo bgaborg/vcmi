@@ -10,43 +10,56 @@
 #include <stdint.h>
 
 // raise on any change to the structs below; the extension refuses a table with another version
-#define VCMI_BRIDGE_VERSION 7
+#define VCMI_BRIDGE_VERSION 8
 
 typedef struct VcmiBridgeStats
 {
-	uint32_t ticks;      // lifecycle ticks run on the game thread, one per 100 ms once started
-	uint32_t observers;  // map observers created: one per new game, load or replay pass
-	uint16_t mapWidth;   // of the current adventure map, 0 outside a game
+	uint32_t ticks; // lifecycle ticks run on the game thread, one per 100 ms once started
+	uint32_t observers; // map observers created: one per new game, load or replay pass
+	uint16_t mapWidth; // of the current adventure map, 0 outside a game
 	uint16_t mapHeight;
 	uint8_t mapLevels;
-	uint8_t inGame;      // 1 while an adventure map exists
-	uint8_t tabletop;    // 1 while the tabletop window is over the adventure map (setTabletop): the 2D map does not draw
+	uint8_t inGame; // 1 while an adventure map exists
+	uint8_t tabletop; // 1 while the tabletop window is over the adventure map (setTabletop): the 2D map does not draw
 	uint8_t windowsAbove; // windows over the tabletop window (dialogs, battles, popups): the game screen shows them
 	uint32_t tilesGeneration; // raised on each tile snapshot (new map), 0 before the first
-	uint32_t fogGeneration;   // raised each time the local team's fog changes
-	uint32_t publishMicros;   // game thread time of the last tile or fog publish
-	uint32_t objectsSnapshot;   // raised on each full object list (new map); 0 before the first
-	uint32_t objectsSequence;   // raised on each changed object record
-	uint32_t objectsMicros;     // game thread time of the last full object list
-	uint32_t changeMicros;      // game thread time of the last object change publish
-	uint32_t moveSequence;      // hero steps the tabletop showed (VcmiMove.sequence of the last)
-	uint32_t waitMicros;        // how long the game waited for the last of them
-	uint32_t moveTimeouts;      // steps whose confirmation did not come in time
-	uint32_t inputsRun;         // tile inputs (tileInput) the game ran
-	uint32_t inputsDropped;     // tile inputs dropped: no tabletop, a window above it, no army, or off the map
+	uint32_t fogGeneration; // raised each time the local team's fog changes
+	uint32_t publishMicros; // game thread time of the last tile or fog publish
+	uint32_t objectsSnapshot; // raised on each full object list (new map); 0 before the first
+	uint32_t objectsSequence; // raised on each changed object record
+	uint32_t objectsMicros; // game thread time of the last full object list
+	uint32_t changeMicros; // game thread time of the last object change publish
+	uint32_t moveSequence; // hero steps the tabletop showed (VcmiMove.sequence of the last)
+	uint32_t waitMicros; // how long the game waited for the last of them
+	uint32_t moveTimeouts; // steps whose confirmation did not come in time
+	uint32_t inputsRun; // tile inputs (tileInput) the game ran
+	uint32_t inputsDropped; // tile inputs dropped: no tabletop, a window above it, no army, or off the map
+	uint32_t selected; // object id of the selected hero or town, VCMI_NONE when none
+	uint32_t pathGeneration; // raised when the selected hero's path changes (path)
 } VcmiBridgeStats;
 
+#define VCMI_NONE 0xffffffffu
+
+// one tile of the selected hero's path, as the 2D map draws it: the tiles the hero walks, from the first step on
+typedef struct VcmiPathNode
+{
+	uint16_t x, y;
+	uint8_t z;
+	uint8_t turns; // turns until the hero gets there: 0 this turn
+	uint16_t pad;
+} VcmiPathNode; // 8 bytes
+
 #define VCMI_TILE_HOVER 0
-#define VCMI_TILE_CLICK 1        // left click
-#define VCMI_TILE_POPUP 2        // right button down: the info popup of the tile
-#define VCMI_TILE_POPUP_END 3    // right button up: closes it
+#define VCMI_TILE_CLICK 1 // left click
+#define VCMI_TILE_POPUP 2 // right button down: the info popup of the tile
+#define VCMI_TILE_POPUP_END 3 // right button up: closes it
 
 // a hero step the tabletop shows: the game waits until Godot confirms it (confirmMove) or durationMs + 200 ms pass. The
 // object's record already holds the destination. Positions are anchor tiles, as VcmiObject's
 typedef struct VcmiMove
 {
-	uint32_t sequence;   // raised on each step; 0 before the first
-	uint32_t object;     // the moving object id: the hero, or its boat
+	uint32_t sequence; // raised on each step; 0 before the first
+	uint32_t object; // the moving object id: the hero, or its boat
 	uint16_t fromX, fromY, toX, toY;
 	uint8_t fromZ, toZ;
 	uint16_t durationMs; // as the 2D map takes it: adventure.heroMoveTime, or enemyMoveTime for other players
@@ -56,14 +69,14 @@ typedef struct VcmiMove
 // or not: the reader hides those whose anchor and visitable tiles are both in the fog
 typedef struct VcmiObject
 {
-	uint32_t id;       // the game's object id, which is also its index in the list
-	uint16_t x, y;     // anchor tile: the bottom right of the object's sprite, as the game places it
+	uint32_t id; // the game's object id, which is also its index in the list
+	uint16_t x, y; // anchor tile: the bottom right of the object's sprite, as the game places it
 	uint8_t z;
-	uint8_t owner;     // player 0-7, 255 neutral, 254 unflaggable; a boat with a hero: the hero's owner
-	uint8_t group;     // animation group: the facing of heroes and boats, else 0
-	uint8_t visit;     // visitable tile = anchor - (visit >> 4, visit & 15)
+	uint8_t owner; // player 0-7, 255 neutral, 254 unflaggable; a boat with a hero: the hero's owner
+	uint8_t group; // animation group: the facing of heroes and boats, else 0
+	uint8_t visit; // visitable tile = anchor - (visit >> 4, visit & 15)
 	uint16_t animation; // index into the animation names (VcmiBridgeApi.animation)
-	uint16_t flags;    // VCMI_OBJECT_*
+	uint16_t flags; // VCMI_OBJECT_*
 } VcmiObject;
 #define VCMI_OBJECT_HERO 1
 #define VCMI_OBJECT_BOAT 2
@@ -71,22 +84,22 @@ typedef struct VcmiObject
 #define VCMI_OBJECT_FLAGGABLE 8 // drawn with the owner's colour
 #define VCMI_OBJECT_VISITABLE 16
 #define VCMI_OBJECT_PRESENT 32 // a drawn object; a record without it is an empty slot (no object, or erased)
-#define VCMI_OBJECT_HIDDEN 64  // a hero in a garrison or a boat: the 2D map does not draw it
+#define VCMI_OBJECT_HIDDEN 64 // a hero in a garrison or a boat: the 2D map does not draw it
 
 typedef struct VcmiObjectList
 {
-	uint32_t snapshot;   // 0: nothing copied (no map, buffer too small, or the game is writing: try next frame)
-	uint32_t sequence;   // the list includes every change up to this one
-	uint32_t count;      // records in the list
+	uint32_t snapshot; // 0: nothing copied (no map, buffer too small, or the game is writing: try next frame)
+	uint32_t sequence; // the list includes every change up to this one
+	uint32_t count; // records in the list
 	uint32_t animations; // animation names, indices 0 to animations - 1; a new snapshot starts the table again
 } VcmiObjectList;
 
 typedef struct VcmiObjectChanges
 {
-	uint32_t sequence;   // the changes copied run up to this one; 0 when nothing was copied
-	uint32_t count;      // records copied (one per change, so an object can appear more than once: apply in order)
+	uint32_t sequence; // the changes copied run up to this one; 0 when nothing was copied
+	uint32_t count; // records copied (one per change, so an object can appear more than once: apply in order)
 	uint32_t animations; // as VcmiObjectList
-	uint8_t resync;      // 1: the changes asked for are gone (another snapshot, or too many): take the whole list
+	uint8_t resync; // 1: the changes asked for are gone (another snapshot, or too many): take the whole list
 	uint8_t pad[3];
 } VcmiObjectChanges;
 
@@ -110,15 +123,17 @@ typedef struct VcmiGrid
 #define VCMI_TERRAIN_COLOURS 256
 
 // one frame of a map object animation (quest/MILESTONE_3B.md); pixels in VcmiAnimationData.data at offset, size bytes
-#define VCMI_FRAME_INDEXED 0 // width * height palette indices: 0 clear, 1 and 4 shadow, 2 and 3 shadow when the palette
-                             // has the H3 shadow colours there, 5 owner flag (ScalableImage.cpp:205-222)
-#define VCMI_FRAME_PNG 1     // a PNG file at its full size (left, top 0), shadow in its alpha; the owner flag mask,
-                             // when there is one, is a second PNG at overlayOffset (its alpha)
+#define VCMI_FRAME_INDEXED \
+	0 // width * height palette indices: 0 clear, 1 and 4 shadow, 2 and 3 shadow when the palette
+		// has the H3 shadow colours there, 5 owner flag (ScalableImage.cpp:205-222)
+#define VCMI_FRAME_PNG \
+	1 // a PNG file at its full size (left, top 0), shadow in its alpha; the owner flag mask,
+		// when there is one, is a second PNG at overlayOffset (its alpha)
 typedef struct VcmiFrame
 {
 	uint16_t group, frame;
 	uint16_t width, height;
-	int16_t left, top;            // offset of the pixels in the full frame
+	int16_t left, top; // offset of the pixels in the full frame
 	uint16_t fullWidth, fullHeight;
 	uint32_t offset, size;
 	uint32_t overlayOffset, overlaySize; // VCMI_FRAME_PNG only; size 0 when none
@@ -171,4 +186,7 @@ typedef struct VcmiBridgeApi
 	// own tile handlers; only the latest hover is kept. Dropped while no tabletop window is shown or a window is over
 	// it. Any thread
 	void (*tileInput)(uint16_t x, uint16_t y, uint8_t z, uint8_t kind);
+	// copies the selected hero's path (stats.pathGeneration) and returns its node count; copies nothing when capacity
+	// is smaller. VCMI_NONE while the game is writing: try next frame. Never waits, any thread
+	uint32_t (*path)(VcmiPathNode * out, uint32_t capacity);
 } VcmiBridgeApi;

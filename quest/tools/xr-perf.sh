@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016 # the single-quoted commands run on the headset, where their $ expand
 # Performance baseline on the headset (on a desk, nobody wearing it), for quest/DATA_BRIDGE.md milestone 0:
 # starts a G-size (252x252) map with an upscaling filter, reveals it with a cheat, zooms out so every object is
 # on screen and animates, and samples each step with `quest.sh sample` into quest/out/perf-<time>-<filter>/.

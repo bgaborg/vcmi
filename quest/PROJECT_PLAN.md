@@ -39,7 +39,7 @@ Not closed yet:
 
 ### Next, in order
 
-1. **Phase 4, tabletop adventure map:** planned in [`PHASE4.md`](PHASE4.md); next are its required checks (section 3), then milestone 4a, play on the table. Also read: [`MILESTONE_3B.md`](MILESTONE_3B.md) section 1f (the sprite work left for phase 4: the view rebuild on a worker, the atlas refill on pans, the GPU cost) and [`DATA_BRIDGE.md`](DATA_BRIDGE.md) Milestone 3c results (the tabletop window, `setTabletop`, the hero steps the game waits for, and what the game screen shows meanwhile).
+1. **Phase 4, tabletop adventure map:** planned in [`PHASE4.md`](PHASE4.md); milestone 4a (play on the table: clicks, path, the screen for dialogs only) is built and played with a simulated ray, next is 4b, moving around the map. Also read: [`MILESTONE_3B.md`](MILESTONE_3B.md) section 1f (the sprite work left for phase 4: the view rebuild on a worker, the atlas refill on pans, the GPU cost) and [`DATA_BRIDGE.md`](DATA_BRIDGE.md) Milestone 3c results (the tabletop window, `setTabletop`, the hero steps the game waits for, and what the game screen shows meanwhile).
 2. **Milestone 4, battle**, then **phase 5, battle diorama**.
 
 Each milestone records its numbers in `DATA_BRIDGE.md` and is optimised before the next one starts.

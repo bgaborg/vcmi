@@ -58,8 +58,14 @@ inline std::array<uint8_t, 1024> bakePalette(const uint8_t * rgb)
 		out[i * 4 + 3] = 255;
 	}
 	const auto similar = [rgb](int i, int r, int g, int b)
-	{ return std::abs(rgb[i * 3] - r) < 8 && std::abs(rgb[i * 3 + 1] - g) < 8 && std::abs(rgb[i * 3 + 2] - b) < 8; };
-	const auto shadow = [&out](int i, uint8_t alpha) { out[i * 4] = out[i * 4 + 1] = out[i * 4 + 2] = 0; out[i * 4 + 3] = alpha; };
+	{
+		return std::abs(rgb[i * 3] - r) < 8 && std::abs(rgb[i * 3 + 1] - g) < 8 && std::abs(rgb[i * 3 + 2] - b) < 8;
+	};
+	const auto shadow = [&out](int i, uint8_t alpha)
+	{
+		out[i * 4] = out[i * 4 + 1] = out[i * 4 + 2] = 0;
+		out[i * 4 + 3] = alpha;
+	};
 	shadow(0, 0);
 	shadow(1, 64);
 	shadow(4, 128);
@@ -99,7 +105,8 @@ inline std::vector<BakedFrame> bakeFrames(const VcmiAnimationData & anim)
 			b.rgba.assign(px.ptr(), px.ptr() + px.size());
 			// the flag is where the overlay is opaque (its alpha), as the 2D map draws it in the owner colour
 			if(f.overlaySize)
-				if(const Ref<Image> overlay = loadPng(anim.data + f.overlayOffset, f.overlaySize); overlay.is_valid() && overlay->get_size() == image->get_size())
+				if(const Ref<Image> overlay = loadPng(anim.data + f.overlayOffset, f.overlaySize);
+				   overlay.is_valid() && overlay->get_size() == image->get_size())
 				{
 					const PackedByteArray ov = overlay->get_data();
 					b.mask.resize(ov.size() / 4);
@@ -141,8 +148,8 @@ public:
 	// mipmaps and masks: about 56 MB on the GPU, the budget of section 1a
 	static constexpr int PAGE = 512;
 	static constexpr int PAGES = 32;
-	static constexpr int PAD = 4;    // between sprites: they stay apart in mips 0-1 and mostly in 2; the LOD switch keeps
-	                                 // sprites from being drawn smaller than that (MILESTONE_3B.md section 5)
+	static constexpr int PAD = 4; // between sprites: they stay apart in mips 0-1 and mostly in 2; the LOD switch keeps
+	// sprites from being drawn smaller than that (MILESTONE_3B.md section 5)
 	static constexpr int WORKERS = 3; // the Quest 3 has 6 cores; the game thread takes one, Godot's main and render threads two
 
 	/// where a frame is: page, rectangle, and its offset in the full frame (trimmed to its visible pixels)
@@ -158,11 +165,11 @@ public:
 	struct Stats
 	{
 		int64_t wanted = 0, loaded = 0, frames = 0, pixels = 0, refills = 0, overflowed = 0;
-		int64_t decodeMicros = 0;   // worker time of the bridge, baking, trimming and packing, summed
-		int64_t mipmapMicros = 0;   // worker time building the page images
-		int64_t batchMillis = 0;    // from the last want with new animations to all of them uploaded
-		int64_t createMicros = 0;   // main thread, once: the empty texture arrays
-		int64_t uploadMicros = 0;   // main thread, the last upload; maxUploadMicros the most of one frame
+		int64_t decodeMicros = 0; // worker time of the bridge, baking, trimming and packing, summed
+		int64_t mipmapMicros = 0; // worker time building the page images
+		int64_t batchMillis = 0; // from the last want with new animations to all of them uploaded
+		int64_t createMicros = 0; // main thread, once: the empty texture arrays
+		int64_t uploadMicros = 0; // main thread, the last upload; maxUploadMicros the most of one frame
 		int64_t maxUploadMicros = 0;
 		int64_t pagesUsed = 0;
 	};
@@ -176,7 +183,12 @@ public:
 			page.mask.assign(size_t(PAGE) * PAGE, 0);
 		}
 		for(int i = 0; i < WORKERS; i++)
-			workers.emplace_back([this]() { work(); });
+			workers.emplace_back(
+				[this]()
+				{
+					work();
+				}
+			);
 	}
 
 	~SpriteAtlas()
@@ -297,8 +309,14 @@ public:
 		return layer >= 0;
 	}
 
-	Ref<Texture2DArray> bodyTexture() const { return body; }
-	Ref<Texture2DArray> maskTexture() const { return flags; }
+	Ref<Texture2DArray> bodyTexture() const
+	{
+		return body;
+	}
+	Ref<Texture2DArray> maskTexture() const
+	{
+		return flags;
+	}
 
 	/// the frames of an animation in the pages; empty when not (yet) loaded. The pixels are on the GPU only once
 	/// busyNow() is false: a renderer waits for that (a refill reuses the pages)
@@ -360,9 +378,9 @@ private:
 		std::vector<uint8_t> rgba;
 		std::vector<uint8_t> mask;
 		int x = 0, shelfY = 0, shelfHeight = 0; // the open shelf
-		bool dirty = false;                     // packed into since its last image
-		bool stale = false;                     // holds a refilled generation's pixels
-		Ref<Image> ready, readyMask;            // built, waiting for the upload
+		bool dirty = false; // packed into since its last image
+		bool stale = false; // holds a refilled generation's pixels
+		Ref<Image> ready, readyMask; // built, waiting for the upload
 	};
 
 	void work()
@@ -373,7 +391,13 @@ private:
 			uint64_t gen;
 			{
 				std::unique_lock lock(mutex);
-				wake.wait(lock, [this]() { return stopping || !queue.empty() || (busy == 0 && anyDirty()); });
+				wake.wait(
+					lock,
+					[this]()
+					{
+						return stopping || !queue.empty() || (busy == 0 && anyDirty());
+					}
+				);
 				if(stopping)
 					return;
 				if(queue.empty())
@@ -646,8 +670,8 @@ private:
 	std::vector<std::thread> workers;
 	bool stopping = false;
 	std::deque<std::string> queue;
-	int busy = 0;                 // workers decoding or building outside the lock
-	uint64_t generation = 0;      // raised by a refill: work of an older generation is dropped
+	int busy = 0; // workers decoding or building outside the lock
+	uint64_t generation = 0; // raised by a refill: work of an older generation is dropped
 	std::vector<Page> pages;
 	std::unordered_map<std::string, std::vector<Placed>> placed;
 	std::unordered_set<std::string> failed; // missing or JSON-only without files: markers stay

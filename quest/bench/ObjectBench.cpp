@@ -60,7 +60,11 @@ void benchSprites(std::vector<std::string> names)
 	const double decodeMicros = microsSince(from);
 
 	// .def frames of one animation with the same pixels (same offset) are packed once; PNG frames are counted only
-	struct Rect { uint32_t anim, offset; uint16_t w, h; };
+	struct Rect
+	{
+		uint32_t anim, offset;
+		uint16_t w, h;
+	};
 	std::vector<Rect> rects;
 	// per animation, for a look on the PC (object-bench.sh pulls it to quest/out/object-bench/): which have a mod JSON
 	// layout, and how many pixels trimming the transparent border (index 0) would save; in the folder run from
@@ -106,21 +110,45 @@ void benchSprites(std::vector<std::string> names)
 			}
 		trimmed += animTrimmed;
 		if(table)
-			std::fprintf(table, "%s\t%d\t%d\t%zu\t%zu\t%zu\t%zu\n", names[a].c_str(), anim.def, anim.json, anim.frames.size(), offsets.size(),
-				anim.data.size(), animTrimmed);
+			std::fprintf(
+				table,
+				"%s\t%d\t%d\t%zu\t%zu\t%zu\t%zu\n",
+				names[a].c_str(),
+				anim.def,
+				anim.json,
+				anim.frames.size(),
+				offsets.size(),
+				anim.data.size(),
+				animTrimmed
+			);
 	}
 	if(table)
 		std::fclose(table);
 	std::printf("animations %zu: no .def %zu (JSON only %zu), .def with a JSON layout %zu\n", anims.size(), noDef, jsonOnly, withJson);
-	std::printf("frames %zu, distinct %zu, pixels %.1f M (trimmed to the visible box %.1f M), rows cut %zu, decode %.0f ms on one thread\n",
-		frames, rects.size(), pixels / 1e6, trimmed / 1e6, overruns, decodeMicros / 1e3);
-	std::printf("PNG frames %zu (not PNG: %zu), %.1f M pixels, with a flag mask %zu, files %.1f MB\n", pngFrames, badPng, pngPixels / 1e6,
-		overlays, pngBytes / 1e6);
+	std::printf(
+		"frames %zu, distinct %zu, pixels %.1f M (trimmed to the visible box %.1f M), rows cut %zu, decode %.0f ms on one thread\n",
+		frames,
+		rects.size(),
+		pixels / 1e6,
+		trimmed / 1e6,
+		overruns,
+		decodeMicros / 1e3
+	);
+	std::printf(
+		"PNG frames %zu (not PNG: %zu), %.1f M pixels, with a flag mask %zu, files %.1f MB\n", pngFrames, badPng, pngPixels / 1e6, overlays, pngBytes / 1e6
+	);
 
 	// shelf packing, tallest first, 1 px padding
 	from = Clock::now();
 	constexpr int PAGE = 2048;
-	std::sort(rects.begin(), rects.end(), [](const Rect & l, const Rect & r) { return l.h != r.h ? l.h > r.h : l.w > r.w; });
+	std::sort(
+		rects.begin(),
+		rects.end(),
+		[](const Rect & l, const Rect & r)
+		{
+			return l.h != r.h ? l.h > r.h : l.w > r.w;
+		}
+	);
 	std::vector<std::vector<uint8_t>> pages;
 	std::vector<uint32_t> owner0; // page 0: the animation of each pixel, for the colour dump
 	int x = 0, y = 0, shelf = 0;
@@ -157,9 +185,17 @@ void benchSprites(std::vector<std::string> names)
 		packed += size_t(r.w) * r.h;
 	}
 	const double packMicros = microsSince(from);
-	std::printf("pages %zu of %dx%d R8 (%.0f MB), distinct pixels %.1f M, fill %.0f%%, too big %zu, pack %.0f ms\n", pages.size(), PAGE,
-		PAGE, pages.size() * double(PAGE) * PAGE / 1e6, packed / 1e6, pages.empty() ? 0 : 100.0 * packed / (pages.size() * double(PAGE) * PAGE),
-		tooBig, packMicros / 1e3);
+	std::printf(
+		"pages %zu of %dx%d R8 (%.0f MB), distinct pixels %.1f M, fill %.0f%%, too big %zu, pack %.0f ms\n",
+		pages.size(),
+		PAGE,
+		PAGE,
+		pages.size() * double(PAGE) * PAGE / 1e6,
+		packed / 1e6,
+		pages.empty() ? 0 : 100.0 * packed / (pages.size() * double(PAGE) * PAGE),
+		tooBig,
+		packMicros / 1e3
+	);
 	std::printf("decode + pack %.0f ms\n", (decodeMicros + packMicros) / 1e3);
 
 	if(pages.empty())
@@ -226,11 +262,23 @@ extern "C" JNIEXPORT jint JNICALL Java_eu_vcmi_vcmi_NativeMethods_bench(JNIEnv *
 		auto game = file.openChunk(SaveFileFormat::CHUNK_GAMESTATE, state.get());
 		state->loadGame(game->iser);
 		const CMap & map = state->getMap();
-		std::printf("save loaded in %.1f s: %s, %zu object slots, %zu heroes on the map\n", microsSince(from) / 1e6, save.c_str(),
-			map.objects.size(), map.getHeroesOnMap().size());
+		std::printf(
+			"save loaded in %.1f s: %s, %zu object slots, %zu heroes on the map\n",
+			microsSince(from) / 1e6,
+			save.c_str(),
+			map.objects.size(),
+			map.getHeroesOnMap().size()
+		);
 
 		ObjectScan scan;
-		timed("full list (snapshot)", repeats, [&]() { scan.snapshot(map); });
+		timed(
+			"full list (snapshot)",
+			repeats,
+			[&]()
+			{
+				scan.snapshot(map);
+			}
+		);
 
 		size_t present = 0;
 		size_t hidden = 0;
@@ -241,29 +289,55 @@ extern "C" JNIEXPORT jint JNICALL Java_eu_vcmi_vcmi_NativeMethods_bench(JNIEnv *
 			present += (o.flags & VCMI_OBJECT_PRESENT) != 0;
 			hidden += (o.flags & VCMI_OBJECT_HIDDEN) != 0;
 			visitable += (o.flags & VCMI_OBJECT_VISITABLE) != 0;
-			markers += (o.flags & VCMI_OBJECT_PRESENT) && !(o.flags & VCMI_OBJECT_HIDDEN) && (o.flags & (VCMI_OBJECT_HERO | VCMI_OBJECT_TOWN | VCMI_OBJECT_FLAGGABLE));
+			markers +=
+				(o.flags & VCMI_OBJECT_PRESENT) && !(o.flags & VCMI_OBJECT_HIDDEN) && (o.flags & (VCMI_OBJECT_HERO | VCMI_OBJECT_TOWN | VCMI_OBJECT_FLAGGABLE));
 		}
-		std::printf("records %zu: drawn %zu, hidden heroes %zu, visitable %zu, minimap markers %zu, animations %zu\n",
-			scan.records().size(), present, hidden, visitable, markers, scan.animations().size());
+		std::printf(
+			"records %zu: drawn %zu, hidden heroes %zu, visitable %zu, minimap markers %zu, animations %zu\n",
+			scan.records().size(),
+			present,
+			hidden,
+			visitable,
+			markers,
+			scan.animations().size()
+		);
 
 		// the lifecycle tick encodes every hero on the map again (garrisons fire no event)
-		timed("tick: all heroes again", repeats * 10, [&]()
-		{
-			for(const ObjectInstanceID & hero : map.getHeroesOnMap())
-				scan.update(map, hero.getNum());
-		});
+		timed(
+			"tick: all heroes again",
+			repeats * 10,
+			[&]()
+			{
+				for(const ObjectInstanceID & hero : map.getHeroesOnMap())
+					scan.update(map, hero.getNum());
+			}
+		);
 		// one map event: one object (a hero step)
 		const int32_t firstHero = map.getHeroesOnMap().empty() ? 0 : map.getHeroesOnMap().front().getNum();
-		timed("event: one object", repeats * 100, [&]() { scan.update(map, firstHero); });
+		timed(
+			"event: one object",
+			repeats * 100,
+			[&]()
+			{
+				scan.update(map, firstHero);
+			}
+		);
 		// what a publish copies under the lock for a new list
 		std::vector<VcmiObject> copy;
-		timed("copy of the whole list", repeats, [&]() { copy = scan.records(); });
+		timed(
+			"copy of the whole list",
+			repeats,
+			[&]()
+			{
+				copy = scan.records();
+			}
+		);
 
 		// the same list twice must be equal: a snapshot is deterministic and an update of an unchanged object is no change
 		ObjectScan again;
 		again.snapshot(map);
 		bool unchanged = again.records().size() == scan.records().size()
-			&& std::memcmp(again.records().data(), scan.records().data(), scan.records().size() * sizeof(VcmiObject)) == 0;
+					  && std::memcmp(again.records().data(), scan.records().data(), scan.records().size() * sizeof(VcmiObject)) == 0;
 		for(size_t id = 0; id < map.objects.size(); id++)
 			unchanged = !again.update(map, id) && unchanged;
 		std::printf("self-check: %s\n", unchanged ? "ok" : "FAILED, an unchanged map gave changed records");

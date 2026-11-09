@@ -14,8 +14,8 @@
 #include <map>
 #include <memory>
 #include <set>
-#include <tuple>
 #include <string>
+#include <tuple>
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/multi_mesh.hpp>
@@ -23,11 +23,11 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/godot.hpp>
 #include <godot_cpp/variant/array.hpp>
-#include <godot_cpp/variant/rect2i.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
+#include <godot_cpp/variant/rect2i.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 using namespace godot;
@@ -78,6 +78,11 @@ protected:
 		BIND_CONSTANT(FOG_CHANGED);
 		BIND_CONSTANT(IN_GAME);
 		BIND_CONSTANT(OBJECTS_CHANGED);
+		BIND_CONSTANT(PATH_CHANGED);
+		ClassDB::bind_method(D_METHOD("path_nodes"), &VcmiData::path_nodes);
+		ClassDB::bind_method(D_METHOD("selected_tile"), &VcmiData::selected_tile);
+		ClassDB::bind_method(D_METHOD("windows_above"), &VcmiData::windows_above);
+		ClassDB::bind_method(D_METHOD("tabletop_shown"), &VcmiData::tabletop_shown);
 	}
 
 	uint32_t seenTiles = 0;
@@ -108,9 +113,18 @@ protected:
 
 	struct Sprite
 	{
-		uint16_t y; uint8_t fixed; uint16_t x; uint32_t id; uint8_t order;
-		float custom[4]; float origin[2]; float fog[4];
-		auto key() const { return std::tie(y, fixed, x, id, order); } // the 2D map's drawing order
+		uint16_t y;
+		uint8_t fixed;
+		uint16_t x;
+		uint32_t id;
+		uint8_t order;
+		float custom[4];
+		float origin[2];
+		float fog[4];
+		auto key() const
+		{
+			return std::tie(y, fixed, x, id, order);
+		} // the 2D map's drawing order
 	};
 	std::vector<Sprite> sprites; // of the last update_sprites and the changes since, in drawing order
 	std::vector<float> table; // the frames the sprites use: 8 floats each (sprite_table)
@@ -120,6 +134,9 @@ protected:
 	std::vector<uint32_t> spriteChanges; // object ids changed since the last sprite update
 	bool spritesStale = true; // a new list or map, or too many changes: update_sprite_changes asks for update_sprites
 	int64_t spriteMicros = 0, changeMicros = 0, maxChangeMicros = 0, bufferMicros = 0; // main thread: the last update_sprites and change update
+	VcmiBridgeStats latest{}; // of the last update
+	uint32_t seenPath = 0;
+	std::vector<VcmiPathNode> path; // the selected hero's, from its first step to the end
 	VcmiMove move{}; // the last hero step the game asked the tabletop to show
 	std::chrono::steady_clock::time_point moveStart; // when update() first saw it
 	bool moveShown = true; // its time has passed and the game was told
@@ -128,8 +145,17 @@ protected:
 	PackedStringArray spriteNames; // of the last update_sprites, per instance: "animation x,y group", for debugging
 
 	// the flag colours of the players (Graphics.cpp:72-90), also the marker colours; the 9th is neutral
-	static constexpr uint8_t PLAYER_COLOURS[9][3] = {{0xff, 0, 0}, {0x31, 0x52, 0xff}, {0x9c, 0x73, 0x52}, {0x42, 0x94, 0x29},
-		{0xff, 0x84, 0}, {0x8c, 0x29, 0xa5}, {0x09, 0x9c, 0xa5}, {0xc6, 0x7b, 0x8c}, {0x84, 0x84, 0x84}};
+	static constexpr uint8_t PLAYER_COLOURS[9][3] = {
+		{0xff, 0,    0   },
+		{0x31, 0x52, 0xff},
+		{0x9c, 0x73, 0x52},
+		{0x42, 0x94, 0x29},
+		{0xff, 0x84, 0   },
+		{0x8c, 0x29, 0xa5},
+		{0x09, 0x9c, 0xa5},
+		{0xc6, 0x7b, 0x8c},
+		{0x84, 0x84, 0x84}
+	};
 
 	// the game stores tiles x-major (VcmiGrid); images are rows of y, with the levels side by side
 	template<typename Pixel>
@@ -162,8 +188,21 @@ protected:
 	}
 
 public:
-	enum { TERRAIN_CHANGED = 1, FOG_CHANGED = 2, IN_GAME = 4, OBJECTS_CHANGED = 8 };
-	enum { TILE_HOVER = VCMI_TILE_HOVER, TILE_CLICK = VCMI_TILE_CLICK, TILE_POPUP = VCMI_TILE_POPUP, TILE_POPUP_END = VCMI_TILE_POPUP_END };
+	enum
+	{
+		TERRAIN_CHANGED = 1,
+		FOG_CHANGED = 2,
+		IN_GAME = 4,
+		OBJECTS_CHANGED = 8,
+		PATH_CHANGED = 16
+	};
+	enum
+	{
+		TILE_HOVER = VCMI_TILE_HOVER,
+		TILE_CLICK = VCMI_TILE_CLICK,
+		TILE_POPUP = VCMI_TILE_POPUP,
+		TILE_POPUP_END = VCMI_TILE_POPUP_END
+	};
 
 	/// true once the game's table is found and its lifecycle task started; call again until then
 	bool connect_bridge()
@@ -180,8 +219,13 @@ public:
 		if(!table || table->version != VCMI_BRIDGE_VERSION)
 		{
 			refused = true;
-			UtilityFunctions::push_error("VCMI bridge: ", table ? "version " + String::num_int64(table->version) : String("no table"),
-				" in the game, expected version ", VCMI_BRIDGE_VERSION, "; bridge off");
+			UtilityFunctions::push_error(
+				"VCMI bridge: ",
+				table ? "version " + String::num_int64(table->version) : String("no table"),
+				" in the game, expected version ",
+				VCMI_BRIDGE_VERSION,
+				"; bridge off"
+			);
 			return false;
 		}
 		api = table;
@@ -217,6 +261,8 @@ public:
 		result["windows_above"] = s.windowsAbove;
 		result["inputs_run"] = s.inputsRun;
 		result["inputs_dropped"] = s.inputsDropped;
+		result["selected"] = int64_t(s.selected == VCMI_NONE ? -1 : int64_t(s.selected));
+		result["path_generation"] = s.pathGeneration;
 		result["objects"] = int64_t(objects.size());
 		result["animations"] = animations.size();
 		return result;
@@ -240,32 +286,71 @@ public:
 	{
 		VcmiBridgeStats s;
 		api->stats(&s);
+		latest = s;
 		const int inGame = s.inGame ? IN_GAME : 0;
-		if(s.tilesGeneration == seenTiles && s.fogGeneration == seenFog && s.objectsSnapshot == seenSnapshot
-			&& s.objectsSequence == seenSequence && !resync && animations.size() >= wantedAnimations)
-			return inGame;
+		int pathChanged = 0;
+		if(s.pathGeneration != seenPath)
+		{
+			// the count first; VCMI_NONE while the game writes, and a new path between the two calls: next frame
+			const uint32_t count = api->path(nullptr, 0);
+			if(count != VCMI_NONE)
+				path.resize(count);
+			if(count != VCMI_NONE && api->path(path.data(), path.size()) == count)
+			{
+				seenPath = s.pathGeneration;
+				pathChanged = PATH_CHANGED;
+			}
+		}
+		if(s.tilesGeneration == seenTiles && s.fogGeneration == seenFog && s.objectsSnapshot == seenSnapshot && s.objectsSequence == seenSequence && !resync
+		   && animations.size() >= wantedAnimations)
+			return inGame | pathChanged;
 		const auto from = std::chrono::steady_clock::now();
 		int changed = 0;
 		VcmiGrid grid;
-		if(s.tilesGeneration != seenTiles && fetch(tiles, grid, [this](auto & buffer, VcmiGrid & g) { api->tiles(buffer.data(), buffer.size(), colours, &g); }))
+		if(s.tilesGeneration != seenTiles
+		   && fetch(
+			   tiles,
+			   grid,
+			   [this](auto & buffer, VcmiGrid & g)
+			   {
+				   api->tiles(buffer.data(), buffer.size(), colours, &g);
+			   }
+		   ))
 		{
 			seenTiles = grid.generation;
 			map = grid;
 			markersReset = true;
 			spritesStale = true;
-			terrain = Image::create_from_data(grid.width * grid.levels, grid.height, false, Image::FORMAT_RGBA8,
-				toRows(grid, 4, [this](size_t i, uint8_t * out)
-				{
-					const VcmiTile & tile = tiles[i];
-					// as the game's minimap: blocked colour on tiles an object blocks and nothing can be visited
-					const bool blocked = (tile.flags & VCMI_TILE_BLOCKED) && !(tile.flags & VCMI_TILE_VISITABLE);
-					std::memcpy(out, &colours[2 * tile.terrain + (blocked ? 1 : 0)], 4);
-					out[3] = 255;
-				}));
+			terrain = Image::create_from_data(
+				grid.width * grid.levels,
+				grid.height,
+				false,
+				Image::FORMAT_RGBA8,
+				toRows(
+					grid,
+					4,
+					[this](size_t i, uint8_t * out)
+					{
+						const VcmiTile & tile = tiles[i];
+						// as the game's minimap: blocked colour on tiles an object blocks and nothing can be visited
+						const bool blocked = (tile.flags & VCMI_TILE_BLOCKED) && !(tile.flags & VCMI_TILE_VISITABLE);
+						std::memcpy(out, &colours[2 * tile.terrain + (blocked ? 1 : 0)], 4);
+						out[3] = 255;
+					}
+				)
+			);
 			terrain->generate_mipmaps();
 			changed |= TERRAIN_CHANGED;
 		}
-		if(s.fogGeneration != seenFog && fetch(fog, grid, [](auto & buffer, VcmiGrid & g) { api->fog(buffer.ptrw(), buffer.size(), &g); }))
+		if(s.fogGeneration != seenFog
+		   && fetch(
+			   fog,
+			   grid,
+			   [](auto & buffer, VcmiGrid & g)
+			   {
+				   api->fog(buffer.ptrw(), buffer.size(), &g);
+			   }
+		   ))
 		{
 			seenFog = grid.generation;
 			fog.resize(int64_t(grid.width) * grid.height * grid.levels); // a smaller map than the one before
@@ -279,7 +364,7 @@ public:
 		fetchAnimations();
 		if(changed)
 			consumeMicros = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - from).count();
-		return changed | inGame;
+		return changed | inGame | pathChanged;
 	}
 
 	/// one try, as fetch: the whole list
@@ -351,9 +436,15 @@ public:
 	}
 
 	/// the minimap colour of each tile, the map levels side by side; null before the first update with a map
-	Ref<Image> terrain_image() const { return terrain; }
+	Ref<Image> terrain_image() const
+	{
+		return terrain;
+	}
 	/// 1 (of 255) where the local team sees; x-major: terrain_image with the axes swapped
-	Ref<Image> fog_image() const { return fogMap; }
+	Ref<Image> fog_image() const
+	{
+		return fogMap;
+	}
 
 	/// the frames of animation `name` (an animation_names entry) as the 2D map draws them (quest/MILESTONE_3B.md):
 	/// {frames: [{group, frame, left, top, full_size, image (RGBA8, shadow in alpha), mask (L8 owner flag,
@@ -430,7 +521,10 @@ public:
 	}
 
 	/// true while the atlas loads or uploads
-	bool atlas_busy() const { return atlas && atlas->busyNow(); }
+	bool atlas_busy() const
+	{
+		return atlas && atlas->busyNow();
+	}
 
 	Dictionary atlas_stats() const
 	{
@@ -459,7 +553,10 @@ public:
 	}
 
 	/// page `layer` as packed, over grey with the owner mask in red; for a look
-	Ref<Image> atlas_page(int layer) const { return atlas ? atlas->debugPage(layer) : Ref<Image>(); }
+	Ref<Image> atlas_page(int layer) const
+	{
+		return atlas ? atlas->debugPage(layer) : Ref<Image>();
+	}
 
 	/// [body, mask]: Texture2DArray of RGBA8 and of R8, SpriteAtlas::PAGES layers; empty before atlas_view
 	Array atlas_textures() const
@@ -487,8 +584,9 @@ public:
 		const float columns = float(map.width) * map.levels;
 		const int vx = int(o.x) - (o.visit >> 4);
 		const int vy = int(o.y) - (o.visit & 15);
-		const float fog[4] = {(o.z * map.width + o.x + 0.5f) / columns, (o.y + 0.5f) / map.height,
-			(o.z * map.width + vx + 0.5f) / columns, (vy + 0.5f) / map.height};
+		const float fog[4] = {
+			(o.z * map.width + o.x + 0.5f) / columns, (o.y + 0.5f) / map.height, (o.z * map.width + vx + 0.5f) / columns, (vy + 0.5f) / map.height
+		};
 		// heroes draw their flag from a separate animation, not in the owner colour (MapRendererObjects::renderImage)
 		const bool hero = o.flags & VCMI_OBJECT_HERO;
 		const int owner = hero ? 9 : o.owner < 8 ? o.owner : o.owner == 255 ? 8 : 9;
@@ -506,9 +604,18 @@ public:
 			// Heroes and boats come after the other objects of their row, as the 2D map draws them last on a tile
 			// (MapObjectDrawOrder::usesFixedDrawSlot). shortcut: special ground (clover field, cursed ground) is not
 			// drawn first as renderGround does: the bridge has no flag for it yet; a hero on its upper row is covered
-			out.push_back(Sprite{o.y, uint8_t((o.flags & (VCMI_OBJECT_HERO | VCMI_OBJECT_BOAT)) ? 1 : 0), o.x, o.id, order,
-				{float(g[0]), float(g[1]), float(ownerCode), o.id + 0.5f},
-				{float((o.z * map.width + o.x + 1) * 32), float((o.y + 1) * 32)}, {fog[0], fog[1], fog[2], fog[3]}});
+			out.push_back(
+				Sprite{
+					o.y,
+					uint8_t((o.flags & (VCMI_OBJECT_HERO | VCMI_OBJECT_BOAT)) ? 1 : 0),
+					o.x,
+					o.id,
+					order,
+					{float(g[0]), float(g[1]), float(ownerCode), o.id + 0.5f},
+					{float((o.z * map.width + o.x + 1) * 32), float((o.y + 1) * 32)},
+					{fog[0], fog[1], fog[2], fog[3]}
+			}
+			);
 		};
 		add(animationNames[o.animation], 0, owner);
 		// shortcut: a boat with a hero flies boat->flagAnimations[owner] with a wave overlay (MapRendererObjects::
@@ -525,9 +632,26 @@ public:
 		if(auto it = groups.find(key); it != groups.end())
 			return it->second;
 		// the 2D map mirrors these groups of heroes and boats (MapRendererObjects::getAnimation, createFlippedGroup)
-		static const std::map<int, int> mirrored = {{13, 1}, {14, 2}, {15, 3}, {10, 6}, {11, 7}, {12, 8}};
+		static const std::map<int, int> mirrored = {
+			{13, 1},
+            {14, 2},
+            {15, 3},
+            {10, 6},
+            {11, 7},
+            {12, 8}
+		};
 		const std::vector<SpriteAtlas::Placed> placed = atlas->frames(name);
-		const auto has = [&](int g) { return std::any_of(placed.begin(), placed.end(), [g](const auto & f) { return f.group == g; }); };
+		const auto has = [&](int g)
+		{
+			return std::any_of(
+				placed.begin(),
+				placed.end(),
+				[g](const auto & f)
+				{
+					return f.group == g;
+				}
+			);
+		};
 		int source = wanted;
 		bool mirror = false;
 		if(!has(wanted))
@@ -540,12 +664,27 @@ public:
 		for(const auto & f : placed)
 			if(f.group == source)
 				frames.push_back(f);
-		std::sort(frames.begin(), frames.end(), [](const auto & l, const auto & r) { return l.frame < r.frame; });
+		std::sort(
+			frames.begin(),
+			frames.end(),
+			[](const auto & l, const auto & r)
+			{
+				return l.frame < r.frame;
+			}
+		);
 		std::array<int, 2> entry{int(table.size() / 8), int(frames.size()) + (mirror ? 1024 : 0)};
 		for(const auto & f : frames)
 		{
-			const float values[8] = {float(f.page), float(f.x), float(f.y), float(f.width), float(f.height),
-				float(f.left - f.fullWidth), float(f.top - f.fullHeight), float(f.fullWidth)};
+			const float values[8] = {
+				float(f.page),
+				float(f.x),
+				float(f.y),
+				float(f.width),
+				float(f.height),
+				float(f.left - f.fullWidth),
+				float(f.top - f.fullHeight),
+				float(f.fullWidth)
+			};
 			table.insert(table.end(), values, values + 8);
 		}
 		groups[key] = entry;
@@ -589,9 +728,28 @@ public:
 		float * out = buffer.ptrw();
 		for(const Sprite & sprite : sprites)
 		{
-			const float values[20] = {sx, 0, 0, sprite.origin[0] * sx - 0.5f, 0, 1, 0, 0.003f, 0, 0, sz, sprite.origin[1] * sz - 0.5f,
-				sprite.fog[0], sprite.fog[1], sprite.fog[2], sprite.fog[3],
-				sprite.custom[0], sprite.custom[1], sprite.custom[2], sprite.custom[3]};
+			const float values[20] = {
+				sx,
+				0,
+				0,
+				sprite.origin[0] * sx - 0.5f,
+				0,
+				1,
+				0,
+				0.003f,
+				0,
+				0,
+				sz,
+				sprite.origin[1] * sz - 0.5f,
+				sprite.fog[0],
+				sprite.fog[1],
+				sprite.fog[2],
+				sprite.fog[3],
+				sprite.custom[0],
+				sprite.custom[1],
+				sprite.custom[2],
+				sprite.custom[3]
+			};
 			std::memcpy(out, values, sizeof(values));
 			out += 20;
 		}
@@ -625,7 +783,14 @@ public:
 			spritesOf(o, sprites, missing);
 		// objects that changed while the atlas loaded may need animations the view did not ask for: ask again
 		spritesStale = missing;
-		std::sort(sprites.begin(), sprites.end(), [](const Sprite & l, const Sprite & r) { return l.key() < r.key(); });
+		std::sort(
+			sprites.begin(),
+			sprites.end(),
+			[](const Sprite & l, const Sprite & r)
+			{
+				return l.key() < r.key();
+			}
+		);
 		writeTable();
 		writeSprites(multimesh);
 		spriteNames.clear();
@@ -653,8 +818,17 @@ public:
 		const auto from = std::chrono::steady_clock::now();
 		std::sort(spriteChanges.begin(), spriteChanges.end());
 		spriteChanges.erase(std::unique(spriteChanges.begin(), spriteChanges.end()), spriteChanges.end());
-		sprites.erase(std::remove_if(sprites.begin(), sprites.end(), [this](const Sprite & sprite)
-			{ return std::binary_search(spriteChanges.begin(), spriteChanges.end(), sprite.id); }), sprites.end());
+		sprites.erase(
+			std::remove_if(
+				sprites.begin(),
+				sprites.end(),
+				[this](const Sprite & sprite)
+				{
+					return std::binary_search(spriteChanges.begin(), spriteChanges.end(), sprite.id);
+				}
+			),
+			sprites.end()
+		);
 		const size_t tableSize = table.size();
 		std::vector<Sprite> added;
 		bool missing = false;
@@ -668,7 +842,10 @@ public:
 			return -1;
 		}
 		// merged, not inserted one by one: up to 4 096 changes wait while the table is not looked at
-		const auto before = [](const Sprite & l, const Sprite & r) { return l.key() < r.key(); };
+		const auto before = [](const Sprite & l, const Sprite & r)
+		{
+			return l.key() < r.key();
+		};
 		std::sort(added.begin(), added.end(), before);
 		sprites.insert(sprites.end(), added.begin(), added.end());
 		std::inplace_merge(sprites.begin(), sprites.end() - added.size(), sprites.end(), before);
@@ -687,6 +864,37 @@ public:
 	{
 		if(api)
 			api->setTabletop(shown ? 1 : 0);
+	}
+
+	/// the selected hero's path, from its first step to the end: [Vector4i(x, y, level, turns until there)]
+	Array path_nodes() const
+	{
+		Array result;
+		for(const VcmiPathNode & node : path)
+			result.push_back(Vector4i(node.x, node.y, node.z, node.turns));
+		return result;
+	}
+
+	/// the visitable tile of the selected hero or town (where a hero stands, as its path's tiles), or (-1, -1, -1)
+	Vector3i selected_tile() const
+	{
+		if(latest.selected >= objects.size())
+			return Vector3i(-1, -1, -1);
+		const VcmiObject & o = objects[latest.selected];
+		return Vector3i(int(o.x) - (o.visit >> 4), int(o.y) - (o.visit & 15), o.z);
+	}
+
+	/// windows over the tabletop window at the last update (dialogs, battles, popups): the game screen shows them
+	int windows_above() const
+	{
+		return latest.windowsAbove;
+	}
+
+	/// true while the game keeps the tabletop window over the adventure map (it is missing at a turn's start until the
+	/// next tick puts it back, and in a replay)
+	bool tabletop_shown() const
+	{
+		return latest.tabletop != 0;
 	}
 
 	/// the heroes on the map: [{id, tile (anchor x, y, level), owner}]
@@ -762,12 +970,24 @@ public:
 
 	/// the frames of the last update_sprites and the changes since: RGBAF, 512 texels a row, 2 per frame (page, x, y, width; height, left and
 	/// top from the full frame's bottom right, full width)
-	Ref<Image> sprite_table() const { return spriteTable; }
-	PackedStringArray sprite_names() const { return spriteNames; }
+	Ref<Image> sprite_table() const
+	{
+		return spriteTable;
+	}
+	PackedStringArray sprite_names() const
+	{
+		return spriteNames;
+	}
 
 	/// the animation names the objects use, by index (VcmiObject.animation)
-	PackedStringArray animation_names() const { return animations; }
-	int64_t object_count() const { return objects.size(); }
+	PackedStringArray animation_names() const
+	{
+		return animations;
+	}
+	int64_t object_count() const
+	{
+		return objects.size();
+	}
 
 	/// one marker per hero, town and flaggable object on the minimap, in the player's colour, `metres` wide on a panel of
 	/// `panel_size`, in the panel's unit space (-0.5..0.5 on x and z). Fills the whole MultiMesh (3D transforms, colours,
@@ -825,7 +1045,13 @@ public:
 					freeSlots.pop_back();
 				}
 				markerInstance(o, metres, instance);
-				multimesh->set_instance_transform(slot, Transform3D(Basis(instance[0], instance[1], instance[2], instance[4], instance[5], instance[6], instance[8], instance[9], instance[10]), Vector3(instance[3], instance[7], instance[11])));
+				multimesh->set_instance_transform(
+					slot,
+					Transform3D(
+						Basis(instance[0], instance[1], instance[2], instance[4], instance[5], instance[6], instance[8], instance[9], instance[10]),
+						Vector3(instance[3], instance[7], instance[11])
+					)
+				);
 				multimesh->set_instance_color(slot, Color(instance[12], instance[13], instance[14], instance[15]));
 				multimesh->set_instance_custom_data(slot, Color(instance[16], instance[17], instance[18], instance[19]));
 			}
@@ -857,9 +1083,9 @@ public:
 		const float scale = o.flags & (VCMI_OBJECT_HERO | VCMI_OBJECT_BOAT) ? 1.5f : 1.0f;
 		const float sx = float(metres / markerPanel.x) * scale;
 		const float sz = float(metres / markerPanel.y) * scale;
-		const float values[20] = {sx, 0, 0, u - 0.5f, 0, 1, 0, 0.002f, 0, 0, sz, v - 0.5f,
-			0, 0, 0, 1,
-			(o.z * map.width + o.x + 0.5f) / columns, (o.y + 0.5f) / map.height, u, v};
+		const float values[20] = {
+			sx, 0, 0, u - 0.5f, 0, 1, 0, 0.002f, 0, 0, sz, v - 0.5f, 0, 0, 0, 1, (o.z * map.width + o.x + 0.5f) / columns, (o.y + 0.5f) / map.height, u, v
+		};
 		std::memcpy(out, values, sizeof(values));
 		for(int c = 0; c < 3; c++)
 			out[12 + c] = PLAYER_COLOURS[o.owner < 8 ? o.owner : 8][c] / 255.0f;
@@ -874,13 +1100,11 @@ void initialize(ModuleInitializationLevel level)
 		GDREGISTER_CLASS(VcmiData);
 }
 
-void uninitialize(ModuleInitializationLevel)
-{
-}
+void uninitialize(ModuleInitializationLevel) {}
 }
 
-extern "C" GDExtensionBool GDE_EXPORT vcmi_xr_init(GDExtensionInterfaceGetProcAddress get_proc_address,
-	const GDExtensionClassLibraryPtr library, GDExtensionInitialization * initialization)
+extern "C" GDExtensionBool GDE_EXPORT
+vcmi_xr_init(GDExtensionInterfaceGetProcAddress get_proc_address, const GDExtensionClassLibraryPtr library, GDExtensionInitialization * initialization)
 {
 	GDExtensionBinding::InitObject init(get_proc_address, library, initialization);
 	init.register_initializer(initialize);

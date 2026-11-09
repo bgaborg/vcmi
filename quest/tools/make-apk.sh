@@ -51,6 +51,7 @@ fi
 cd "$REPO"
 if [ ! -f conan-generated/conan_toolchain.cmake ]; then
 	conan profile detect --exist-ok
+	# shellcheck source=/dev/null # the game's CI script, checked with the upstream code
 	RUNNER_TEMP="$TOOLS" source CI/install_conan_dependencies.sh dependencies-android-arm64-v8a
 	conan install . \
 		--output-folder=conan-generated \

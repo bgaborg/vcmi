@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016 # the single-quoted commands run on the headset, where their $ expand
 # Minimap test on the headset (quest/DATA_BRIDGE.md milestone 2): starts the first scenario, looks at the war table,
 # moves the hero a few tiles, then reveals the map with the vcmieagles cheat. After each step a screenshot and the
 # bridge stats; the fog generation must rise after the moves and after the cheat, the object list after the moves,

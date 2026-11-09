@@ -47,7 +47,8 @@ build)
 	done
 	rm -rf "$OUT/classes"
 	javac --release 8 -cp "$TOOLS/android-sdk/platforms/android-35/android.jar" -d "$OUT/classes" "$REPO/quest/bench/NativeMethods.java"
-	"$(ls -d "$TOOLS"/android-sdk/build-tools/* | tail -1)/d8" --min-api 24 --output "$OUT" "$OUT/classes/eu/vcmi/vcmi/NativeMethods.class"
+	BUILD_TOOLS=("$TOOLS"/android-sdk/build-tools/*) # the newest last: the glob sorts the version names
+	"${BUILD_TOOLS[-1]}/d8" --min-api 24 --output "$OUT" "$OUT/classes/eu/vcmi/vcmi/NativeMethods.class"
 	mv "$OUT/classes.dex" "$OUT/bench.dex"
 	ls -la "$OUT" "$OUT/libs"
 	;;

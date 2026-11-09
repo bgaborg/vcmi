@@ -9,12 +9,12 @@ const OUT := "res://../out/room-preview" ## quest/out/room-preview
 ## quest/out is not in git, so without it the screen is flat dark grey
 const SHOT := "res://../out/perf-20261106-194305-auto/debug-zoom2.jpg"
 const SHOT_RECT := Rect2i(125, 345, 1160, 535)
-## the minimap on the war table: the terrain image the headset saved with the test command `minimap` (main.gd), when present
+## the minimap on the war table: the terrain image the headset saved with the test command `minimap` (main.gd), when
+## present
 const MINIMAP := "res://../out/minimap-debug/minimap-%s.png"
 ## the sprites on the table as the headset drew them: the file the test command `sprites` saves (main.gd _save_sprites),
 ## pulled by `render-room.sh sprites`; with `-- sprites` only the views of the table are rendered
 const SPRITES := "res://../out/sprites-dump/sprites.bin"
-var ZOOM_TILE := Vector2(19.0, 13.0) ## the tile the view `sprites-zoom` looks at; `-- sprites zoom=x,y` sets it
 const SIZE := Vector2i(1920, 1080)
 const HEAD := Vector3(0.0, 1.6, 0.0)
 const SEATED := Vector3(0.0, 1.2, 0.0)
@@ -24,14 +24,15 @@ const ASPECT := 2560.0 / 1440.0
 const SETTLE_FRAMES := 30 ## the reflection probe renders over a few frames
 const SCREEN_LAYER := 4 ## render layer bit of the game picture, seen only by the layer camera
 ## as main.gd's screen_occluder
-const OCCLUDER := "shader_type spatial;
+const OCCLUDER := """shader_type spatial;
 render_mode unshaded, blend_mul, depth_draw_always, cull_disabled, shadows_disabled;
 void fragment() {
 	ALBEDO = vec3(0.0);
 	ALPHA = 0.0;
 }
-"
+"""
 
+var zoom_tile := Vector2(19.0, 13.0) ## the tile the view `sprites-zoom` looks at; `-- sprites zoom=x,y` sets it
 ## name: [camera position, point looked at]
 var views := {
 	"head": [HEAD, HEAD + Vector3.FORWARD],
@@ -66,7 +67,8 @@ func _ready() -> void:
 			var v := arg.get_slice("=", 1).split(",")
 			room.set_zoom(float(v[0]), Vector2(float(v[1]), float(v[2])))
 		if arg.begins_with("zoom="):
-			ZOOM_TILE = Vector2(float(arg.get_slice("=", 1).get_slice(",", 0)), float(arg.get_slice("=", 1).get_slice(",", 1)))
+			zoom_tile = Vector2(float(arg.get_slice("=", 1).get_slice(",", 0)), float(arg.get_slice("=",
+					1).get_slice(",", 1)))
 	if FileAccess.file_exists(SPRITES):
 		_load_sprites(room)
 	if "sprites" in OS.get_cmdline_user_args():
@@ -88,8 +90,10 @@ func _ready() -> void:
 		for i in SETTLE_FRAMES:
 			await RenderingServer.frame_post_draw
 		if view == "head":
-			for info in [["draw calls", Viewport.RENDER_INFO_DRAW_CALLS_IN_FRAME], ["primitives", Viewport.RENDER_INFO_PRIMITIVES_IN_FRAME], ["objects", Viewport.RENDER_INFO_OBJECTS_IN_FRAME]]:
-				print("room preview: head view ", info[0], " ", eye.get_render_info(Viewport.RENDER_INFO_TYPE_VISIBLE, info[1]))
+			for info in [["draw calls", Viewport.RENDER_INFO_DRAW_CALLS_IN_FRAME], ["primitives",
+					Viewport.RENDER_INFO_PRIMITIVES_IN_FRAME], ["objects", Viewport.RENDER_INFO_OBJECTS_IN_FRAME]]:
+				print("room preview: head view ", info[0], " ", eye.get_render_info(Viewport.RENDER_INFO_TYPE_VISIBLE,
+						info[1]))
 		var picture := layer.get_texture().get_image()
 		picture.convert(Image.FORMAT_RGBA8)
 		var room_image := eye.get_texture().get_image()
@@ -109,7 +113,8 @@ func _load_sprites(room: Node3D) -> void:
 		if entry.is_empty():
 			return null
 		# files saved before the mipmap flag: mipmaps when the data is larger than the base level
-		var mipmaps: bool = entry[4] if entry.size() > 4 else entry[3].size() > Image.create_empty(entry[0], entry[1], false, entry[2]).get_data().size()
+		var mipmaps: bool = entry[4] if entry.size() > 4 else entry[3].size() > Image.create_empty(entry[0], entry[1],
+				false, entry[2]).get_data().size()
 		return Image.create_from_data(entry[0], entry[1], mipmaps, entry[2], entry[3])
 	room.set_minimap(image.call(data.terrain), image.call(data.fog), true)
 	var layers := []
@@ -134,23 +139,26 @@ func _load_sprites(room: Node3D) -> void:
 	var terrain: Image = image.call(data.terrain)
 	var panel: Vector2 = room.minimap_size()
 	var map_size := Vector2(terrain.get_width(), terrain.get_height()) # the levels side by side
-	var at := Vector3((ZOOM_TILE.x / map_size.x - 0.5) * panel.x, 0.0, (ZOOM_TILE.y / map_size.y - 0.5) * panel.y)
+	var at := Vector3((zoom_tile.x / map_size.x - 0.5) * panel.x, 0.0, (zoom_tile.y / map_size.y - 0.5) * panel.y)
 	views["sprites-zoom"] = [minimap * (at + Vector3(0.0, 0.13, 0.04)), minimap * at]
 	print("room preview: sprites ", data.count, " instances, ", layers[0].get_layers(), " pages")
 	# with `-- sprites <name part>`: the frames the table gives the first instance of that animation, cut from the pages
 	var args := OS.get_cmdline_user_args()
-	var wanted := args[args.find("sprites") + 1] if args.find("sprites") >= 0 and args.size() > args.find("sprites") + 1 and not args[args.find("sprites") + 1].begins_with("zoom=") else ""
+	var after := args.find("sprites") + 1
+	var wanted := args[after] if after > 0 and args.size() > after and not args[after].begins_with("zoom=") else ""
 	var names: PackedStringArray = data.get("names", PackedStringArray())
 	if wanted == "near": # frame 0 of every instance near the zoom tile
 		var table: Image = image.call(data.table)
 		for i in names.size():
 			var anchor := names[i].get_slice(" ", 1).split(",")
-			if absf(float(anchor[0]) - ZOOM_TILE.x) <= 4.0 and absf(float(anchor[1]) - ZOOM_TILE.y) <= 6.0:
+			if absf(float(anchor[0]) - zoom_tile.x) <= 4.0 and absf(float(anchor[1]) - zoom_tile.y) <= 6.0:
 				var first := int(data.buffer[i * 20 + 16] + 0.5)
 				var a := table.get_pixel((2 * first) % 512, (2 * first) / 512)
 				var b := table.get_pixel((2 * first + 1) % 512, (2 * first + 1) / 512)
 				var page: Image = image.call(data.pages[int(a.r)])
-				page.get_region(Rect2i(int(a.g), int(a.b), maxi(int(a.a), 1), maxi(int(b.r), 1))).save_png(ProjectSettings.globalize_path(OUT.path_join("near-%d-%s.png" % [i, names[i].get_slice(" ", 0).get_file()])))
+				page.get_region(Rect2i(int(a.g), int(a.b), maxi(int(a.a), 1), maxi(int(b.r),
+						1))).save_png(ProjectSettings.globalize_path(OUT.path_join("near-%d-%s.png" % [i,
+						names[i].get_slice(" ", 0).get_file()])))
 	for i in names.size():
 		if wanted != "" and wanted != "near" and wanted in names[i]:
 			var table: Image = image.call(data.table)
@@ -159,9 +167,11 @@ func _load_sprites(room: Node3D) -> void:
 			for f in count:
 				var a := table.get_pixel((2 * (first + f)) % 512, (2 * (first + f)) / 512)
 				var b := table.get_pixel((2 * (first + f) + 1) % 512, (2 * (first + f) + 1) / 512)
-				print("room preview: ", names[i], " frame ", f, ": page ", a.r, " at ", Vector2(a.g, a.b), " size ", Vector2(a.a, b.r), " offset ", Vector2(b.g, b.b))
+				print("room preview: ", names[i], " frame ", f, ": page ", a.r, " at ", Vector2(a.g, a.b), " size ",
+						Vector2(a.a, b.r), " offset ", Vector2(b.g, b.b))
 				var page: Image = image.call(data.pages[int(a.r)])
-				page.get_region(Rect2i(int(a.g), int(a.b), int(a.a), int(b.r))).save_png(ProjectSettings.globalize_path(OUT.path_join("frame-%d.png" % f)))
+				page.get_region(Rect2i(int(a.g), int(a.b), int(a.a),
+						int(b.r))).save_png(ProjectSettings.globalize_path(OUT.path_join("frame-%d.png" % f)))
 			# and only that instance on the table
 			multimesh.instance_count = 1
 			multimesh.buffer = (data.buffer as PackedFloat32Array).slice(i * 20, i * 20 + 20)
@@ -169,7 +179,7 @@ func _load_sprites(room: Node3D) -> void:
 	# what is drawn near the zoom tile, by anchor: animation, anchor, group
 	for name: String in data.get("names", PackedStringArray()):
 		var anchor := name.get_slice(" ", 1).split(",")
-		if absf(float(anchor[0]) - ZOOM_TILE.x) <= 4.0 and absf(float(anchor[1]) - ZOOM_TILE.y) <= 4.0:
+		if absf(float(anchor[0]) - zoom_tile.x) <= 4.0 and absf(float(anchor[1]) - zoom_tile.y) <= 4.0:
 			print("room preview: near the zoom tile: ", name)
 
 
@@ -259,7 +269,8 @@ func _check_clear(room: Node3D) -> void:
 						if hit == null and _in_front_of_screen(p - head):
 							hit = p
 				if hit != null:
-					print("room preview: WARNING ", room.get_path_to(instance), " may cover the screen at ", hit, " seen from ", head.y, " m")
+					print("room preview: WARNING ", room.get_path_to(instance), " may cover the screen at ", hit,
+							" seen from ", head.y, " m")
 					break
 
 
