@@ -428,6 +428,22 @@ func visible_uv() -> Rect2:
 	return Rect2(zoom_centre - Vector2.ONE * 0.5 / zoom, Vector2.ONE / zoom)
 
 
+## where a ray from `from` along `direction` hits the minimap, in map UV (both levels side by side, through the
+## zoom); Vector2(-1, -1) when it misses
+func table_uv(from: Vector3, direction: Vector3) -> Vector2:
+	var to_panel := _minimap.global_transform.affine_inverse()
+	var start := to_panel * from
+	var along := to_panel.basis * direction
+	if absf(along.y) < 0.000001 or -start.y / along.y <= 0.0:
+		return Vector2(-1.0, -1.0)
+	var hit := start + along * (-start.y / along.y)
+	var panel := Vector2(hit.x, hit.z) / minimap_size() + Vector2(0.5, 0.5)
+	if panel.x < 0.0 or panel.x > 1.0 or panel.y < 0.0 or panel.y > 1.0:
+		return Vector2(-1.0, -1.0)
+	var view := visible_uv()
+	return view.position + panel * view.size
+
+
 ## the minimap's centre in the world
 func minimap_centre() -> Vector3:
 	return _minimap.global_position

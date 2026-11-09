@@ -65,6 +65,12 @@ protected:
 		ClassDB::bind_method(D_METHOD("update_sprites", "multimesh", "tiles", "level", "with_names"), &VcmiData::update_sprites, DEFVAL(false));
 		ClassDB::bind_method(D_METHOD("update_sprite_changes", "multimesh"), &VcmiData::update_sprite_changes);
 		ClassDB::bind_method(D_METHOD("set_tabletop", "shown"), &VcmiData::set_tabletop);
+		ClassDB::bind_method(D_METHOD("tile_input", "tile", "kind"), &VcmiData::tile_input);
+		ClassDB::bind_method(D_METHOD("heroes"), &VcmiData::heroes);
+		BIND_CONSTANT(TILE_HOVER);
+		BIND_CONSTANT(TILE_CLICK);
+		BIND_CONSTANT(TILE_POPUP);
+		BIND_CONSTANT(TILE_POPUP_END);
 		ClassDB::bind_method(D_METHOD("animate_move", "multimesh"), &VcmiData::animate_move);
 		ClassDB::bind_method(D_METHOD("sprite_table"), &VcmiData::sprite_table);
 		ClassDB::bind_method(D_METHOD("sprite_names"), &VcmiData::sprite_names);
@@ -157,6 +163,7 @@ protected:
 
 public:
 	enum { TERRAIN_CHANGED = 1, FOG_CHANGED = 2, IN_GAME = 4, OBJECTS_CHANGED = 8 };
+	enum { TILE_HOVER = VCMI_TILE_HOVER, TILE_CLICK = VCMI_TILE_CLICK, TILE_POPUP = VCMI_TILE_POPUP, TILE_POPUP_END = VCMI_TILE_POPUP_END };
 
 	/// true once the game's table is found and its lifecycle task started; call again until then
 	bool connect_bridge()
@@ -207,6 +214,9 @@ public:
 		result["move_sequence"] = s.moveSequence;
 		result["wait_us"] = s.waitMicros;
 		result["move_timeouts"] = s.moveTimeouts;
+		result["windows_above"] = s.windowsAbove;
+		result["inputs_run"] = s.inputsRun;
+		result["inputs_dropped"] = s.inputsDropped;
 		result["objects"] = int64_t(objects.size());
 		result["animations"] = animations.size();
 		return result;
@@ -677,6 +687,30 @@ public:
 	{
 		if(api)
 			api->setTabletop(shown ? 1 : 0);
+	}
+
+	/// the heroes on the map: [{id, tile (anchor x, y, level), owner}]
+	Array heroes() const
+	{
+		Array result;
+		for(const VcmiObject & o : objects)
+			if((o.flags & VCMI_OBJECT_PRESENT) && (o.flags & VCMI_OBJECT_HERO))
+			{
+				Dictionary hero;
+				hero["id"] = o.id;
+				hero["tile"] = Vector3i(o.x, o.y, o.z);
+				hero["owner"] = o.owner;
+				result.push_back(hero);
+			}
+		return result;
+	}
+
+	/// tile input from the tabletop: TILE_HOVER, TILE_CLICK, TILE_POPUP (grip down), TILE_POPUP_END (grip up), on tile
+	/// x, y of level z; the game runs it as the 2D map's tile handlers (quest/PHASE4.md decision 1)
+	void tile_input(const Vector3i & tile, int kind)
+	{
+		if(api && tile.x >= 0 && tile.y >= 0 && tile.z >= 0)
+			api->tileInput(uint16_t(tile.x), uint16_t(tile.y), uint8_t(tile.z), uint8_t(kind));
 	}
 
 	/// each frame: a new hero step starts its clock; once its duration has passed the game is told and goes on, whether

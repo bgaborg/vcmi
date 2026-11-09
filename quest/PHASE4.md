@@ -1,6 +1,6 @@
 # Phase 4: the tabletop adventure map (plan)
 
-Status: 2026-11-09, planned, nothing built yet. Next: the required checks (section 3), then milestone 4a (section 4).
+Status: 2026-11-09, required checks 1, 2, 4, 5 and 6 done (section 3a); check 3 needs a person to hold a controller. Next: check 3, then milestone 4a (section 4).
 
 Goal (from [`PROJECT_PLAN.md`](PROJECT_PLAN.md#phase-4---tabletop-adventure-map-after-data-bridge-milestones-2-and-3)): the adventure map is fully playable on the war table, and one button goes back to the 2D screen.
 
@@ -78,6 +78,51 @@ Each check can change the design; record the results here.
 4. **Screen policy:** the windows above the tabletop window are found in the stack (`findWindows` keeps its order; battles, the town and hero windows and popups push on top: `BattleInterface.cpp:103`, `CPlayerInterface.cpp:451`). The check: hiding the screen layer in Godot keeps the game rendering normally when a dialog opens. Leaving tabletop mode with a dialog open waits until it closes (the window is popped only when on top).
 5. **World view and spell casting:** what a table click does in world view and while an adventure spell is being cast (both pass `optionMapViewActive`).
 6. **Terrain frames:** whether the sprite decoder reads the terrain, river and road `.def` files as it reads the objects' (needed for 4c).
+
+## 3a. Results of the required checks (2026-11-09)
+
+What the checks built, kept for milestone 4a:
+- **Bridge, version 7:**
+  - `tileInput(x, y, z, kind)` with `VCMI_TILE_HOVER`, `CLICK`, `POPUP` and `POPUP_END`. Godot calls it as `VcmiData.tile_input`; the test command is `tile x y kind`.
+  - A queue the lifecycle tick drains: the latest hover, then the other inputs in order.
+  - Inputs are dropped with no tabletop window, a window above it, no current army, or a tile off the map.
+  - New stats: `windows_above`, `inputs_run`, `inputs_dropped`.
+- **Extension:**
+  - `VcmiData.heroes()`: id, tile and owner of each hero (test command `heroes`).
+  - `room.table_uv` and `main.gd` `_table_tile`: the tile under a ray on the table, through the zoom.
+- **Test commands:** `table_pick` (check 3), `screen_hide`, and `decode:<animation>`.
+- **Local test:** `quest/tools/test-local.sh` runs `quest/xr/tests/table_uv_test.gd` headless on the PC in about 6 s: rays onto known points of the minimap at zoom 1 and zoomed land on the expected map UV. Host logic that needs no game is tested this way, the game's behaviour on the Quest.
+
+Results on the Quest, first scenario, tabletop on (`quest/out/phase4-checks/`):
+
+1. **Tile input works through the game's own handlers.**
+   - A hover set the cursor. The first click set the path, the second walked the hero 3 tiles, with the steps waited for as in milestone 3c.
+   - A right click showed the tile's popup ("Rock") on the screen (`1-popup.jpg`), and `POPUP_END` closed it. Object popups (a hero, town or monster) are other window classes: `POPUP_END` closes any popup on top, as the game's own right-button release does (`EventDispatcher::dispatchClosePopup`); the hero's popup opened and closed this way, and table clicks worked again after it (`7-hero-popup.jpg`).
+   - Popups open at the 2D cursor (`AdventureMapInterface.cpp:964`, `InfoWindows.cpp:219`), which table input does not move; 4a places the screen so that this does not matter, or moves the cursor to the tile first.
+   - A click on the hero opened the hero window above the tabletop (`windows_above` 1). Two map clicks under it were dropped, and the hero did not move.
+   - Clicks run up to 100 ms late (the tick period); 4a measures click-to-move against the budget.
+2. **The cursor image follows the hover.** After each hover `getCurrentImage()` was a 40x40 image, a different one for an empty tile (move), the hero, and a blocked or far tile. So Godot can draw the game's own cursor at the ray's hit.
+3. **Picking precision: not done.** The controllers are not tracked while they lie still: a person has to hold one pointed at the table. At zoom 1 a tile of the first scenario is 0.56 cm on the table.
+4. **Screen policy works.**
+   - With the game screen layer hidden (`5-screen-hidden.jpg`), a click opened the hero window. It was drawn completely when the layer came back (`6-screen-shown-dialog.jpg`): the game keeps rendering while the screen is hidden.
+   - `windows_above` counts the window and drops to 0 when it closes.
+   - Under dialogs the screen shows a stale map, or a starry background after a total redraw; a dialog's own dimming hides most of it.
+5. **World view has no use on the table.** The 2D map that draws it is covered, so V showed nothing. An Escape afterwards opened the settings window instead of leaving world view. 4a drops the world view shortcuts in the tabletop window, and the table's own zoom replaces world view. Spell casting was not tried (no hero with an adventure spell); 4a tests it with a scenario that has one.
+6. **Terrain, rivers and roads decode** through the bridge like the objects.
+
+| Animation | Frames | Source | Bridge time |
+|---|---|---|---|
+| `DIRTTL` | 46 | HD mod PNG | 9.5 ms |
+| `GRASTL` | 79 | HD mod PNG | 9.2 ms |
+| `SUBBTL` | 79 | HD mod PNG | 10.8 ms |
+| `WATRTL` | 80 | .def | 3.6 ms |
+| `ROCKTL` | 48 | .def | 2.9 ms |
+| `clrrvr` | 13 | .def | 2.2 ms |
+| `lavrvr` | 13 | .def | 2.3 ms |
+| `dirtrd` | 17 | HD mod PNG | 4.1 ms |
+| `cobbrd` | 17 | .def | 2.3 ms |
+
+   All frames are in group 0, decoded on the atlas workers in 4c. Water and lava move in 2D by rotating palette colours (`adventure.terrainAnimation`), which baked RGBA frames lose; 4c animates them (a few baked rotations, or the palette in the shader).
 
 ## 4. Milestones, in order
 

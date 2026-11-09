@@ -10,7 +10,7 @@
 #include <stdint.h>
 
 // raise on any change to the structs below; the extension refuses a table with another version
-#define VCMI_BRIDGE_VERSION 6
+#define VCMI_BRIDGE_VERSION 7
 
 typedef struct VcmiBridgeStats
 {
@@ -21,7 +21,7 @@ typedef struct VcmiBridgeStats
 	uint8_t mapLevels;
 	uint8_t inGame;      // 1 while an adventure map exists
 	uint8_t tabletop;    // 1 while the tabletop window is over the adventure map (setTabletop): the 2D map does not draw
-	uint8_t pad;
+	uint8_t windowsAbove; // windows over the tabletop window (dialogs, battles, popups): the game screen shows them
 	uint32_t tilesGeneration; // raised on each tile snapshot (new map), 0 before the first
 	uint32_t fogGeneration;   // raised each time the local team's fog changes
 	uint32_t publishMicros;   // game thread time of the last tile or fog publish
@@ -32,7 +32,14 @@ typedef struct VcmiBridgeStats
 	uint32_t moveSequence;      // hero steps the tabletop showed (VcmiMove.sequence of the last)
 	uint32_t waitMicros;        // how long the game waited for the last of them
 	uint32_t moveTimeouts;      // steps whose confirmation did not come in time
+	uint32_t inputsRun;         // tile inputs (tileInput) the game ran
+	uint32_t inputsDropped;     // tile inputs dropped: no tabletop, a window above it, no army, or off the map
 } VcmiBridgeStats;
+
+#define VCMI_TILE_HOVER 0
+#define VCMI_TILE_CLICK 1        // left click
+#define VCMI_TILE_POPUP 2        // right button down: the info popup of the tile
+#define VCMI_TILE_POPUP_END 3    // right button up: closes it
 
 // a hero step the tabletop shows: the game waits until Godot confirms it (confirmMove) or durationMs + 200 ms pass. The
 // object's record already holds the destination. Positions are anchor tiles, as VcmiObject's
@@ -160,4 +167,8 @@ typedef struct VcmiBridgeApi
 	void (*move)(VcmiMove * out);
 	// Godot has shown step `sequence`: the game goes on; any thread
 	void (*confirmMove)(uint32_t sequence);
+	// input on tile x, y of level z from the tabletop (VCMI_TILE_*), run by the next lifecycle tick as the 2D map's
+	// own tile handlers; only the latest hover is kept. Dropped while no tabletop window is shown or a window is over
+	// it. Any thread
+	void (*tileInput)(uint16_t x, uint16_t y, uint8_t z, uint8_t kind);
 } VcmiBridgeApi;

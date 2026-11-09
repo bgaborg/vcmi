@@ -18,9 +18,12 @@
 #include "../../client/CPlayerInterface.h"
 #include "../../client/GameEngine.h"
 #include "../../client/GameInstance.h"
+#include "../../client/PlayerLocalState.h"
 #include "../../client/adventureMap/AdventureMapInterface.h"
 #include "../../client/adventureMap/AdventureMapShortcuts.h"
 #include "../../client/gui/CIntObject.h"
+#include "../../client/gui/CursorHandler.h"
+#include "render/IImage.h"
 #include "../../client/gui/Shortcut.h"
 #include "../../client/gui/WindowHandler.h"
 #include "../../client/replay/GameplayReplayer.h"
@@ -219,6 +222,79 @@ void updateTabletop()
 	tabletopShown = !windows.findWindows<TabletopWindow>().empty();
 }
 
+std::atomic<uint8_t> windowsAbove{0};
+std::atomic<uint32_t> inputsRun{0};
+std::atomic<uint32_t> inputsDropped{0};
+
+// tile input from Godot: the latest hover, and the other inputs in order
+struct TileInput
+{
+	int3 tile;
+	uint8_t kind;
+};
+std::mutex inputMutex;
+std::optional<TileInput> pendingHover;
+std::vector<TileInput> pendingInputs;
+
+// game thread, interfaceMutex held, after updateTabletop: runs the queued tile inputs through the adventure map's own
+// tile handlers (PHASE4.md decision 1). They check only the adventure state, not whether the map is covered, so the
+// input is dropped while a window is over the tabletop window: a click would walk the hero away behind a dialog.
+void runTileInputs()
+{
+	std::vector<TileInput> inputs;
+	{
+		std::lock_guard lock(inputMutex);
+		if(pendingHover)
+			inputs.push_back(*pendingHover);
+		inputs.insert(inputs.end(), pendingInputs.begin(), pendingInputs.end());
+		pendingHover.reset();
+		pendingInputs.clear();
+	}
+	WindowHandler & windows = ENGINE->windows();
+	const auto stack = windows.findWindows<IShowActivatable>(); // bottom to top
+	const auto tabletop = windows.findWindows<TabletopWindow>();
+	const auto at = tabletop.empty() ? stack.end() : std::find(stack.begin(), stack.end(), tabletop.front());
+	windowsAbove = at == stack.end() ? 0 : static_cast<uint8_t>(std::min<size_t>(stack.end() - at - 1, 255));
+	for(const TileInput & input : inputs)
+	{
+		// the popup's end closes it, which is above the tabletop by then; as EventDispatcher::dispatchClosePopup, which
+		// also covers the object popups (CInfoBoxPopup and others are not CRClickPopup)
+		if(input.kind == VCMI_TILE_POPUP_END)
+		{
+			if(windows.isTopWindowPopup())
+				windows.popWindows(1);
+			continue;
+		}
+		const CPlayerInterface * player = GAME->interface();
+		// per input: the click before may have opened a dialog in this same tick
+		if(tabletop.empty() || !windows.isTopWindow(tabletop.front()) || !player || !player->cb || !player->cb->isInTheMap(input.tile)
+			|| !player->localState->getCurrentArmy())
+		{
+			inputsDropped++;
+			continue;
+		}
+		inputsRun++;
+		switch(input.kind)
+		{
+			case VCMI_TILE_HOVER:
+			{
+				adventureInt->onTileHovered(input.tile);
+				// check 2 of PHASE4.md: the cursor the hover set
+				const auto image = ENGINE->cursor().getCurrentImage();
+				logGlobal->debug("Quest bridge: hover %s -> cursor %p %dx%d", input.tile.toString(), static_cast<const void *>(image.get()),
+					image ? image->width() : 0, image ? image->height() : 0);
+				break;
+			}
+			case VCMI_TILE_CLICK:
+				adventureInt->onTileLeftClicked(input.tile);
+				break;
+			case VCMI_TILE_POPUP:
+				adventureInt->onTileRightClicked(input.tile);
+				break;
+		}
+	}
+}
+
 // game thread only: the adventure map and size the tile snapshot was taken for
 std::weak_ptr<AdventureMapInterface> tilesMap;
 int3 tilesSize;
@@ -386,6 +462,7 @@ void tick()
 	}
 	inGame = true;
 	updateTabletop();
+	runTileInputs();
 	const int3 size = GAME->interface() && GAME->interface()->cb ? GAME->interface()->cb->getMapSize() : int3();
 	mapSize = static_cast<uint32_t>(size.x) | static_cast<uint32_t>(size.y) << 12 | static_cast<uint32_t>(size.z) << 24;
 	bool listTaken = false;
@@ -494,10 +571,22 @@ void stats(VcmiBridgeStats * out)
 	out->objectsMicros = objectsMicros;
 	out->changeMicros = changeMicros;
 	out->tabletop = tabletopShown;
+	out->windowsAbove = windowsAbove;
+	out->inputsRun = inputsRun;
+	out->inputsDropped = inputsDropped;
 	out->waitMicros = waitMicros;
 	out->moveTimeouts = moveTimeouts;
 	std::lock_guard lock(moveMutex);
 	out->moveSequence = currentMove.sequence;
+}
+
+void tileInput(uint16_t x, uint16_t y, uint8_t z, uint8_t kind)
+{
+	std::lock_guard lock(inputMutex);
+	if(kind == VCMI_TILE_HOVER)
+		pendingHover = TileInput{int3(x, y, z), kind};
+	else if(pendingInputs.size() < 64) // shortcut: the tick drains them every 100 ms; more is a stuck game
+		pendingInputs.push_back(TileInput{int3(x, y, z), kind});
 }
 
 void setTabletop(uint8_t shown)
@@ -645,4 +734,5 @@ extern "C" __attribute__((visibility("default"))) const VcmiBridgeApi vcmi_bridg
 	setTabletop,
 	copyMove,
 	confirmMove,
+	tileInput,
 };

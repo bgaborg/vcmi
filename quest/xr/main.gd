@@ -212,13 +212,25 @@ void fragment() {
 		pointer_dot.add_child(dot)
 
 
-## everything the sprites on the table are drawn from, for the preview on the PC (quest/tools/render-room.sh sprites):
-## the minimap images, the atlas pages and masks, the frame table and the MultiMesh buffer, as one Variant file
+## the map tile (x, y, level) under the aim ray of `hand` on the table, or Vector3i(-1, -1, -1)
+func _table_tile(hand: int) -> Vector3i:
+	var ray := _aim_ray(hand)
+	if ray.is_empty() or map_size.x == 0:
+		return Vector3i(-1, -1, -1)
+	var uv: Vector2 = room.table_uv(ray[0], ray[1])
+	if uv.x < 0.0:
+		return Vector3i(-1, -1, -1)
+	var column := mini(int(uv.x * map_size.x * map_size.z), map_size.x * map_size.z - 1)
+	return Vector3i(column % map_size.x, mini(int(uv.y * map_size.y), map_size.y - 1), column / map_size.x)
+
+
 ## the 2 texels of frame `index` in a sprite table (VcmiData.sprite_table), for the test command `sprites_check`
 func _table_frame(table: Image, index: int) -> Array:
 	return [table.get_pixel(2 * index % 512, 2 * index / 512), table.get_pixel((2 * index + 1) % 512, (2 * index + 1) / 512)]
 
 
+## everything the sprites on the table are drawn from, for the preview on the PC (quest/tools/render-room.sh sprites):
+## the minimap images, the atlas pages and masks, the frame table and the MultiMesh buffer, as one Variant file
 func _save_sprites(path: String) -> void:
 	var entry := func(image: Image) -> Array:
 		return [image.get_width(), image.get_height(), image.get_format(), image.get_data(), image.has_mipmaps()] if image != null else []
@@ -627,6 +639,15 @@ func _pulse(hand: int, amplitude: float) -> void:
 ## head yaw pitch height | head_off | recenter | aim yaw pitch | aim_off | click | rclick | pad keycode | stick x y | lstick x y | screen distance width | env index | lmenu seconds | wrist 1/0 | gfx feature on | probe | bridge | minimap;
 ## angles in degrees, height in metres, stick values -1..1 with y up, as the right (stick) and left (lstick) thumbstick
 func _on_test_command(command: String, a: float, b: float, c: float) -> void:
+	if command.begins_with("decode:"): # decode:<animation>: its frames through the bridge (PHASE4.md check 6)
+		var decoded: Dictionary = vcmi_data.decode_animation(command.substr(7)) if vcmi_data else {}
+		var groups := {}
+		for frame in decoded.get("frames", []):
+			groups[frame["group"]] = groups.get(frame["group"], 0) + 1
+		print("VCMI XR: decode ", command.substr(7), ": ", decoded.get("frames", []).size(), " frames, groups ", groups,
+				", first ", (decoded["frames"][0]["image"] as Image).get_size() if not decoded.get("frames", []).is_empty() else "none",
+				", png ", decoded["frames"][0]["png"] if not decoded.get("frames", []).is_empty() else false, ", ", decoded.get("bridge_us", 0), " us")
+		return
 	match command:
 		"head", "table_view": # table_view: above the minimap, looking down at it; a the height above the table (default 0.45 m)
 			if command == "head":
@@ -796,6 +817,35 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 		"tabletop": # a 1: the game shows the map on the tabletop only (milestone 3c): the 2D map stops, hero steps wait for the table; 0: back
 			if vcmi_data:
 				vcmi_data.set_tabletop(a > 0.0)
+		"tile": # a, b the tile of level 0, c the kind (0 hover, 1 click, 2 popup, 3 popup end): through the bridge (PHASE4.md)
+			if vcmi_data:
+				vcmi_data.tile_input(Vector3i(int(a), int(b), 0), int(c))
+		"table_pick": # for a seconds (default 5): the tile under the active hand's ray on the table each frame (PHASE4.md
+				# check 3): how often it changes with the controller held still
+			var tiles := {}
+			var changes := 0
+			var misses := 0
+			var frames := 0
+			var last := Vector3i(-2, -2, -2)
+			var start := Time.get_ticks_msec()
+			while Time.get_ticks_msec() - start < int((a if a > 0.0 else 5.0) * 1000.0):
+				await get_tree().process_frame
+				var tile := _table_tile(active_hand)
+				frames += 1
+				if tile.x < 0:
+					misses += 1
+				else:
+					tiles[tile] = tiles.get(tile, 0) + 1
+				if tile != last and last.x > -2:
+					changes += 1
+				last = tile
+			var metres: float = room.minimap_size().x / (map_size.x * map_size.z) * room.zoom if map_size.x > 0 else 0.0
+			print("VCMI XR: table pick ", frames, " frames, ", misses, " off the table, ", changes, " changes, tiles ", tiles,
+					", tile ", snappedf(metres * 100.0, 0.01), " cm at zoom ", room.zoom)
+		"heroes": # prints the heroes on the map
+			print("VCMI XR: heroes ", vcmi_data.heroes() if vcmi_data else [])
+		"screen_hide": # a 1: the game screen layer hidden (PHASE4.md check 4); 0: shown
+			layer.visible = a <= 0.0
 		"move_trace": # for a frames (default 120): the sprites whose place changed since the last frame, in tiles, with
 				# the time; a hero step of the tabletop shows as a few small moves of the same instance
 			var mm: MultiMesh = room.sprite_multimesh()
