@@ -1,6 +1,6 @@
 # Data bridge milestone 3b: map object sprites (research findings)
 
-Status: 2026-11-07, plan steps 1 and 2 done: the decode benchmark changed the design (section 1a); the bridge decodes .def and PNG frames (section 1b). **Read this before continuing 3b.** Next: plan step 3 (section 7). Context: [`DATA_BRIDGE.md`](DATA_BRIDGE.md) (sections 3-5, milestone 3a results).
+Status: 2026-11-09, plan steps 1-3 done: the decode benchmark changed the design (section 1a); the bridge decodes .def and PNG frames (section 1b); the atlas fills from the view (section 1c). **Read this before continuing 3b.** Next: plan step 4 (section 7). Context: [`DATA_BRIDGE.md`](DATA_BRIDGE.md) (sections 3-5, milestone 3a results).
 
 Original recommendation (revised in section 1a, keep for the facts): 8-bit indexed sprite pages with one palette row per animation, decoded by a new bridge function that calls `CDefFile` directly on a worker thread. Bodies in one alpha-scissor MultiMesh pass, shadows in one blended pass. Frames advance in the shader as the 2D map does. Sprites replace the markers only when a tile is at least ~12 px on screen. No changes to upstream files. This replaces the older plan in `DATA_BRIDGE.md` ("draw each frame twice into an `SDL_Surface`").
 
@@ -48,6 +48,29 @@ Measured with `quest/tools/object-bench.sh run` on the heaviest map's autosave (
 - **Times on the Quest** (heaviest map, new game, 1 730 animations, 10 349 frames, one worker): 1.8-2.2 s for all, which is 1.1-1.2 ms per animation (bridge 1.0-1.3 s, bake and PNG decode 0.8 s). The slowest animation is `AVGgolm0` at 19-23 ms. The benchmark without the game: 1.7 s for the bridge side of 1 883 animations, with 2 885 PNG frames (17.2 M pixels, 29.7 MB of files) of which 638 have a mask, and none failed.
 - **Budget for a new view:** 150 animations at 1.2 ms make about 180 ms on one worker, above the 150 ms budget. Plan step 3 uses two workers, or a smaller margin around the view.
 
+## 1c. Results of plan step 3: the atlas of the view
+
+`quest/xr/extension/SpriteAtlas.h`, used by `VcmiData`:
+- **`atlas_view(tiles, level)`** collects the animations of the objects on a rectangle of tiles. The anchors are grown by 8 tiles, as an object is drawn up and left of its anchor, and the hero flags `AF0<owner>` are added. `atlas_busy`, `atlas_stats`, `atlas_page` and `atlas_textures` go with it, and `update()` uploads.
+- **Workers:** 3 workers decode through the bridge (`bakeFrames`, shared with `decode_animation`), trim to the visible box, and shelf-pack the frames into 32 pages of 512² RGBA8 plus an R8 owner mask. The colour is premultiplied by alpha on the worker, so mipmaps blend edges right; the shader of step 4 is to blend premultiplied. A worker builds a page's images with mipmaps, at most two waiting for the upload. The main thread uploads at most one page per frame (`Texture2DArray::update_layer`) and does not wait for the workers there (`try_lock`); the other calls hold the lock only for copies. A frame bigger than a page (512 px) leaves its animation as a marker.
+- **Refill:** a view whose animations do not all fit leaves the rest as markers and refills on the next view. A view that needs other animations refills when the old ones are more than twice as many and over 64. `shortcut:` no eviction of single animations; an LRU of shelves if panning in phase 4 shows refills.
+- **Memory (computed, not measured):** 56 MB on the GPU (32 x 512² RGBA8 with mipmaps 45 MB, masks 11 MB), 42 MB of CPU pages, plus up to two built pages waiting (about 3.5 MB). The first upload creates the empty arrays on the main thread once: 40 ms (`create_us`), a hitch to move to map load or a worker in step 4.
+- **Test command** `quest.sh test atlas-view <x> <y> <size>` (x < 0: the map's centre) loads a view, waits, prints `atlas_stats` and saves the first 16 pages to `files/atlas-pages.png`.
+
+Measured on the Quest, heaviest map, new game (`quest/out/atlas-pages-512-crop.png`):
+
+| Version | 30x30 view, cold | Pan by 5 tiles | 20x20 view after a refill | Main thread per upload |
+|---|---|---|---|---|
+| 2 pages of 2048², 2 workers | 1 151 ms, 9 animations left out | | | 7.4-11.3 ms |
+| 32 pages of 512², 2 workers | 888 ms | 177 ms | 508 ms | 0.34-0.81 ms |
+| + premultiplied (no `fix_alpha_edges`), 3 workers | 663 ms | 79 ms | 341 ms | 0.34-0.98 ms |
+| + review fixes (premultiply on the worker, at most 2 built pages waiting) | **680 ms** | **94 ms** | **412 ms** | **0.32-0.38 ms, one spike 1.55 ms** |
+
+- **A view is bigger than estimated.** A 30x30 view in the middle of the heaviest map holds 369-373 animations (not 150), 1 264-1 312 frames and 5.6-5.9 M trimmed pixels: 31-32 of the 32 pages. Animated decorations dominate: a waterfall of 18 frames and a mine of 15 fill most of two pages.
+- **Mipmaps:** `fix_alpha_edges` cost about 18 ms per page. Premultiplied pages need no edge fix: 576 -> 45 ms of worker time for the view.
+- **The cold view misses its 150 ms budget, panning meets it.** The cold view is bound by decoding: 0.61 s of worker time on 3 workers, and the wall time is about the same, so the bridge side (file reads) appears to run one at a time. Building pages while decoding (tried: build each page the packer has left) made no gain (888 / 161 / 605 ms) and was reverted.
+- **Next for speed, when phase 4 needs it:** load the area around the player's heroes and towns at map start, so the first view is warm; a disk cache of baked animations per mod set; share identical frames (many animated decorations repeat frames).
+
 ## 2. How VCMI loads `.def` sprites
 
 - `CDefFile(path)` reads the file through `CResourceHandler` (`client/render/CDefFile.cpp:43-96`), with the 256-colour palette (`:62-68`) and frame offsets per group. `loadFrame(frame, group, IImageLoader&)` (`:99`) decodes the RLE into any loader: `init(size, margins, fullSize, SDL_Color* pal)` plus runs of 8-bit indices (`client/render/IImageLoader.h`). It uses only `SDL_Color`, no SDL calls, no renderer, no GL context.
@@ -91,7 +114,7 @@ Measured with `quest/tools/object-bench.sh run` on the heaviest map's autosave (
 
 1. **Done 2026-11-07, results in section 1a.** Decode benchmark without the game: add `client/render/CDefFile.cpp` and a `DefDecode.cpp` loader to `quest/bench/bench.cmake` (needs only SDL's include directory) and run it like `object-bench.sh` on the heaviest save. Report frames, content pixels, pages, JSON animations left out (check 1) and decode + pack time (check 3).
 2. **Done 2026-11-07, results in section 1b.** Bridge `decodeAnimation` for the revised design: the .def frames as indices with the palette (`SpriteDecode`, as benchmarked), and for a JSON layout the PNG bytes of each frame and its overlay. Godot bakes and decodes them on the worker into RGBA. A test command `atlas <name>` saves the RGBA frames under `quest/out/` as PNG; compare with the 2D map's sprite, for one .def object and one `hd-remastered` object.
-3. **Next.** Extension workers (two, section 1b) and the view-driven page fill, applying the owner mask only to owned objects; main-thread timers in the `bridge` stats, texture memory with `quest.sh sample`, and the real number of animations and pixels in a zoomed view.
-4. Shader with palette, flag colour, mirroring and TIME frames on 100 objects of the first scenario; screenshot next to the 2D view. Check 2 (custom data precision) here.
+3. **Done 2026-11-09, results in section 1c.** Extension workers and the view-driven page fill; main-thread upload timers in `atlas_stats`, and the real number of animations and pixels in a zoomed view. Texture memory is computed, not yet read with `quest.sh sample`.
+4. **Next.** Shader on the atlas pages (premultiplied blending; the owner colour on the mask only for owned objects; mirroring and TIME frames) on 100 objects of the first scenario; screenshot next to the 2D view. Check 2 (custom data precision) here.
 5. All objects, chunks, depth-lift order, shadow pass and the LOD switch on the heaviest map; check 4 (shimmer) and the GPU budget.
 6. Change log: update only the instances of changed records.

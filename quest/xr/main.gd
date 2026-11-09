@@ -647,6 +647,25 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 								if flag.get_pixel(x, y).r > 0.5:
 									full.set_pixel(x + f.left, y + f.top, Color.RED)
 					full.save_png("%s/%d_%d_%d.png" % [dir, i, f.group, f.frame])
+		"atlas-view": # the sprite atlas for a view (quest/MILESTONE_3B.md, plan step 3): a, b the top-left tile (a < 0: the
+				# map's centre), c the size in tiles (default 30), level 0; waits until loaded, prints the stats, saves page 0
+			if vcmi_data == null:
+				return
+			var size := int(c) if c > 0.0 else 30
+			var map: Vector3i = vcmi_data.stats().get("map", Vector3i.ZERO)
+			var at := Vector2i(int(a), int(b)) if a >= 0.0 else Vector2i(map.x / 2 - size / 2, map.y / 2 - size / 2)
+			var wanted: int = vcmi_data.atlas_view(Rect2i(at, Vector2i(size, size)), 0)
+			var from := Time.get_ticks_msec()
+			while vcmi_data.atlas_busy() and Time.get_ticks_msec() - from < 20000:
+				await get_tree().process_frame
+			print("VCMI XR: atlas view ", at, " size ", size, ": ", wanted, " animations, ", vcmi_data.atlas_stats())
+			# the first 16 pages side by side, 4 x 4
+			var sheet := Image.create_empty(4 * 512, 4 * 512, false, Image.FORMAT_RGBA8)
+			for layer in 16:
+				var page: Image = vcmi_data.atlas_page(layer)
+				if page != null:
+					sheet.blit_rect(page, Rect2i(Vector2i.ZERO, page.get_size()), Vector2i(layer % 4, layer / 4) * 512)
+			sheet.save_png("/sdcard/Android/data/is.xyz.vcmi.quest/files/atlas-pages.png")
 		"probe", "bridge":
 			pass
 		_:

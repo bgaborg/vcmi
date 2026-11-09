@@ -11,6 +11,8 @@
 #include <vector>
 
 #include <dlfcn.h>
+#include <memory>
+#include <string>
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/multi_mesh.hpp>
@@ -18,6 +20,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/godot.hpp>
 #include <godot_cpp/variant/array.hpp>
+#include <godot_cpp/variant/rect2i.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
@@ -25,6 +28,8 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 using namespace godot;
+
+#include "SpriteAtlas.h"
 
 namespace
 {
@@ -49,6 +54,11 @@ protected:
 		ClassDB::bind_method(D_METHOD("object_count"), &VcmiData::object_count);
 		ClassDB::bind_method(D_METHOD("update_markers", "multimesh", "panel_size", "metres"), &VcmiData::update_markers);
 		ClassDB::bind_method(D_METHOD("decode_animation", "name"), &VcmiData::decode_animation);
+		ClassDB::bind_method(D_METHOD("atlas_view", "tiles", "level"), &VcmiData::atlas_view);
+		ClassDB::bind_method(D_METHOD("atlas_busy"), &VcmiData::atlas_busy);
+		ClassDB::bind_method(D_METHOD("atlas_stats"), &VcmiData::atlas_stats);
+		ClassDB::bind_method(D_METHOD("atlas_page", "layer"), &VcmiData::atlas_page);
+		ClassDB::bind_method(D_METHOD("atlas_textures"), &VcmiData::atlas_textures);
 		BIND_CONSTANT(TERRAIN_CHANGED);
 		BIND_CONSTANT(FOG_CHANGED);
 		BIND_CONSTANT(IN_GAME);
@@ -77,6 +87,7 @@ protected:
 	uint32_t colours[VCMI_TERRAIN_COLOURS * 2] = {};
 	Ref<Image> terrain;
 	Ref<Image> fogMap;
+	std::unique_ptr<SpriteAtlas> atlas; // made by the first atlas_view
 
 	// the game stores tiles x-major (VcmiGrid); images are rows of y, with the levels side by side
 	template<typename Pixel>
@@ -167,6 +178,8 @@ public:
 	{
 		if(!api)
 			return 0;
+		if(atlas)
+			atlas->upload();
 		VcmiBridgeStats s;
 		api->stats(&s);
 		const int inGame = s.inGame ? IN_GAME : 0;
@@ -257,46 +270,6 @@ public:
 	}
 
 	/// the names the table gained; the rest on the next update when the game is writing
-	static Ref<Image> loadPng(const uint8_t * bytes, uint32_t size)
-	{
-		PackedByteArray buffer;
-		buffer.resize(size);
-		std::memcpy(buffer.ptrw(), bytes, size);
-		Ref<Image> image;
-		image.instantiate();
-		if(image->load_png_from_buffer(buffer) != OK)
-			return Ref<Image>();
-		return image;
-	}
-
-	/// a .def palette as RGBA with the special entries the 2D map uses for map objects
-	/// (ScalableImageParameters::setShadowTransparency, clientsdl3/render/ScalableImage.cpp:205-222): 0 clear, 1 and 4
-	/// shadow at alpha 64 and 128, 2 and 3 the same when they hold H3's shadow colours. 5, the owner flag, keeps its
-	/// colour: objects without an owner draw it so (WITH_SHADOW or ONLY_BODY_IGNORE_OVERLAY, MapRenderer.cpp:425-427);
-	/// for owned ones the mask marks it for the owner colour
-	static std::array<uint8_t, 1024> bakePalette(const uint8_t * rgb)
-	{
-		std::array<uint8_t, 1024> out{};
-		if(!rgb)
-			return out;
-		for(int i = 0; i < 256; i++)
-		{
-			std::memcpy(&out[i * 4], &rgb[i * 3], 3);
-			out[i * 4 + 3] = 255;
-		}
-		const auto similar = [rgb](int i, int r, int g, int b)
-		{ return std::abs(rgb[i * 3] - r) < 8 && std::abs(rgb[i * 3 + 1] - g) < 8 && std::abs(rgb[i * 3 + 2] - b) < 8; };
-		const auto shadow = [&out](int i, uint8_t alpha) { out[i * 4] = out[i * 4 + 1] = out[i * 4 + 2] = 0; out[i * 4 + 3] = alpha; };
-		shadow(0, 0);
-		shadow(1, 64);
-		shadow(4, 128);
-		if(similar(2, 255, 100, 255))
-			shadow(2, 64);
-		if(similar(3, 255, 50, 255))
-			shadow(3, 128);
-		return out;
-	}
-
 	void fetchAnimations()
 	{
 		char name[256];
@@ -326,70 +299,99 @@ public:
 		api->decodeAnimation(name.utf8().get_data(), &anim);
 		result["bridge_us"] = int64_t(std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - from).count());
 		from = Clock::now();
-		const auto rgba = bakePalette(anim.palette);
-		for(uint32_t i = 0; i < anim.frameCount; i++)
+		for(const BakedFrame & b : bakeFrames(anim))
 		{
-			const VcmiFrame & f = anim.frames[i];
-			if(f.offset + uint64_t(f.size) > anim.dataSize || f.overlayOffset + uint64_t(f.overlaySize) > anim.dataSize)
-				continue;
-			Ref<Image> image;
+			PackedByteArray px;
+			px.resize(b.rgba.size());
+			std::memcpy(px.ptrw(), b.rgba.data(), b.rgba.size());
 			Ref<Image> mask;
-			if(f.format == VCMI_FRAME_PNG)
+			if(!b.mask.empty())
 			{
-				image = loadPng(anim.data + f.offset, f.size);
-				if(image.is_null())
-					continue;
-				image->convert(Image::FORMAT_RGBA8);
-				if(f.overlaySize)
-					if(Ref<Image> overlay = loadPng(anim.data + f.overlayOffset, f.overlaySize);
-						overlay.is_valid() && overlay->get_size() == image->get_size())
-					{
-						// the flag is where the overlay is opaque (its alpha), as the 2D map draws it in the owner colour
-						overlay->convert(Image::FORMAT_RGBA8);
-						const PackedByteArray px = overlay->get_data();
-						PackedByteArray alpha;
-						alpha.resize(px.size() / 4);
-						const uint8_t * src = px.ptr();
-						uint8_t * dst = alpha.ptrw();
-						for(int64_t p = 0; p < alpha.size(); p++)
-							dst[p] = src[p * 4 + 3];
-						mask = Image::create_from_data(overlay->get_width(), overlay->get_height(), false, Image::FORMAT_L8, alpha);
-					}
-			}
-			else
-			{
-				if(f.width == 0 || f.height == 0 || f.size != uint32_t(f.width) * f.height)
-					continue;
-				PackedByteArray px;
-				px.resize(int64_t(f.size) * 4);
 				PackedByteArray flag;
-				flag.resize(f.size);
-				uint8_t * out = px.ptrw();
-				uint8_t * flagOut = flag.ptrw();
-				bool flagged = false;
-				for(uint32_t p = 0; p < f.size; p++)
-				{
-					const uint8_t index = anim.data[f.offset + p];
-					std::memcpy(out + p * 4, &rgba[index * 4], 4);
-					flagOut[p] = index == 5 ? 255 : 0;
-					flagged |= index == 5;
-				}
-				image = Image::create_from_data(f.width, f.height, false, Image::FORMAT_RGBA8, px);
-				if(flagged)
-					mask = Image::create_from_data(f.width, f.height, false, Image::FORMAT_L8, flag);
+				flag.resize(b.mask.size());
+				std::memcpy(flag.ptrw(), b.mask.data(), b.mask.size());
+				mask = Image::create_from_data(b.width, b.height, false, Image::FORMAT_L8, flag);
 			}
 			Dictionary frame;
-			frame["group"] = f.group;
-			frame["frame"] = f.frame;
-			frame["left"] = f.left;
-			frame["top"] = f.top;
-			frame["full_size"] = Vector2i(f.fullWidth, f.fullHeight);
-			frame["image"] = image;
+			frame["group"] = b.group;
+			frame["frame"] = b.frame;
+			frame["left"] = b.left;
+			frame["top"] = b.top;
+			frame["full_size"] = Vector2i(b.fullWidth, b.fullHeight);
+			frame["image"] = Image::create_from_data(b.width, b.height, false, Image::FORMAT_RGBA8, px);
 			frame["mask"] = mask;
-			frame["png"] = f.format == VCMI_FRAME_PNG;
+			frame["png"] = b.png;
 			frames.push_back(frame);
 		}
 		result["bake_us"] = int64_t(std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - from).count());
+		return result;
+	}
+
+	/// asks the sprite atlas for the animations of the objects on `tiles` of map level `level` (quest/MILESTONE_3B.md,
+	/// plan step 3), and the hero flags there; returns how many animations that is. The workers load the missing ones,
+	/// update() uploads them.
+	int64_t atlas_view(const Rect2i & tiles, int level)
+	{
+		if(!api)
+			return 0;
+		if(!atlas)
+			atlas = std::make_unique<SpriteAtlas>(api);
+		// an object is drawn up and left of its anchor tile, up to 8 tiles (H3 object templates are at most 8x6)
+		const Rect2i anchors(tiles.position, tiles.size + Vector2i(8, 8));
+		std::unordered_set<uint16_t> seen;
+		std::unordered_set<int> flags;
+		std::vector<std::string> names;
+		for(const VcmiObject & o : objects)
+		{
+			if(!(o.flags & VCMI_OBJECT_PRESENT) || (o.flags & VCMI_OBJECT_HIDDEN) || o.z != level || !anchors.has_point(Vector2i(o.x, o.y)))
+				continue;
+			if(o.animation < animations.size() && seen.insert(o.animation).second)
+				names.push_back(animations[o.animation].utf8().get_data());
+			// heroes fly a separate flag animation (MapRendererObjects::getFlagAnimation)
+			if((o.flags & VCMI_OBJECT_HERO) && o.owner < 8 && flags.insert(o.owner).second)
+				names.push_back("AF0" + std::to_string(o.owner));
+		}
+		atlas->want(names);
+		return names.size();
+	}
+
+	/// true while the atlas loads or uploads
+	bool atlas_busy() const { return atlas && atlas->busyNow(); }
+
+	Dictionary atlas_stats() const
+	{
+		Dictionary result;
+		if(!atlas)
+			return result;
+		const SpriteAtlas::Stats s = atlas->statsNow();
+		result["wanted"] = s.wanted;
+		result["loaded"] = s.loaded;
+		result["frames"] = s.frames;
+		result["pixels"] = s.pixels;
+		result["pages_used"] = s.pagesUsed;
+		result["refills"] = s.refills;
+		result["overflowed"] = s.overflowed;
+		result["decode_us"] = s.decodeMicros;
+		result["mipmap_us"] = s.mipmapMicros;
+		result["batch_ms"] = s.batchMillis;
+		result["create_us"] = s.createMicros;
+		result["upload_us"] = s.uploadMicros;
+		result["max_upload_us"] = s.maxUploadMicros;
+		return result;
+	}
+
+	/// page `layer` as packed, over grey with the owner mask in red; for a look
+	Ref<Image> atlas_page(int layer) const { return atlas ? atlas->debugPage(layer) : Ref<Image>(); }
+
+	/// [body, mask]: Texture2DArray of RGBA8 and of R8, SpriteAtlas::PAGES layers; empty before atlas_view
+	Array atlas_textures() const
+	{
+		Array result;
+		if(atlas)
+		{
+			result.push_back(atlas->bodyTexture());
+			result.push_back(atlas->maskTexture());
+		}
 		return result;
 	}
 

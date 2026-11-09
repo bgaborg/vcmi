@@ -69,6 +69,7 @@ quest/bridge/                  quest-only C++, compiled into libvcmiclient_<abi>
 quest/xr/extension/            godot-cpp GDExtension libvcmi_xr.so
   CMakeLists.txt               built by quest/tools/make-extension.sh into src/quest/jniLibs
   VcmiData.cpp                 Godot class: finds the table, turns buffers into Image / MultiMesh / arrays
+  SpriteAtlas.h                the sprites of the view in Texture2DArray pages, filled by workers (MILESTONE_3B.md 1c)
 android/vcmi-app/src/quest/assets/vcmi_xr.gdextension   android_aar_plugin style, path returned by VcmiBridge
 ```
 
