@@ -7,6 +7,7 @@ Goal: the most immersive way to play Heroes 3 on Quest 3, with no motion sicknes
 |---|---|
 | this file | status and next steps, architecture, rules, roadmap, open decisions |
 | [`PHASE2.md`](PHASE2.md) | how the XR host works (phases 2-3) and **working on the headset**: build, adb, test commands and scripts |
+| [`PHASE4.md`](PHASE4.md) | the tabletop adventure map: design decisions, required checks, milestones 4a-4f |
 | [`DATA_BRIDGE.md`](DATA_BRIDGE.md) | game data from VCMI to Godot: design, budgets, milestones and their measurements |
 | [`XR_PERFORMANCE.md`](XR_PERFORMANCE.md) | GPU cost of the 3D scene: measurements, rules, what to try next |
 | [`PHASE1.md`](PHASE1.md) | build settings, phase 1 test checklist, SoD_SP gap analysis |
@@ -38,7 +39,7 @@ Not closed yet:
 
 ### Next, in order
 
-1. **Phase 4, tabletop adventure map:** builds on milestones 2 and 3, all done. Read first: [`MILESTONE_3B.md`](MILESTONE_3B.md) section 1f (the sprite work left for phase 4: the view rebuild on a worker, the atlas refill on pans, the GPU cost) and [`DATA_BRIDGE.md`](DATA_BRIDGE.md) Milestone 3c results (the tabletop window, `setTabletop`, the hero steps the game waits for, and what the game screen shows meanwhile).
+1. **Phase 4, tabletop adventure map:** planned in [`PHASE4.md`](PHASE4.md); next are its required checks (section 3), then milestone 4a, play on the table. Also read: [`MILESTONE_3B.md`](MILESTONE_3B.md) section 1f (the sprite work left for phase 4: the view rebuild on a worker, the atlas refill on pans, the GPU cost) and [`DATA_BRIDGE.md`](DATA_BRIDGE.md) Milestone 3c results (the tabletop window, `setTabletop`, the hero steps the game waits for, and what the game screen shows meanwhile).
 2. **Milestone 4, battle**, then **phase 5, battle diorama**.
 
 Each milestone records its numbers in `DATA_BRIDGE.md` and is optimised before the next one starts.
