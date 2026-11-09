@@ -278,6 +278,7 @@ func _update_sprite_view(head: Vector3) -> void:
 			room.set_sprites(vcmi_data.atlas_textures(), vcmi_data.sprite_table(), false)
 			sprites_pending = false
 	room.show_sprites(near and (not sprites_pending or room.sprite_multimesh().instance_count > 0))
+	vcmi_data.animate_move(room.sprite_multimesh())
 
 
 func _exit_tree() -> void:
@@ -792,6 +793,23 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 			room.set_sprites(vcmi_data.atlas_textures(), vcmi_data.sprite_table(), false)
 			print("VCMI XR: sprites check ", "same" if differ < 0 else "DIFFERENT at instance %d" % differ, ", ", kept.size() / 20,
 					" -> ", now.size() / 20, " instances, ", stats)
+		"tabletop": # a 1: the game shows the map on the tabletop only (milestone 3c): the 2D map stops, hero steps wait for the table; 0: back
+			if vcmi_data:
+				vcmi_data.set_tabletop(a > 0.0)
+		"move_trace": # for a frames (default 120): the sprites whose place changed since the last frame, in tiles, with
+				# the time; a hero step of the tabletop shows as a few small moves of the same instance
+			var mm: MultiMesh = room.sprite_multimesh()
+			var last: PackedFloat32Array = mm.buffer
+			var start := Time.get_ticks_msec()
+			for frame in int(a) if a > 0.0 else 120:
+				await get_tree().process_frame
+				var now: PackedFloat32Array = mm.buffer
+				if now.size() == last.size():
+					for i in now.size() / 20:
+						if now[i * 20 + 3] != last[i * 20 + 3] or now[i * 20 + 11] != last[i * 20 + 11]:
+							print("VCMI XR: move trace %d ms instance %d at %.2f, %.2f tiles" % [Time.get_ticks_msec() - start, i,
+									(now[i * 20 + 3] + 0.5) * map_size.x * map_size.z, (now[i * 20 + 11] + 0.5) * map_size.y])
+				last = now
 		"table_zoom": # the minimap shows 1 / a of the map around b, c (minimap UV, both levels side by side; 0: the centre)
 			room.set_zoom(a if a > 0.0 else 1.0, Vector2(b if b > 0.0 else 0.5, c if c > 0.0 else 0.5))
 			sprites_held = false

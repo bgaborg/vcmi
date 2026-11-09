@@ -10,7 +10,7 @@
 #include <stdint.h>
 
 // raise on any change to the structs below; the extension refuses a table with another version
-#define VCMI_BRIDGE_VERSION 5
+#define VCMI_BRIDGE_VERSION 6
 
 typedef struct VcmiBridgeStats
 {
@@ -20,7 +20,8 @@ typedef struct VcmiBridgeStats
 	uint16_t mapHeight;
 	uint8_t mapLevels;
 	uint8_t inGame;      // 1 while an adventure map exists
-	uint16_t pad;
+	uint8_t tabletop;    // 1 while the tabletop window is over the adventure map (setTabletop): the 2D map does not draw
+	uint8_t pad;
 	uint32_t tilesGeneration; // raised on each tile snapshot (new map), 0 before the first
 	uint32_t fogGeneration;   // raised each time the local team's fog changes
 	uint32_t publishMicros;   // game thread time of the last tile or fog publish
@@ -28,7 +29,21 @@ typedef struct VcmiBridgeStats
 	uint32_t objectsSequence;   // raised on each changed object record
 	uint32_t objectsMicros;     // game thread time of the last full object list
 	uint32_t changeMicros;      // game thread time of the last object change publish
+	uint32_t moveSequence;      // hero steps the tabletop showed (VcmiMove.sequence of the last)
+	uint32_t waitMicros;        // how long the game waited for the last of them
+	uint32_t moveTimeouts;      // steps whose confirmation did not come in time
 } VcmiBridgeStats;
+
+// a hero step the tabletop shows: the game waits until Godot confirms it (confirmMove) or durationMs + 200 ms pass. The
+// object's record already holds the destination. Positions are anchor tiles, as VcmiObject's
+typedef struct VcmiMove
+{
+	uint32_t sequence;   // raised on each step; 0 before the first
+	uint32_t object;     // the moving object id: the hero, or its boat
+	uint16_t fromX, fromY, toX, toY;
+	uint8_t fromZ, toZ;
+	uint16_t durationMs; // as the 2D map takes it: adventure.heroMoveTime, or enemyMoveTime for other players
+} VcmiMove; // 20 bytes
 
 // one map object, as the 2D map draws it, at index `id` of the object list; the list holds every object, in the fog
 // or not: the reader hides those whose anchor and visitable tiles are both in the fog
@@ -137,4 +152,12 @@ typedef struct VcmiBridgeApi
 	// no game is loaded; reads the game's files (milliseconds), so call it from a worker thread. `out` points into
 	// storage of the calling thread, valid until its next call
 	uint32_t (*decodeAnimation)(const char * name, VcmiAnimationData * out);
+	// 1: the tabletop shows the map, so the game keeps its own empty window over the adventure map (the 2D map stops
+	// drawing and animating) and waits for Godot's hero steps; 0: the 2D map again. Applied by the next lifecycle tick;
+	// any thread
+	void (*setTabletop)(uint8_t shown);
+	// copies the last hero step the tabletop showed; any thread
+	void (*move)(VcmiMove * out);
+	// Godot has shown step `sequence`: the game goes on; any thread
+	void (*confirmMove)(uint32_t sequence);
 } VcmiBridgeApi;

@@ -38,9 +38,8 @@ Not closed yet:
 
 ### Next, in order
 
-1. **Data bridge milestone 3, objects:** 3b, the map object sprites. **Read [`MILESTONE_3B.md`](MILESTONE_3B.md) first** (research findings, design and budgets). Plan step 1 is done: the installed HD mod makes half the map's sprites RGBA PNGs, and the whole map's sprites do not fit the budget, so the atlas is now RGBA and holds only the zoomed view (its section 1a). Plan step 2 is done: the bridge decodes .def and PNG frames, matching the mod's images, at 1.2 ms per animation on a worker. Plan step 3 is done: 3 workers fill 32 pages of 512² from the view; a 30x30 view needs 370 animations, loads cold in 0.66 s and after a pan in 79 ms, and the main thread spends under 1 ms per upload (its section 1c). Plan step 4 is done: the sprite shader draws the objects on the minimap where the 2D map has them, and `render-room.sh sprites` renders it on the PC from a headset capture in about 13 s (its section 1d). Plan step 5 is done: a simple zoom (test command `table_zoom`) and the LOD switch show the sprites on the heaviest map at 72 Hz, for +0.74-1.1 ms of GPU, over its +0.5 ms budget (its section 1e). Plan step 6 is done: object changes update only their sprites, 67-84 µs per hero step on the heaviest map; the work left for phase 4 (the view rebuild on a worker, the atlas refill on pans, the GPU cost) is listed in its section 1f. The next step is 3c, the 3D-mode window and hero step timing ([`DATA_BRIDGE.md` section 5](DATA_BRIDGE.md#5-milestones)).
-2. **Phase 4, tabletop adventure map:** builds on milestones 2 and 3.
-3. **Milestone 4, battle**, then **phase 5, battle diorama**.
+1. **Phase 4, tabletop adventure map:** builds on milestones 2 and 3, all done. Read first: [`MILESTONE_3B.md`](MILESTONE_3B.md) section 1f (the sprite work left for phase 4: the view rebuild on a worker, the atlas refill on pans, the GPU cost) and [`DATA_BRIDGE.md`](DATA_BRIDGE.md) Milestone 3c results (the tabletop window, `setTabletop`, the hero steps the game waits for, and what the game screen shows meanwhile).
+2. **Milestone 4, battle**, then **phase 5, battle diorama**.
 
 Each milestone records its numbers in `DATA_BRIDGE.md` and is optimised before the next one starts.
 

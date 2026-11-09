@@ -64,6 +64,8 @@ protected:
 		ClassDB::bind_method(D_METHOD("atlas_textures"), &VcmiData::atlas_textures);
 		ClassDB::bind_method(D_METHOD("update_sprites", "multimesh", "tiles", "level", "with_names"), &VcmiData::update_sprites, DEFVAL(false));
 		ClassDB::bind_method(D_METHOD("update_sprite_changes", "multimesh"), &VcmiData::update_sprite_changes);
+		ClassDB::bind_method(D_METHOD("set_tabletop", "shown"), &VcmiData::set_tabletop);
+		ClassDB::bind_method(D_METHOD("animate_move", "multimesh"), &VcmiData::animate_move);
 		ClassDB::bind_method(D_METHOD("sprite_table"), &VcmiData::sprite_table);
 		ClassDB::bind_method(D_METHOD("sprite_names"), &VcmiData::sprite_names);
 		BIND_CONSTANT(TERRAIN_CHANGED);
@@ -112,6 +114,10 @@ protected:
 	std::vector<uint32_t> spriteChanges; // object ids changed since the last sprite update
 	bool spritesStale = true; // a new list or map, or too many changes: update_sprite_changes asks for update_sprites
 	int64_t spriteMicros = 0, changeMicros = 0, maxChangeMicros = 0, bufferMicros = 0; // main thread: the last update_sprites and change update
+	VcmiMove move{}; // the last hero step the game asked the tabletop to show
+	std::chrono::steady_clock::time_point moveStart; // when update() first saw it
+	bool moveShown = true; // its time has passed and the game was told
+	bool moveDrawn = true; // the sprites are back at their own place
 	Ref<Image> spriteTable; // of the last update_sprites: the frames in the atlas, 2 texels each
 	PackedStringArray spriteNames; // of the last update_sprites, per instance: "animation x,y group", for debugging
 
@@ -197,6 +203,10 @@ public:
 		result["objects_sequence"] = s.objectsSequence;
 		result["objects_us"] = s.objectsMicros;
 		result["change_us"] = s.changeMicros;
+		result["tabletop"] = s.tabletop != 0;
+		result["move_sequence"] = s.moveSequence;
+		result["wait_us"] = s.waitMicros;
+		result["move_timeouts"] = s.moveTimeouts;
 		result["objects"] = int64_t(objects.size());
 		result["animations"] = animations.size();
 		return result;
@@ -210,6 +220,14 @@ public:
 			return 0;
 		if(atlas)
 			atlas->upload();
+		const int result = fetchPublished();
+		// after the objects: the game publishes a step before its record, so a record at the end comes with its step
+		updateMove();
+		return result;
+	}
+
+	int fetchPublished()
+	{
 		VcmiBridgeStats s;
 		api->stats(&s);
 		const int inGame = s.inGame ? IN_GAME : 0;
@@ -651,6 +669,61 @@ public:
 		changeMicros = microsSince(from);
 		maxChangeMicros = std::max(maxChangeMicros, changeMicros);
 		return newFrames ? 3 : 1;
+	}
+
+	/// true: the game shows the map on the tabletop (VcmiBridgeApi.setTabletop): the 2D map stops drawing and animating,
+	/// and the game waits for the tabletop's hero steps (animate_move)
+	void set_tabletop(bool shown)
+	{
+		if(api)
+			api->setTabletop(shown ? 1 : 0);
+	}
+
+	/// each frame: a new hero step starts its clock; once its duration has passed the game is told and goes on, whether
+	/// or not the sprites showed it (markers, another level)
+	void updateMove()
+	{
+		VcmiMove latest{};
+		api->move(&latest);
+		const auto now = std::chrono::steady_clock::now();
+		if(latest.sequence != move.sequence)
+		{
+			move = latest;
+			moveStart = now;
+			moveShown = false;
+			moveDrawn = false;
+		}
+		if(!moveShown && now - moveStart >= std::chrono::milliseconds(move.durationMs))
+		{
+			api->confirmMove(move.sequence);
+			moveShown = true;
+		}
+	}
+
+	/// slides the sprites of the moving object from the step's start to its end, the game's record being at the end
+	/// already; puts them back when the step is over. Each frame after update_sprite_changes. True while it moves.
+	/// shortcut: markers jump; a step to another level (none from onHeroMoved) is not slid
+	bool animate_move(const Ref<MultiMesh> & multimesh)
+	{
+		if(moveDrawn || multimesh.is_null() || multimesh->get_instance_count() != int64_t(sprites.size()) || map.width == 0)
+			return false;
+		// the step comes before the object's new record: until then its sprites are still at the start
+		if(move.object >= objects.size() || objects[move.object].x != move.toX || objects[move.object].y != move.toY)
+			return true;
+		const float elapsed = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - moveStart).count();
+		const float left = move.fromZ == move.toZ ? std::max(0.0f, 1.0f - elapsed / std::max<float>(move.durationMs, 1.0f)) : 0.0f;
+		const float sx = 1.0f / (32.0f * float(map.width) * map.levels);
+		const float sz = 1.0f / (32.0f * map.height);
+		const Basis basis(sx, 0, 0, 0, 1, 0, 0, 0, sz);
+		for(size_t i = 0; i < sprites.size(); i++)
+			if(sprites[i].id == move.object)
+			{
+				const float x = sprites[i].origin[0] + (int(move.fromX) - int(move.toX)) * 32.0f * left;
+				const float y = sprites[i].origin[1] + (int(move.fromY) - int(move.toY)) * 32.0f * left;
+				multimesh->set_instance_transform(i, Transform3D(basis, Vector3(x * sx - 0.5f, 0.003f, y * sz - 0.5f)));
+			}
+		moveDrawn = left <= 0.0f;
+		return !moveDrawn;
 	}
 
 	/// the frames of the last update_sprites and the changes since: RGBAF, 512 texels a row, 2 per frame (page, x, y, width; height, left and

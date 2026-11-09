@@ -3,7 +3,8 @@
  * Compiled into libvcmiclient by clientapp/CMakeLists.txt when quest/bridge exists.
  * Milestone 1: the exported table, the lifecycle task and one map observer per game.
  * Milestone 2: the tile snapshot per map and the local team's fog, for the minimap in Godot.
- * Milestone 3: the object list (ObjectScan), one full list per map and then the records the map events change.
+ * Milestone 3: the object list (ObjectScan), one full list per map and then the records the map events change;
+ * the tabletop window over the adventure map and the hero steps the game waits for (3c).
  *
  * License: GNU General Public License v2.0 or later
  */
@@ -18,10 +19,18 @@
 #include "../../client/GameEngine.h"
 #include "../../client/GameInstance.h"
 #include "../../client/adventureMap/AdventureMapInterface.h"
+#include "../../client/adventureMap/AdventureMapShortcuts.h"
+#include "../../client/gui/CIntObject.h"
+#include "../../client/gui/Shortcut.h"
+#include "../../client/gui/WindowHandler.h"
+#include "../../client/replay/GameplayReplayer.h"
 #include "../../client/mapView/IMapRendererObserver.h"
 #include "../../client/mapView/mapHandler.h"
+#include "../../lib/CConfigHandler.h"
 #include "../../lib/CPlayerState.h"
+#include "../../lib/StartInfo.h"
 #include "../../lib/CThreadHelper.h"
+#include "../../lib/UnlockGuard.h"
 #include "../../lib/GameLibrary.h"
 #include "../../lib/TerrainHandler.h"
 #include "../../lib/callback/CCallback.h"
@@ -37,6 +46,10 @@ namespace
 void markObject(const CGObjectInstance * obj);
 void markRemoval(const CGObjectInstance * obj);
 void flushObjects();
+void showMove(const CGHeroInstance * hero, const int3 & from, const int3 & dest);
+bool moveWaiting();
+void waitForMove();
+void endMoves();
 
 // Every event marks its object; the events after a change also publish it at once (hero step timing, milestone 3c
 // needs that), the others leave it to the next event or tick: before an erase or an owner change the old state is
@@ -44,12 +57,22 @@ void flushObjects();
 class BridgeObserver final : public IMapObjectObserver
 {
 public:
-	bool hasOngoingAnimations() override { return false; }
+	// a hero step the tabletop shows: the game waits for Godot as it waits for the 2D map's animation
+	bool hasOngoingAnimations() override { return moveWaiting(); }
+	void waitForOngoingAnimations() override { waitForMove(); }
+	void endNetwork() override { endMoves(); }
 	void onObjectFadeIn(const CGObjectInstance * obj, const PlayerColor &) override { markObject(obj); flushObjects(); }
 	void onObjectFadeOut(const CGObjectInstance * obj, const PlayerColor &) override { markRemoval(obj); }
 	void onObjectInstantAdd(const CGObjectInstance * obj, const PlayerColor &) override { markObject(obj); flushObjects(); }
 	void onObjectInstantRemove(const CGObjectInstance * obj, const PlayerColor &) override { markRemoval(obj); }
-	void onHeroMoved(const CGHeroInstance * hero, const int3 &, const int3 &) override { markObject(hero); flushObjects(); }
+	void onHeroMoved(const CGHeroInstance * hero, const int3 & from, const int3 & dest) override
+	{
+		// the step before the record: the tabletop slides a hero whose record is at the destination, so it never sees
+		// the hero there before the step
+		showMove(hero, from, dest);
+		markObject(hero);
+		flushObjects();
+	}
 	void onBeforeHeroTeleported(const CGHeroInstance * hero, const int3 &, const int3 &) override { markObject(hero); }
 	void onAfterHeroTeleported(const CGHeroInstance * hero, const int3 &, const int3 &) override { markObject(hero); flushObjects(); }
 	void onBeforeHeroEmbark(const CGHeroInstance * hero, const int3 &, const int3 &) override { markObject(hero); }
@@ -93,6 +116,108 @@ std::vector<int32_t> pendingIds;
 // objects about to be erased or changed with no event after it: encoded again each tick for 2 s, because the wait for
 // the 2D fade releases interfaceMutex before the erase (NetPacksClient.cpp:510-537), so a tick can see them unchanged
 std::vector<std::pair<int32_t, int>> removals; // id, ticks left
+
+// The tabletop window: empty, over the adventure map while Godot shows the tabletop. The adventure map is then not the
+// top window, so it does not draw, tick or animate (MapViewController::isEventVisible), and its hotkeys come here.
+class TabletopWindow final : public WindowBase
+{
+public:
+	TabletopWindow() : WindowBase(KEYBOARD) { pos = Rect(Point(), ENGINE->screenDimensions()); }
+
+	// as AdventureOptions: the adventure map's enabled shortcut; AdventureMapInterface::keyPressed only scrolls
+	void keyPressed(EShortcut key) override
+	{
+		if(!adventureInt)
+			return;
+		for(const AdventureMapShortcutState & shortcut : adventureInt->getAdventureShortcuts().getShortcuts())
+			if(shortcut.shortcut == key && shortcut.isEnabled)
+			{
+				shortcut.callback();
+				return;
+			}
+	}
+};
+
+std::atomic<bool> tabletopWanted{false};
+std::atomic<bool> tabletopShown{false};
+
+// a hero step the tabletop shows: the network thread waits (moveConfirmed) until Godot confirms it or the deadline
+std::mutex moveMutex;
+std::condition_variable moveConfirmed;
+VcmiMove currentMove{};
+uint32_t confirmedMove = 0;
+std::chrono::steady_clock::time_point moveDeadline;
+std::atomic<bool> stepPending{false}; // from the step until its wait ends
+std::atomic<uint32_t> waitMicros{0};
+std::atomic<uint32_t> moveTimeouts{0};
+
+bool moveWaiting() { return stepPending; }
+
+// network thread, interfaceMutex held (CPlayerInterface::heroMoved): publishes the step when the tabletop shows it,
+// with the 2D map's own rules for what is shown (MapViewController::isEventVisible, onHeroMoved)
+void showMove(const CGHeroInstance * hero, const int3 & from, const int3 & dest)
+{
+	// the window itself, not tabletopShown: the game may have closed it since the last tick, and the 2D map animates then
+	if(from == dest || ENGINE->windows().findWindows<TabletopWindow>().empty() || replayFollowedPlayer())
+		return;
+	const CPlayerInterface * player = GAME->interface();
+	const bool own = hero->getOwner() == player->playerID;
+	const double ms = settings["adventure"][own ? "heroMoveTime" : "enemyMoveTime"].Float();
+	if(ms <= 1)
+		return; // instant movement
+	if(!own && (player->makingTurn
+		|| (player->cb->getStartInfo()->playerInfos.at(hero->getOwner()).isControlledByHuman() && !settings["session"]["adventureTrackHero"].Bool())))
+		return;
+	if(!player->cb->isVisible(hero->convertToVisitablePos(from)) && !player->cb->isVisible(hero->convertToVisitablePos(dest)))
+		return;
+	const CGObjectInstance * moving = hero->inBoat() ? static_cast<const CGObjectInstance *>(hero->getBoat()) : hero;
+	std::lock_guard lock(moveMutex);
+	currentMove = VcmiMove{currentMove.sequence + 1, static_cast<uint32_t>(moving->id.getNum()),
+		static_cast<uint16_t>(from.x), static_cast<uint16_t>(from.y), static_cast<uint16_t>(dest.x), static_cast<uint16_t>(dest.y),
+		static_cast<uint8_t>(from.z), static_cast<uint8_t>(dest.z), static_cast<uint16_t>(std::min(ms, 65535.0))};
+	moveDeadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(currentMove.durationMs + 200);
+	stepPending = true;
+}
+
+// network thread, interfaceMutex held: as MapViewController::waitForOngoingAnimations, with the lock released, so the
+// game thread keeps running. The deadline keeps a stalled or paused Godot from stalling the game.
+void waitForMove()
+{
+	const auto from = std::chrono::steady_clock::now();
+	auto unlockInterface = vstd::makeUnlockGuard(ENGINE->interfaceMutex);
+	std::unique_lock lock(moveMutex);
+	if(!moveConfirmed.wait_until(lock, moveDeadline, []() { return confirmedMove >= currentMove.sequence; }))
+		moveTimeouts++;
+	stepPending = false;
+	waitMicros = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - from).count();
+}
+
+// before the map is destroyed (Client.cpp): a waiting network thread goes on
+void endMoves()
+{
+	std::lock_guard lock(moveMutex);
+	confirmedMove = currentMove.sequence;
+	moveConfirmed.notify_all();
+}
+
+// game thread, interfaceMutex held: puts the tabletop window over the adventure map while Godot wants it, again after
+// the game closes it with all dialogs at each turn start and end (CPlayerInterface::closeAllDialogs). Pushed only with
+// the adventure map on top and no 2D step playing (pushing then would freeze that step, MapViewController.cpp:627-631),
+// and not in a replay, which shows its own map; popped only when on top (popWindow throws otherwise)
+void updateTabletop()
+{
+	WindowHandler & windows = ENGINE->windows();
+	const auto shown = windows.findWindows<TabletopWindow>();
+	const bool replay = replayFollowedPlayer().has_value();
+	if(tabletopWanted && !replay)
+	{
+		if(shown.empty() && windows.isTopWindow(adventureInt) && !GAME->map().hasOngoingAnimations())
+			windows.pushWindow(std::make_shared<TabletopWindow>());
+	}
+	else if(!shown.empty() && windows.isTopWindow(shown.front()))
+		windows.popWindow(shown.front());
+	tabletopShown = !windows.findWindows<TabletopWindow>().empty();
+}
 
 // game thread only: the adventure map and size the tile snapshot was taken for
 std::weak_ptr<AdventureMapInterface> tilesMap;
@@ -256,9 +381,11 @@ void tick()
 	{
 		inGame = false;
 		mapSize = 0;
+		tabletopShown = false;
 		return;
 	}
 	inGame = true;
+	updateTabletop();
 	const int3 size = GAME->interface() && GAME->interface()->cb ? GAME->interface()->cb->getMapSize() : int3();
 	mapSize = static_cast<uint32_t>(size.x) | static_cast<uint32_t>(size.y) << 12 | static_cast<uint32_t>(size.z) << 24;
 	bool listTaken = false;
@@ -366,6 +493,29 @@ void stats(VcmiBridgeStats * out)
 	out->objectsSequence = objectsSequence;
 	out->objectsMicros = objectsMicros;
 	out->changeMicros = changeMicros;
+	out->tabletop = tabletopShown;
+	out->waitMicros = waitMicros;
+	out->moveTimeouts = moveTimeouts;
+	std::lock_guard lock(moveMutex);
+	out->moveSequence = currentMove.sequence;
+}
+
+void setTabletop(uint8_t shown)
+{
+	tabletopWanted = shown != 0;
+}
+
+void copyMove(VcmiMove * out)
+{
+	std::lock_guard lock(moveMutex);
+	*out = currentMove;
+}
+
+void confirmMove(uint32_t sequence)
+{
+	std::lock_guard lock(moveMutex);
+	confirmedMove = std::max(confirmedMove, sequence);
+	moveConfirmed.notify_all();
 }
 
 void copyTiles(VcmiTile * out, uint32_t capacity, uint32_t * colours, VcmiGrid * grid)
@@ -480,6 +630,7 @@ uint32_t decodeFrames(const char * name, VcmiAnimationData * out)
 }
 
 static_assert(sizeof(VcmiFrame) == 36, "VcmiFrame is part of the bridge ABI");
+static_assert(sizeof(VcmiMove) == 20, "VcmiMove is part of the bridge ABI");
 
 extern "C" __attribute__((visibility("default"))) const VcmiBridgeApi vcmi_bridge_api = {
 	VCMI_BRIDGE_VERSION,
@@ -491,4 +642,7 @@ extern "C" __attribute__((visibility("default"))) const VcmiBridgeApi vcmi_bridg
 	copyObjectChanges,
 	copyAnimation,
 	decodeFrames,
+	setTabletop,
+	copyMove,
+	confirmMove,
 };
