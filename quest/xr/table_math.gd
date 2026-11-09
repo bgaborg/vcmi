@@ -39,3 +39,15 @@ static func follow(view: Rect2, target: Vector2, keep: float) -> Vector2:
 	if Rect2(view.position + margin, view.size - margin * 2.0).has_point(target):
 		return view.get_center()
 	return target
+
+
+## the view centre after a grab moved from panel point `from` to `to` (panel UV, 0..1 across the table): the map moves
+## with the hand, so the map point under the hand stays under it
+static func drag(centre: Vector2, from: Vector2, to: Vector2, zoom: float) -> Vector2:
+	return centre - (to - from) / zoom
+
+
+## the view centre at `new_zoom` that keeps the map point under panel point `pivot` (panel UV) where it is
+static func zoom_about(centre: Vector2, zoom: float, new_zoom: float, pivot: Vector2) -> Vector2:
+	var under := centre + (pivot - Vector2(0.5, 0.5)) / zoom
+	return under - (pivot - Vector2(0.5, 0.5)) / new_zoom

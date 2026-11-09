@@ -1,6 +1,6 @@
 # Phase 4: the tabletop adventure map (plan)
 
-Status: 2026-11-09, required checks done except check 3, which waits for a person in the headset (section 3a); milestone 4a built and played on the Quest with a simulated ray (section 4a results; a battle, spells and the real buttons not yet checked). Next: milestone 4b.
+Status: 2026-11-09, required checks done except check 3, which waits for a person in the headset (section 3a); milestones 4a and 4b built and played on the Quest with a simulated ray (sections 4a and 4b results; a battle, spells and the real buttons not yet checked). Next: milestone 4c.
 
 Goal (from [`PROJECT_PLAN.md`](PROJECT_PLAN.md#phase-4---tabletop-adventure-map-after-data-bridge-milestones-2-and-3)): the adventure map is fully playable on the war table, and one button goes back to the 2D screen.
 
@@ -166,6 +166,7 @@ Each one is tested on the Quest, reviewed, and recorded here with its numbers be
   - The first click drew the path (`2-path.jpg`), and the second walked the hero 5 steps (each waited for about 160 ms, no timeouts). The fog opened and the white mark moved with the hero (`3-walked.jpg`).
   - The hero reached a chest: its dialog came forward on the game screen (`4-dialog-on-screen.jpg`). After A the screen hid again, and play went back to the table (`5-screen-hidden-again.jpg`).
   - `tabletop 0` brought the 2D screen back.
+  - Ending the turn and going back to the main menu from tabletop mode both worked.
 - **Fixed after the review:**
   - The screen also shows while the tabletop window is missing: at a turn's start the game shows its dialogs (new week, the next player) before the tick puts the window back, and replays run without it.
   - Leaving tabletop mode ends a table popup still held.
@@ -187,6 +188,33 @@ Each one is tested on the Quest, reviewed, and recorded here with its numbers be
   - LRU eviction of atlas shelves instead of a refill on every pan;
   - writing only the instances that moved.
 - **Exit:** panning and zooming the heaviest map holds 72 fps with no markers flashing, measured with `quest.sh sample`.
+
+#### 4b results (2026-11-09)
+
+- **Decisions:**
+  - **Grips:**
+    - One grip moved more than 1.5 cm drags the map.
+    - Two grips zoom about their midpoint, from one map level up to 6 cm tiles.
+    - A grip held still for 350 ms shows the tile's popup until it is released.
+    - A hand that was the pivot of a zoom opens no popup.
+  - **Table height:** it stays fixed at 0.8 m. `shortcut:` seated or standing comes with a person in the headset (check 3).
+  - **The view rebuild stays on the main thread:** an index of the objects by 8x8-tile buckets per level, and integer animation keys instead of name sets, brought it from 2.2-3.7 ms to 0.7-1.3 ms on the heaviest map while panning, and 2.3 ms once after a far jump. A worker is not needed.
+  - **Writing only the instances that moved is skipped:** the whole buffer takes about 0.1 ms.
+- **Atlas:**
+  - **Size:** 48 pages of 512² (about 84 MB with masks and mipmaps), instead of 24. The budget in section 5 is now 84 MB.
+  - **Eviction:** a page that the current view does not use goes first, the one unused longest.
+  - **Refill on fragmentation:** when every page holds something the view needs, a frame that does not fit makes all pages start again with only the view, in about 0.8 s on a worker. Only a frame that does not fit in such a fresh atlas marks the view as overflowed, which shows markers at that zoom.
+  - **Retries:** animations that failed for lack of room are tried again by the next view.
+- **On the Quest**, heaviest map (252x252x2, 53,808 objects), tabletop zoom (`quest/out/phase4b/`):
+  - 15 pans of 2 tiles each and 3 far jumps (`table_pan`, the maths of a hand drag), with a check after each that the view's sprites match a full rebuild: all the same.
+  - No overflow, and no markers.
+  - The pages filled after about 8 pans. From then on a refill came about every 4 pans east, and once in 24 pans diagonally. Eviction never ran, because on this map every page holds some of the view.
+  - 72-73 fps throughout, with an app GPU time of 5.8-6.4 ms (`heavy-pan-refill.csv`).
+- **Fixed after the review:**
+  - Animations that overflowed are retried even when nothing else is missing. Before, zooming in kept markers.
+  - A new object list clears the atlas keys, because the indices then name other animations.
+  - The pivot of a two-hand zoom no longer opens a popup when the other hand lets go.
+- **Not checked yet:** a real two-hand grab and zoom, which needs a person (only `table_pan` was used).
 
 ### 4c. Terrain, rivers and roads
 
@@ -220,7 +248,7 @@ Each one is tested on the Quest, reviewed, and recorded here with its numbers be
 | Main thread, per frame | the bridge consumer 0.5 ms; no single frame over 1 ms of table work (rebuilds go to a worker in 4b) |
 | A click to the hero starting to move | under 100 ms, as in 2D |
 | Hero step | the game's own time (150 ms default), waited for as in milestone 3c |
-| Memory | atlas pages and terrain within the 64 MB of [`MILESTONE_3B.md`](MILESTONE_3B.md) section 1a |
+| Memory | atlas pages 84 MB (48 pages, raised in 4b from the 64 MB of [`MILESTONE_3B.md`](MILESTONE_3B.md) section 1a), terrain on top |
 
 ## 6. Open decisions
 

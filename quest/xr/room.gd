@@ -473,6 +473,13 @@ func visible_uv() -> Rect2:
 	return Rect2(zoom_centre - Vector2.ONE * 0.5 / zoom, Vector2.ONE / zoom)
 
 
+## the panel UV (0..1 across the minimap, not clamped) straight below or above a point in the world: where a hand
+## grabs the table
+func panel_point(world: Vector3) -> Vector2:
+	var local := _minimap.global_transform.affine_inverse() * world
+	return Vector2(local.x, local.z) / minimap_size() + Vector2(0.5, 0.5)
+
+
 ## where a ray from `from` along `direction` hits the minimap's plane, in the world; Vector3.INF when it does not
 func table_hit(from: Vector3, direction: Vector3) -> Vector3:
 	var to_panel := _minimap.global_transform.affine_inverse()

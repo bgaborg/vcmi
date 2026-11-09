@@ -144,10 +144,11 @@ class SpriteAtlas
 {
 public:
 	// small pages, many layers: an upload of a 2048² page with mipmaps took 7-11 ms of the main thread on the Quest
-	// (MILESTONE_3B.md section 1c); 512² layers hold the same pixels and upload in pieces. 32 x 512² RGBA8 with
-	// mipmaps and masks: about 56 MB on the GPU, the budget of section 1a
+	// (MILESTONE_3B.md section 1c); 512² layers hold the same pixels and upload in pieces. 48 x 512² RGBA8 with
+	// mipmaps and masks: about 84 MB on the GPU (the budget revised in PHASE4.md 4b)
 	static constexpr int PAGE = 512;
-	static constexpr int PAGES = 32;
+	// 48: the tabletop view of the heaviest map (1.5 cm tiles, PHASE4.md 4b) needed about 10 % more than 32 pages
+	static constexpr int PAGES = 48;
 	static constexpr int PAD = 4; // between sprites: they stay apart in mips 0-1 and mostly in 2; the LOD switch keeps
 	// sprites from being drawn smaller than that (MILESTONE_3B.md section 5)
 	static constexpr int WORKERS = 3; // the Quest 3 has 6 cores; the game thread takes one, Godot's main and render threads two
@@ -164,7 +165,8 @@ public:
 
 	struct Stats
 	{
-		int64_t wanted = 0, loaded = 0, frames = 0, pixels = 0, refills = 0, overflowed = 0;
+		int64_t wanted = 0, loaded = 0, frames = 0, pixels = 0, refills = 0, overflowed = 0, evicted = 0;
+		bool viewOverflowed = false; // the current view's animations do not all fit (VcmiData: markers then)
 		int64_t decodeMicros = 0; // worker time of the bridge, baking, trimming and packing, summed
 		int64_t mipmapMicros = 0; // worker time building the page images
 		int64_t batchMillis = 0; // from the last want with new animations to all of them uploaded
@@ -203,40 +205,41 @@ public:
 			worker.join();
 	}
 
-	/// main thread: the animations the view needs, by name. Loads those not in the pages; when the pages ran full, or
-	/// would hold mostly other animations, starts them again with only these.
-	/// shortcut: no eviction of single animations, the pages are refilled; an LRU of shelves if panning shows refills
+	/// main thread: the animations the view needs, by name. Loads those not in the pages; a full atlas makes room by
+	/// clearing the page the view has not needed for longest (evict). Starts all pages again with only these when no
+	/// page can go (the view needs more than the pages), or when the pages would hold mostly other animations.
 	void want(const std::vector<std::string> & names)
 	{
 		std::lock_guard lock(mutex);
 		stats.wanted = names.size();
+		wantSerial++;
+		wantedNow = std::unordered_set<std::string>(names.begin(), names.end());
+		for(Page & page : pages)
+			if(std::any_of(
+				   page.animations.begin(),
+				   page.animations.end(),
+				   [this](const std::string & a)
+				   {
+					   return wantedNow.count(a);
+				   }
+			   ))
+				page.used = wantSerial;
+		// what overflowed is tried again, before counting: evict may make room now that the view moved or shrank
+		for(const std::string & name : overflowNames)
+			failed.erase(name);
+		overflowNames.clear();
+		viewOverflowed = false;
 		size_t missing = 0;
 		for(const std::string & name : names)
 			missing += !placed.count(name) && !failed.count(name);
 		if(missing == 0)
 			return;
 		// shortcut: 64 animations stay cached when zooming in to a few; tune with the real views of phase 4
-		const bool refill = overflowed || (placed.size() > 2 * names.size() && placed.size() > 64);
-		if(refill)
-		{
-			generation++;
-			placed.clear();
-			failed.clear();
-			queue.clear();
-			for(Page & page : pages)
-			{
-				page.stale = true; // cleared by the next pack, on a worker: 42 MB is too much for the main thread
-				page.shelfY = page.shelfHeight = page.x = 0;
-				page.dirty = false;
-				page.ready.unref();
-				page.readyMask.unref();
-			}
-			overflowed = false;
-			stats.refills++;
-		}
-		for(const std::string & name : names)
-			if(!placed.count(name) && !failed.count(name) && std::find(queue.begin(), queue.end(), name) == queue.end())
-				queue.push_back(name);
+		if(placed.size() > 2 * names.size() && placed.size() > 64)
+			refill();
+		else
+			freshBatch = false;
+		queueWanted();
 		batchStart = std::chrono::steady_clock::now();
 		batchOpen = true;
 		wake.notify_all();
@@ -339,6 +342,7 @@ public:
 	{
 		std::lock_guard lock(mutex);
 		Stats s = stats;
+		s.viewOverflowed = viewOverflowed;
 		s.loaded = placed.size();
 		s.pagesUsed = 0;
 		for(const Page & page : pages)
@@ -373,6 +377,36 @@ public:
 	}
 
 private:
+	// lock held: all pages start again empty, for the animations of the last want() only. A frame that does not fit
+	// in such a fresh batch means the view needs more than the pages (viewOverflowed)
+	void refill()
+	{
+		generation++;
+		placed.clear();
+		failed.clear();
+		overflowNames.clear();
+		queue.clear();
+		for(Page & page : pages)
+		{
+			page.stale = true; // cleared by the next pack, on a worker: 63 MB is too much for the main thread
+			page.shelfY = page.shelfHeight = page.x = 0;
+			page.dirty = false;
+			page.ready.unref();
+			page.readyMask.unref();
+			page.animations.clear();
+		}
+		freshBatch = true;
+		stats.refills++;
+	}
+
+	// lock held: the wanted animations that are not loaded, failed or queued go into the queue
+	void queueWanted()
+	{
+		for(const std::string & name : wantedNow)
+			if(!placed.count(name) && !failed.count(name) && std::find(queue.begin(), queue.end(), name) == queue.end())
+				queue.push_back(name);
+	}
+
 	struct Page
 	{
 		std::vector<uint8_t> rgba;
@@ -380,6 +414,8 @@ private:
 		int x = 0, shelfY = 0, shelfHeight = 0; // the open shelf
 		bool dirty = false; // packed into since its last image
 		bool stale = false; // holds a refilled generation's pixels
+		std::unordered_set<std::string> animations; // with frames on this page
+		uint64_t used = 0; // the last want() whose view needed one of them (evict)
 		Ref<Image> ready, readyMask; // built, waiting for the upload
 	};
 
@@ -583,13 +619,31 @@ private:
 				}
 				if(page == PAGES)
 				{
-					// stays a marker until the next refill, so a view needing more than the pages does not refill forever
-					overflowed = true;
+					page = evict(name);
+					if(page >= 0 && !fit(pages[page], std::min(f.width + PAD, PAGE), std::min(f.height + PAD, PAGE)))
+						page = PAGES;
+					if(page < 0)
+						page = PAGES;
+				}
+				if(page == PAGES && !freshBatch)
+				{
+					// the pages are fragmented (each holds something the view needs): start again with this view only
+					refill();
+					queueWanted();
+					return;
+				}
+				if(page == PAGES)
+				{
+					// stays a marker until the view moves, so a view needing more than the pages does not refill forever
+					viewOverflowed = true;
 					stats.overflowed++;
 					failed.insert(name);
+					overflowNames.insert(name);
 					return;
 				}
 				Page & target = pages[page];
+				target.animations.insert(name);
+				target.used = wantSerial;
 				p.page = uint16_t(page);
 				p.x = uint16_t(target.x);
 				p.y = uint16_t(target.shelfY);
@@ -607,6 +661,37 @@ private:
 		}
 		stats.frames += out.size();
 		placed[name] = std::move(out);
+	}
+
+	// a page the current view does not need, the one unneeded for longest, cleared for new frames; its animations are
+	// dropped (their frames elsewhere stay as unused space). Their sprites lie outside the view and its margin (the
+	// view asks for 2 tiles more on every side), so nothing visible points at the page while it is refilled. -1: none
+	int evict(const std::string & packing)
+	{
+		int best = -1;
+		for(int i = 0; i < PAGES; i++)
+			if(pages[i].used < wantSerial && !pages[i].animations.count(packing) && (best < 0 || pages[i].used < pages[best].used))
+				best = i;
+		if(best < 0)
+			return -1;
+		Page & page = pages[best];
+		for(const std::string & name : page.animations)
+		{
+			placed.erase(name);
+			for(Page & other : pages)
+				if(&other != &page)
+					other.animations.erase(name);
+		}
+		page.animations.clear();
+		std::fill(page.rgba.begin(), page.rgba.end(), 0);
+		std::fill(page.mask.begin(), page.mask.end(), 0);
+		page.stale = false;
+		page.x = page.shelfY = page.shelfHeight = 0;
+		page.ready.unref();
+		page.readyMask.unref();
+		page.dirty = true;
+		stats.evicted++;
+		return best;
 	}
 
 	// in the open shelf, else in a new one below it; the page changes only when the frame goes in, so trying the
@@ -672,10 +757,14 @@ private:
 	std::deque<std::string> queue;
 	int busy = 0; // workers decoding or building outside the lock
 	uint64_t generation = 0; // raised by a refill: work of an older generation is dropped
+	uint64_t wantSerial = 0; // raised by each want()
+	std::unordered_set<std::string> wantedNow; // the names of the last want()
 	std::vector<Page> pages;
 	std::unordered_map<std::string, std::vector<Placed>> placed;
 	std::unordered_set<std::string> failed; // missing or JSON-only without files: markers stay
-	bool overflowed = false;
+	bool viewOverflowed = false; // the last want() needs more than the pages hold, even after evicting
+	bool freshBatch = true; // the pages were refilled for the current view (an overflow then is real)
+	std::unordered_set<std::string> overflowNames; // failed for want of room: tried again by the next want()
 	bool batchOpen = false;
 	std::chrono::steady_clock::time_point batchStart;
 	Stats stats;

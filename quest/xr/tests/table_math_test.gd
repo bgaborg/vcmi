@@ -33,6 +33,19 @@ func _initialize() -> void:
 	_expect("hero in the middle: view stays", TableMath.follow(view, Vector2(0.2, 0.22), 0.6), Vector2(0.2, 0.2))
 	_expect("hero near the edge: view moves", TableMath.follow(view, Vector2(0.28, 0.2), 0.6), Vector2(0.28, 0.2))
 
+	# a grab: the hand moves a quarter of the table right at zoom 4: the view moves a sixteenth of the map left
+	_expect("drag right", TableMath.drag(Vector2(0.3, 0.5), Vector2(0.5, 0.5), Vector2(0.75, 0.5), 4.0), Vector2(0.2375,
+			0.5))
+	_expect("drag back to the start", TableMath.drag(Vector2(0.3, 0.5), Vector2(0.5, 0.5), Vector2(0.5, 0.5), 4.0),
+			Vector2(0.3, 0.5))
+	# zooming about the panel centre keeps the centre; about a corner keeps the map point under it
+	_expect("zoom about the middle", TableMath.zoom_about(Vector2(0.3, 0.4), 4.0, 8.0, Vector2(0.5, 0.5)), Vector2(0.3,
+			0.4))
+	var pivot := Vector2(0.75, 0.25)
+	var zoomed := TableMath.zoom_about(Vector2(0.3, 0.4), 4.0, 8.0, pivot)
+	_expect("zoom keeps the point under the hands", zoomed + (pivot - Vector2(0.5, 0.5)) / 8.0,
+			Vector2(0.3, 0.4) + (pivot - Vector2(0.5, 0.5)) / 4.0)
+
 	print("table_math_test: ", "PASS" if failures == 0 else "FAIL (%d)" % failures)
 	quit(1 if failures else 0)
 

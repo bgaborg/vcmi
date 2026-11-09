@@ -13,9 +13,9 @@
 #include <dlfcn.h>
 #include <map>
 #include <memory>
-#include <set>
 #include <string>
 #include <tuple>
+#include <unordered_map>
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/multi_mesh.hpp>
@@ -83,6 +83,7 @@ protected:
 		ClassDB::bind_method(D_METHOD("selected_tile"), &VcmiData::selected_tile);
 		ClassDB::bind_method(D_METHOD("windows_above"), &VcmiData::windows_above);
 		ClassDB::bind_method(D_METHOD("tabletop_shown"), &VcmiData::tabletop_shown);
+		ClassDB::bind_method(D_METHOD("move_target"), &VcmiData::move_target);
 	}
 
 	uint32_t seenTiles = 0;
@@ -109,7 +110,9 @@ protected:
 	Ref<Image> fogMap;
 	std::unique_ptr<SpriteAtlas> atlas; // made by the first atlas_view
 	std::vector<std::string> animationNames; // animations in UTF-8, for the atlas
-	std::set<std::string> atlasNames; // of the last atlas_view
+	// of the last atlas_view: which animations it asked for, by animation index, and the hero flags by owner
+	std::vector<uint8_t> inAtlas;
+	std::array<bool, 8> flagInAtlas{};
 
 	struct Sprite
 	{
@@ -128,12 +131,19 @@ protected:
 	};
 	std::vector<Sprite> sprites; // of the last update_sprites and the changes since, in drawing order
 	std::vector<float> table; // the frames the sprites use: 8 floats each (sprite_table)
-	std::map<std::pair<std::string, int>, std::array<int, 2>> groups; // animation and group -> first frame, count
+	// animation key (spriteKey) << 8 | group -> first frame, count (+ 1024 when mirrored)
+	std::unordered_map<uint64_t, std::array<int, 2>> groups;
 	Rect2i spriteAnchors; // of the last update_sprites: the anchor tiles of the objects drawn
 	int spriteLevel = -1;
 	std::vector<uint32_t> spriteChanges; // object ids changed since the last sprite update
 	bool spritesStale = true; // a new list or map, or too many changes: update_sprite_changes asks for update_sprites
 	int64_t spriteMicros = 0, changeMicros = 0, maxChangeMicros = 0, bufferMicros = 0; // main thread: the last update_sprites and change update
+	// object ids by anchor tile, BUCKET x BUCKET tiles a bucket, per map level: a view visits only its buckets, not
+	// every object (53 808 on the heaviest map). Empty until first used after a new list or map; changes keep it
+	static constexpr int BUCKET = 8;
+	static constexpr uint32_t FLAG_KEY = 0x10000; // animation keys above the indices (uint16_t): a hero's flag, + owner
+	std::vector<std::vector<uint32_t>> buckets;
+	int bucketColumns = 0, bucketRows = 0;
 	VcmiBridgeStats latest{}; // of the last update
 	uint32_t seenPath = 0;
 	std::vector<VcmiPathNode> path; // the selected hero's, from its first step to the end
@@ -321,6 +331,7 @@ public:
 			map = grid;
 			markersReset = true;
 			spritesStale = true;
+			buckets.clear();
 			terrain = Image::create_from_data(
 				grid.width * grid.levels,
 				grid.height,
@@ -384,6 +395,8 @@ public:
 		{
 			animations.clear(); // a new list starts the names again
 			animationNames.clear();
+			inAtlas.clear(); // indexed by the old names
+			flagInAtlas = {};
 		}
 		wantedAnimations = list.animations;
 		seenSnapshot = list.snapshot;
@@ -393,6 +406,7 @@ public:
 		changedIds.clear();
 		spritesStale = true;
 		spriteChanges.clear();
+		buckets.clear();
 		return true;
 	}
 
@@ -410,6 +424,16 @@ public:
 			const VcmiObject & record = changeBuffer[i];
 			if(record.id >= objects.size())
 				objects.resize(record.id + 1);
+			if(!buckets.empty())
+			{
+				if(objects[record.id].flags & VCMI_OBJECT_PRESENT)
+				{
+					std::vector<uint32_t> & bucket = buckets[bucketOf(objects[record.id])];
+					bucket.erase(std::remove(bucket.begin(), bucket.end(), record.id), bucket.end());
+				}
+				if(record.flags & VCMI_OBJECT_PRESENT)
+					buckets[bucketOf(record)].push_back(record.id);
+			}
 			objects[record.id] = record;
 			changedIds.push_back(record.id);
 			spriteChanges.push_back(record.id);
@@ -491,6 +515,39 @@ public:
 		return result;
 	}
 
+	int bucketOf(const VcmiObject & o) const
+	{
+		const int x = std::min(o.x / BUCKET, bucketColumns - 1);
+		const int y = std::min(o.y / BUCKET, bucketRows - 1);
+		return (std::min<int>(o.z, map.levels - 1) * bucketRows + y) * bucketColumns + x;
+	}
+
+	/// calls `visit` with the present objects whose anchor may lie in `anchors` on `level` (the whole buckets that
+	/// touch it: the caller still checks the tile); builds the index when it is not there
+	template<typename Visit>
+	void forObjectsIn(const Rect2i & anchors, int level, Visit visit)
+	{
+		if(map.width == 0 || map.levels == 0 || level < 0 || level >= map.levels)
+			return;
+		if(buckets.empty())
+		{
+			bucketColumns = (map.width + BUCKET - 1) / BUCKET;
+			bucketRows = (map.height + BUCKET - 1) / BUCKET;
+			buckets.assign(size_t(bucketColumns) * bucketRows * map.levels, {});
+			for(const VcmiObject & o : objects)
+				if(o.flags & VCMI_OBJECT_PRESENT)
+					buckets[bucketOf(o)].push_back(o.id);
+		}
+		const int x0 = std::clamp(anchors.position.x / BUCKET, 0, bucketColumns - 1);
+		const int y0 = std::clamp(anchors.position.y / BUCKET, 0, bucketRows - 1);
+		const int x1 = std::clamp((anchors.get_end().x - 1) / BUCKET, 0, bucketColumns - 1);
+		const int y1 = std::clamp((anchors.get_end().y - 1) / BUCKET, 0, bucketRows - 1);
+		for(int y = y0; y <= y1; y++)
+			for(int x = x0; x <= x1; x++)
+				for(uint32_t id : buckets[(size_t(level) * bucketRows + y) * bucketColumns + x])
+					visit(objects[id]);
+	}
+
 	/// asks the sprite atlas for the animations of the objects on `tiles` of map level `level` (quest/MILESTONE_3B.md,
 	/// plan step 3), and the hero flags there; returns how many animations that is. The workers load the missing ones,
 	/// update() uploads them.
@@ -505,18 +562,26 @@ public:
 		std::unordered_set<uint16_t> seen;
 		std::unordered_set<int> flags;
 		std::vector<std::string> names;
-		for(const VcmiObject & o : objects)
-		{
-			if(!(o.flags & VCMI_OBJECT_PRESENT) || (o.flags & VCMI_OBJECT_HIDDEN) || o.z != level || !anchors.has_point(Vector2i(o.x, o.y)))
-				continue;
-			if(o.animation < animationNames.size() && seen.insert(o.animation).second)
-				names.push_back(animationNames[o.animation]);
-			// heroes fly a separate flag animation (MapRendererObjects::getFlagAnimation)
-			if((o.flags & VCMI_OBJECT_HERO) && o.owner < 8 && flags.insert(o.owner).second)
-				names.push_back("AF0" + std::to_string(o.owner));
-		}
+		forObjectsIn(
+			anchors,
+			level,
+			[&](const VcmiObject & o)
+			{
+				if(!(o.flags & VCMI_OBJECT_PRESENT) || (o.flags & VCMI_OBJECT_HIDDEN) || o.z != level || !anchors.has_point(Vector2i(o.x, o.y)))
+					return;
+				if(o.animation < animationNames.size() && seen.insert(o.animation).second)
+					names.push_back(animationNames[o.animation]);
+				// heroes fly a separate flag animation (MapRendererObjects::getFlagAnimation)
+				if((o.flags & VCMI_OBJECT_HERO) && o.owner < 8 && flags.insert(o.owner).second)
+					names.push_back("AF0" + std::to_string(o.owner));
+			}
+		);
 		atlas->want(names);
-		atlasNames = std::set<std::string>(names.begin(), names.end());
+		inAtlas.assign(animationNames.size(), 0);
+		for(uint16_t animation : seen)
+			inAtlas[animation] = 1;
+		for(int owner = 0; owner < 8; owner++)
+			flagInAtlas[owner] = flags.count(owner);
 		return names.size();
 	}
 
@@ -539,6 +604,8 @@ public:
 		result["pages_used"] = s.pagesUsed;
 		result["refills"] = s.refills;
 		result["overflowed"] = s.overflowed;
+		result["evicted"] = s.evicted;
+		result["view_overflowed"] = s.viewOverflowed;
 		result["decode_us"] = s.decodeMicros;
 		result["mipmap_us"] = s.mipmapMicros;
 		result["batch_ms"] = s.batchMillis;
@@ -590,14 +657,15 @@ public:
 		// heroes draw their flag from a separate animation, not in the owner colour (MapRendererObjects::renderImage)
 		const bool hero = o.flags & VCMI_OBJECT_HERO;
 		const int owner = hero ? 9 : o.owner < 8 ? o.owner : o.owner == 255 ? 8 : 9;
-		const auto add = [&](const std::string & name, uint8_t order, int ownerCode)
+		// key: the animation index, or FLAG_KEY + the owner for a hero's flag
+		const auto add = [&](uint32_t key, uint8_t order, int ownerCode)
 		{
-			if(!atlasNames.count(name))
+			if(key >= FLAG_KEY ? !flagInAtlas[key - FLAG_KEY] : key >= inAtlas.size() || !inAtlas[key])
 			{
 				missing = true;
 				return;
 			}
-			const std::array<int, 2> g = groupFrames(name, o.group);
+			const std::array<int, 2> g = groupFrames(key, o.group);
 			if((g[1] & 1023) == 0)
 				return;
 			// the full frame's bottom right sits on the anchor tile's bottom right (MapRendererObjects::renderImage).
@@ -617,20 +685,21 @@ public:
 			}
 			);
 		};
-		add(animationNames[o.animation], 0, owner);
+		add(o.animation, 0, owner);
 		// shortcut: a boat with a hero flies boat->flagAnimations[owner] with a wave overlay (MapRendererObjects::
 		// getFlagAnimation, getOverlayAnimation); not published by the bridge yet, so boats have no flag
 		if(hero && o.owner < 8)
-			add("AF0" + std::to_string(o.owner), 1, 9);
+			add(FLAG_KEY + o.owner, 1, 9);
 	}
 
 	/// the frames of group `wanted` of animation `name` in the frame table, added to it on first use: first, count
 	/// (+ 1024 when mirrored)
-	std::array<int, 2> groupFrames(const std::string & name, int wanted)
+	std::array<int, 2> groupFrames(uint32_t animation, int wanted)
 	{
-		const auto key = std::make_pair(name, wanted);
+		const uint64_t key = uint64_t(animation) << 8 | uint8_t(wanted);
 		if(auto it = groups.find(key); it != groups.end())
 			return it->second;
+		const std::string name = animation >= FLAG_KEY ? "AF0" + std::to_string(animation - FLAG_KEY) : animationNames[animation];
 		// the 2D map mirrors these groups of heroes and boats (MapRendererObjects::getAnimation, createFlippedGroup)
 		static const std::map<int, int> mirrored = {
 			{13, 1},
@@ -779,8 +848,14 @@ public:
 		groups.clear();
 		spriteChanges.clear();
 		bool missing = false;
-		for(const VcmiObject & o : objects)
-			spritesOf(o, sprites, missing);
+		forObjectsIn(
+			spriteAnchors,
+			level,
+			[&](const VcmiObject & o)
+			{
+				spritesOf(o, sprites, missing);
+			}
+		);
 		// objects that changed while the atlas loaded may need animations the view did not ask for: ask again
 		spritesStale = missing;
 		std::sort(
@@ -888,6 +963,12 @@ public:
 	int windows_above() const
 	{
 		return latest.windowsAbove;
+	}
+
+	/// the last hero step the tabletop showed: Vector4i(x, y, level of its end (the anchor tile), its sequence; 0: none)
+	Vector4i move_target() const
+	{
+		return Vector4i(move.toX, move.toY, move.toZ, int32_t(move.sequence));
 	}
 
 	/// true while the game keeps the tabletop window over the adventure map (it is missing at a turn's start until the

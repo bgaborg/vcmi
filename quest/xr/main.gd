@@ -18,6 +18,9 @@ const TableMath := preload("res://table_math.gd")
 ## needs a person holding a controller; 1.5 cm is a safe guess until it is measured
 const TABLE_TILE_METRES := 0.015
 const PATH_CHANGED := 16
+const TABLE_MAX_TILE_METRES := 0.06 ## the closest zoom: a tile 6 cm wide
+const GRAB_MOVE_METRES := 0.015 ## a grip moved this far drags the map; held still...
+const GRAB_POPUP_MS := 350 ## ...this long it shows the tile's popup instead
 const TABLE_KEEP := 0.6 ## the view follows the selected hero once it leaves the middle 60 % of the table
 const BUTTON_LEFT := 1 ## MotionEvent.BUTTON_PRIMARY
 const BUTTON_RIGHT := 2 ## MotionEvent.BUTTON_SECONDARY
@@ -61,11 +64,19 @@ var atlas_task := -1 ## the worker of the test command `atlas -1`, waited for be
 var map_size := Vector3i.ZERO ## tiles of the map: width, height, levels (from the bridge stats at a new tile snapshot)
 var sprite_rect := Rect2i() ## the tiles and level the atlas was last asked for
 var sprite_level := -1
+## the zoom whose view the atlas could not hold (VcmiData atlas_stats view_overflowed): markers there and further out,
+## sprites again once zoomed in past it; 0 when none. shortcut: one value per map, so a sparse area at that zoom shows
+## markers too; per area if players see it
+var too_far_zoom := 0.0
 var sprites_pending := false ## the atlas loads them; update_sprites when it is done
 ## the map is played on the war table (quest/PHASE4.md milestone 4a); the screen shows dialogs only
 var tabletop := false
 var table_tile := TableMath.NO_TILE ## the tile under the active ray on the table, sent to the game as a hover
-var table_popup := false ## the grip opened a tile's popup from the table: its release closes it
+var table_popup := false ## a still grip opened a tile's popup from the table: its release closes it
+## grips held on the table by hand: {start: hand position, ms: press time, drag: moving the map}
+var grabs := {}
+var grab_view := {} ## the view when the current drag or two-hand zoom began: centre, zoom, at, spread
+var followed_move := 0 ## the sequence of the last hero step the view followed
 var shown_selection := Vector3i(-2, -2, -2) ## the selected hero's tile the table last followed and marked
 var sprites_held := false ## the test command `sprites` set them: the view does not change them until `table_zoom`
 var atlas_refills := 0 ## of the atlas, at the last view: a refill moves the frames, so the sprites wait for the rebuild
@@ -290,7 +301,7 @@ func _update_sprite_view(head: Vector3) -> void:
 	var level := clampi(int(view.get_center().x * map_size.z), 0, map_size.z - 1)
 	# the levels lie side by side: sprites only when the view shows one of them
 	var one_level := int(view.position.x * map_size.z) == int((view.end.x - 0.0001) * map_size.z)
-	var near := pixels >= SPRITE_PIXELS and one_level
+	var near: bool = pixels >= SPRITE_PIXELS and one_level and room.zoom > too_far_zoom * 1.05
 	if near:
 		var x0 := int(floor(view.position.x * map_size.x * map_size.z)) - level * map_size.x
 		var y0 := int(floor(view.position.y * map_size.y))
@@ -309,14 +320,20 @@ func _update_sprite_view(head: Vector3) -> void:
 			sprite_rect = tiles
 			sprite_level = level
 			sprites_pending = true
+		if sprites_pending:
+			# a refill (at the request, or when the pages are fragmented while loading) moves the frames the old
+			# instances point at: markers until the rebuild
 			var refills: int = vcmi_data.atlas_stats().get("refills", 0)
-			if refills != atlas_refills: # the old instances point at frames the refill moves: markers until the rebuild
+			if refills != atlas_refills:
 				atlas_refills = refills
 				room.sprite_multimesh().instance_count = 0
 		if sprites_pending and not vcmi_data.atlas_busy():
 			vcmi_data.update_sprites(room.sprite_multimesh(), sprite_rect, sprite_level)
 			room.set_sprites(vcmi_data.atlas_textures(), vcmi_data.sprite_table(), false)
 			sprites_pending = false
+			if vcmi_data.atlas_stats().get("view_overflowed", false):
+				too_far_zoom = room.zoom # some objects would have no sprite: markers until closer
+				print("VCMI XR: the atlas cannot hold the view at zoom ", room.zoom, ": markers")
 	room.show_sprites(near and (not sprites_pending or room.sprite_multimesh().instance_count > 0))
 	vcmi_data.animate_move(room.sprite_multimesh())
 
@@ -373,6 +390,7 @@ func _process(delta: float) -> void:
 			vcmi_data.update_markers(room.marker_multimesh(), room.minimap_size(), room.MARKER_METRES)
 		if changed & 1:
 			map_size = vcmi_data.stats().get("map", Vector3i.ZERO)
+			too_far_zoom = 0.0
 		if changed & 4 and tracked != null and not sprites_held:
 			_update_sprite_view((origin.transform * (tracked as Transform3D)).origin)
 		_update_table(changed)
@@ -406,6 +424,8 @@ func _set_tabletop(on: bool) -> void:
 	if table_popup: # its grip release would otherwise end up on the screen, or the screen's on the table
 		table_popup = false
 		vcmi_data.tile_input(Vector3i.ZERO, TILE_POPUP_END)
+	grabs.clear()
+	grab_view = {}
 	shown_selection = Vector3i(-2, -2, -2) # zoom in, follow and mark the selected hero again (_update_table)
 	if not on:
 		layer.visible = true
@@ -426,7 +446,15 @@ func _update_table(changed: int) -> void:
 		var centre := TableMath.follow(room.visible_uv(), TableMath.tile_uv(selected, map_size), TABLE_KEEP)
 		room.set_zoom(room.zoom, TableMath.on_level(centre, room.zoom, selected.z, map_size.z))
 	shown_selection = selected
+	# the hero steps the table shows, enemies' too: the view follows them as the 2D map does, not while a hand holds it
+	var move: Vector4i = vcmi_data.move_target()
+	if tabletop and move.w != followed_move and grabs.is_empty():
+		var target := TableMath.tile_uv(Vector3i(move.x, move.y, move.z), map_size)
+		var centre := TableMath.follow(room.visible_uv(), target, TABLE_KEEP)
+		room.set_zoom(room.zoom, TableMath.on_level(centre, room.zoom, move.z, map_size.z))
+	followed_move = move.w
 	if tabletop:
+		_update_grabs()
 		# also without the tabletop window: at a turn's start the game shows its dialogs (new week, the next player)
 		# before the bridge can put the window back, and replays run without it
 		var dialog: bool = vcmi_data.windows_above() > 0 or not vcmi_data.tabletop_shown()
@@ -727,7 +755,7 @@ func _press(button: int, hand: int, pressed: bool) -> void:
 			await get_tree().create_timer(0.1).timeout
 			bridge.key(keycode, false)
 		return
-	if tabletop and (not layer.visible or (button == BUTTON_RIGHT and not pressed and table_popup)):
+	if tabletop and (not layer.visible or (button == BUTTON_RIGHT and not pressed and grabs.has(hand))):
 		_table_press(button, hand, pressed)
 		return
 	if pressed:
@@ -740,12 +768,18 @@ func _press(button: int, hand: int, pressed: bool) -> void:
 	bridge.pointerButton(button, pressed)
 
 
-## Trigger and grip on the table: a click on the tile under the ray, or its popup while the grip is held
+## Trigger and grip on the table: the trigger clicks the tile under the ray; a grip grabs the table (_update_grabs)
 func _table_press(button: int, hand: int, pressed: bool) -> void:
-	if button == BUTTON_RIGHT and not pressed:
-		if table_popup:
-			table_popup = false
-			vcmi_data.tile_input(Vector3i.ZERO, TILE_POPUP_END)
+	if button == BUTTON_RIGHT:
+		if pressed:
+			grabs[hand] = {"start": grips[hand].global_position, "ms": Time.get_ticks_msec(), "drag": false}
+			grab_view = {}
+		else:
+			grabs.erase(hand)
+			grab_view = {} # the other hand, if still holding, drags from where it is now
+			if table_popup and grabs.is_empty():
+				table_popup = false
+				vcmi_data.tile_input(Vector3i.ZERO, TILE_POPUP_END)
 		return
 	if not pressed:
 		return
@@ -756,12 +790,50 @@ func _table_press(button: int, hand: int, pressed: bool) -> void:
 	if tile != table_tile: # the other hand's ray, or the first frame: the game hovers before it clicks, as in 2D
 		table_tile = tile
 		vcmi_data.tile_input(tile, TILE_HOVER)
-	if button == BUTTON_LEFT:
-		vcmi_data.tile_input(tile, TILE_CLICK)
-	else:
-		table_popup = true
-		vcmi_data.tile_input(tile, TILE_POPUP)
+	vcmi_data.tile_input(tile, TILE_CLICK)
 	_pulse(hand, 0.5)
+
+
+## Each frame in tabletop mode, the grips held on the table: one moving hand drags the map with it, two hands zoom
+## about their middle (and drag it), a still hand shows the tile's popup under its ray after GRAB_POPUP_MS
+func _update_grabs() -> void:
+	if grabs.is_empty() or map_size.x == 0:
+		return
+	var hands: Array = grabs.keys()
+	for hand in hands:
+		var grab: Dictionary = grabs[hand]
+		if not grab["drag"] and grips[hand].global_position.distance_to(grab["start"]) > GRAB_MOVE_METRES:
+			grab["drag"] = true
+			grab_view = {}
+	if hands.size() == 2: # a hand that was the pivot of a zoom opens no popup when the other lets go
+		for hand in hands:
+			grabs[hand]["drag"] = true
+	var points: Array = hands.map(func(hand): return room.panel_point(grips[hand].global_position))
+	var dragging: bool = hands.any(func(hand): return grabs[hand]["drag"])
+	if hands.size() == 1 and not dragging:
+		var hand: int = hands[0]
+		if not table_popup and Time.get_ticks_msec() - int(grabs[hand]["ms"]) >= GRAB_POPUP_MS:
+			var tile := _table_tile(hand)
+			if tile.x >= 0:
+				table_popup = true
+				vcmi_data.tile_input(tile, TILE_HOVER)
+				vcmi_data.tile_input(tile, TILE_POPUP)
+				_pulse(hand, 0.5)
+		return
+	if table_popup:
+		return
+	var middle: Vector2 = points[0] if points.size() == 1 else (points[0] + points[1]) / 2.0
+	var spread: float = 0.0 if points.size() == 1 else (points[0] as Vector2).distance_to(points[1])
+	if grab_view.is_empty() or grab_view["hands"] != points.size():
+		grab_view = {"centre": room.zoom_centre, "zoom": room.zoom, "at": middle, "spread": spread, "hands": points.size()}
+	var zoom: float = grab_view["zoom"]
+	if points.size() == 2 and grab_view["spread"] > 0.01:
+		var closest := TableMath.zoom_for(TABLE_MAX_TILE_METRES, room.minimap_size().x, map_size)
+		zoom = clampf(zoom * spread / grab_view["spread"], float(map_size.z), closest)
+	var centre := TableMath.zoom_about(grab_view["centre"], grab_view["zoom"], zoom, grab_view["at"])
+	centre = TableMath.drag(centre, grab_view["at"], middle, zoom)
+	var level := clampi(int(room.zoom_centre.x * map_size.z), 0, map_size.z - 1)
+	room.set_zoom(zoom, TableMath.on_level(centre, zoom, level, map_size.z))
 
 
 ## A short click on the controller of `hand`; the game's own hapticFeedback() is called for touch input only
@@ -951,28 +1023,29 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 					vcmi_data.atlas_stats())
 			_save_sprites("/sdcard/Android/data/is.xyz.vcmi.quest/files/sprites.bin")
 		"sprites_check": # plan step 6: the view's sprites after its change updates match a whole update_sprites of it
-			if vcmi_data == null or vcmi_data.sprite_table() == null or sprites_held or sprites_pending:
+			var shown: bool = room.sprite_multimesh().instance_count > 0
+			if vcmi_data == null or vcmi_data.sprite_table() == null or sprites_held or sprites_pending or not shown:
 				print("VCMI XR: sprites check skipped: no view's sprites, or they are held or loading")
-				return
-			var mm: MultiMesh = room.sprite_multimesh()
-			var kept: PackedFloat32Array = mm.buffer
-			var kept_table: Image = vcmi_data.sprite_table()
-			var stats: Dictionary = vcmi_data.atlas_stats()
-			vcmi_data.update_sprites(mm, sprite_rect, sprite_level)
-			var now: PackedFloat32Array = mm.buffer
-			var differ := -1 if kept.size() == now.size() else 0
-			for i in kept.size() if differ < 0 else 0:
-				# the first frame indexes each table, which the changes extend in their own order: compare the frames
-				var same := kept[i] == now[i] if i % 20 != 16 \
-						else _table_frame(kept_table, int(kept[i])) == _table_frame(vcmi_data.sprite_table(),
-								int(now[i]))
-				if not same:
-					differ = i / 20
-					break
-			room.set_sprites(vcmi_data.atlas_textures(), vcmi_data.sprite_table(), false)
-			print("VCMI XR: sprites check ", "same" if differ < 0 else "DIFFERENT at instance %d" % differ, ", ",
-					kept.size() / 20,
-					" -> ", now.size() / 20, " instances, ", stats)
+			else:
+				var mm: MultiMesh = room.sprite_multimesh()
+				var kept: PackedFloat32Array = mm.buffer
+				var kept_table: Image = vcmi_data.sprite_table()
+				var stats: Dictionary = vcmi_data.atlas_stats()
+				vcmi_data.update_sprites(mm, sprite_rect, sprite_level)
+				var now: PackedFloat32Array = mm.buffer
+				var differ := -1 if kept.size() == now.size() else 0
+				for i in kept.size() if differ < 0 else 0:
+					# the first frame indexes each table, which the changes extend in their own order: compare the frames
+					var same := kept[i] == now[i] if i % 20 != 16 \
+							else _table_frame(kept_table, int(kept[i])) == _table_frame(vcmi_data.sprite_table(),
+									int(now[i]))
+					if not same:
+						differ = i / 20
+						break
+				room.set_sprites(vcmi_data.atlas_textures(), vcmi_data.sprite_table(), false)
+				print("VCMI XR: sprites check ", "same" if differ < 0 else "DIFFERENT at instance %d" % differ, ", ",
+						kept.size() / 20,
+						" -> ", now.size() / 20, " instances, ", stats)
 		# a 1: the game shows the map on the tabletop only (milestone 3c): the 2D map stops, hero steps wait for the
 		# table; 0: back
 		"tabletop":
@@ -1025,6 +1098,11 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 							print("VCMI XR: move trace %d ms instance %d at %.2f, %.2f tiles" % [
 									Time.get_ticks_msec() - start, i, x, y])
 				last = now
+		# moves the view by a, b of the map's UV, as a hand drag does (TableMath.drag), on the view's level
+		"table_pan":
+			var level := clampi(int(room.zoom_centre.x * map_size.z), 0, maxi(map_size.z - 1, 0))
+			var panned := TableMath.drag(room.zoom_centre, Vector2.ZERO, -Vector2(a, b) * room.zoom, room.zoom)
+			room.set_zoom(room.zoom, TableMath.on_level(panned, room.zoom, level, maxi(map_size.z, 1)))
 		# the minimap shows 1 / a of the map around b, c (minimap UV, both levels side by side; 0: the centre)
 		"table_zoom":
 			room.set_zoom(a if a > 0.0 else 1.0, Vector2(b if b > 0.0 else 0.5, c if c > 0.0 else 0.5))
