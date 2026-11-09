@@ -204,6 +204,28 @@ void fragment() {
 		pointer_dot.add_child(dot)
 
 
+## everything the sprites on the table are drawn from, for the preview on the PC (quest/tools/render-room.sh sprites):
+## the minimap images, the atlas pages and masks, the frame table and the MultiMesh buffer, as one Variant file
+func _save_sprites(path: String) -> void:
+	var entry := func(image: Image) -> Array:
+		return [image.get_width(), image.get_height(), image.get_format(), image.get_data(), image.has_mipmaps()] if image != null else []
+	var textures: Array = vcmi_data.atlas_textures()
+	var pages := []
+	var masks := []
+	for layer in (textures[0] as Texture2DArray).get_layers():
+		var page: Image = textures[0].get_layer_data(layer)
+		page.clear_mipmaps()
+		pages.append(entry.call(page))
+		var mask: Image = textures[1].get_layer_data(layer)
+		mask.clear_mipmaps()
+		masks.append(entry.call(mask))
+	var multimesh: MultiMesh = room.sprite_multimesh()
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	file.store_var({"terrain": entry.call(vcmi_data.terrain_image()), "fog": entry.call(vcmi_data.fog_image()), "pages": pages,
+			"masks": masks, "table": entry.call(vcmi_data.sprite_table()), "count": multimesh.instance_count, "buffer": multimesh.buffer, "names": vcmi_data.sprite_names()})
+	print("VCMI XR: sprites saved to ", path, ", ", file.get_length(), " bytes")
+
+
 func _exit_tree() -> void:
 	if atlas_task >= 0:
 		WorkerThreadPool.wait_for_task_completion(atlas_task)
@@ -546,8 +568,13 @@ func _pulse(hand: int, amplitude: float) -> void:
 ## angles in degrees, height in metres, stick values -1..1 with y up, as the right (stick) and left (lstick) thumbstick
 func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 	match command:
-		"head":
-			test_head = Transform3D(Basis.from_euler(Vector3(deg_to_rad(b), deg_to_rad(a), 0.0)), Vector3(0.0, c if c > 0.0 else 1.6, 0.0))
+		"head", "table_view": # table_view: above the minimap, looking down at it; a the height above the table (default 0.45 m)
+			if command == "head":
+				test_head = Transform3D(Basis.from_euler(Vector3(deg_to_rad(b), deg_to_rad(a), 0.0)), Vector3(0.0, c if c > 0.0 else 1.6, 0.0))
+			else:
+				var minimap: Transform3D = room._table * Transform3D(Basis(), Vector3(0.0, room.TABLE_TOP, 0.0))
+				var eye := minimap * Vector3(0.0, a if a > 0.0 else 0.45, 0.15)
+				test_head = Transform3D(Basis(), eye).looking_at(minimap.origin, Vector3.UP)
 			test_head_start = null
 			# the real controllers lie next to the real headset; moved with a simulated head they can end up in front of the eyes
 			for model in models:
@@ -666,6 +693,22 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 				if page != null:
 					sheet.blit_rect(page, Rect2i(Vector2i.ZERO, page.get_size()), Vector2i(layer % 4, layer / 4) * 512)
 			sheet.save_png("/sdcard/Android/data/is.xyz.vcmi.quest/files/atlas-pages.png")
+		"sprites": # the object sprites on the minimap (quest/MILESTONE_3B.md, plan step 4): a, b the top-left tile, c the
+				# size in tiles (default: the whole map), level 0; loads the atlas, waits, fills the sprites, checks precision
+			if vcmi_data == null:
+				return
+			var map: Vector3i = vcmi_data.stats().get("map", Vector3i.ZERO)
+			var tiles := Rect2i(int(a), int(b), int(c), int(c)) if c > 0.0 else Rect2i(0, 0, map.x, map.y)
+			var wanted: int = vcmi_data.atlas_view(tiles, 0)
+			var from := Time.get_ticks_msec()
+			while vcmi_data.atlas_busy() and Time.get_ticks_msec() - from < 20000:
+				await get_tree().process_frame
+			var started := Time.get_ticks_usec()
+			var count: int = vcmi_data.update_sprites(room.sprite_multimesh(), tiles, 0, true)
+			var fill_us := Time.get_ticks_usec() - started
+			room.set_sprites(vcmi_data.atlas_textures(), vcmi_data.sprite_table(), true)
+			print("VCMI XR: sprites ", tiles, ": ", wanted, " animations, ", count, " instances in ", fill_us, " us, ", vcmi_data.atlas_stats())
+			_save_sprites("/sdcard/Android/data/is.xyz.vcmi.quest/files/sprites.bin")
 		"probe", "bridge":
 			pass
 		_:

@@ -93,7 +93,7 @@ Keys and text into the game itself: its display id is in `dumpsys display` ("VCM
 
 ### War room tools (Windows)
 
-`bake-room.sh` (rebake after changing anything static in `room.gd`; commit the `.lmbake`, the `.exr` and its `.import`) and `render-room.sh` (preview PNGs in `quest/out/room-preview/`, warns about geometry that could cover the screen) run the Windows Godot 4.7.2 editor from `~/vcmi-tools/godot-4.7.2-win` in Git Bash. They need an active Windows desktop session (the editor hangs while it is disconnected or locked) and restore `project.godot`, which the editor rewrites.
+`bake-room.sh` (rebake after changing anything static in `room.gd`; commit the `.lmbake`, the `.exr` and its `.import`) and `render-room.sh` (preview PNGs in `quest/out/room-preview/`, warns about geometry that could cover the screen; `render-room.sh sprites [name|near]` renders only the war table with the sprites the headset saved with the test command `sprites`, about 13 s, for shader and layout changes without an APK; `QUEST_ADDRESS=<ip>:5555` pulls the newest capture; see `MILESTONE_3B.md` section 1d) run the Windows Godot 4.7.2 editor from `~/vcmi-tools/godot-4.7.2-win` in Git Bash. They need an active Windows desktop session (the editor hangs while it is disconnected or locked) and restore `project.godot`, which the editor rewrites.
 
 ### Measuring
 

@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <dlfcn.h>
+#include <map>
 #include <memory>
 #include <string>
 
@@ -59,6 +60,9 @@ protected:
 		ClassDB::bind_method(D_METHOD("atlas_stats"), &VcmiData::atlas_stats);
 		ClassDB::bind_method(D_METHOD("atlas_page", "layer"), &VcmiData::atlas_page);
 		ClassDB::bind_method(D_METHOD("atlas_textures"), &VcmiData::atlas_textures);
+		ClassDB::bind_method(D_METHOD("update_sprites", "multimesh", "tiles", "level", "with_names"), &VcmiData::update_sprites, DEFVAL(false));
+		ClassDB::bind_method(D_METHOD("sprite_table"), &VcmiData::sprite_table);
+		ClassDB::bind_method(D_METHOD("sprite_names"), &VcmiData::sprite_names);
 		BIND_CONSTANT(TERRAIN_CHANGED);
 		BIND_CONSTANT(FOG_CHANGED);
 		BIND_CONSTANT(IN_GAME);
@@ -88,6 +92,12 @@ protected:
 	Ref<Image> terrain;
 	Ref<Image> fogMap;
 	std::unique_ptr<SpriteAtlas> atlas; // made by the first atlas_view
+	Ref<Image> spriteTable; // of the last update_sprites: the frames in the atlas, 2 texels each
+	PackedStringArray spriteNames; // of the last update_sprites, per instance: "animation x,y group", for debugging
+
+	// the flag colours of the players (Graphics.cpp:72-90), also the marker colours; the 9th is neutral
+	static constexpr uint8_t PLAYER_COLOURS[9][3] = {{0xff, 0, 0}, {0x31, 0x52, 0xff}, {0x9c, 0x73, 0x52}, {0x42, 0x94, 0x29},
+		{0xff, 0x84, 0}, {0x8c, 0x29, 0xa5}, {0x09, 0x9c, 0xa5}, {0xc6, 0x7b, 0x8c}, {0x84, 0x84, 0x84}};
 
 	// the game stores tiles x-major (VcmiGrid); images are rows of y, with the levels side by side
 	template<typename Pixel>
@@ -395,6 +405,135 @@ public:
 		return result;
 	}
 
+	/// the sprites of the objects on `tiles` of level `level` whose frames are in the atlas (atlas_view, then wait for
+	/// atlas_busy), as the 2D map draws them, into `multimesh` in the minimap's unit space (as update_markers): one
+	/// instance per object and hero flag, in drawing order (the shader draws without depth, so the order is the
+	/// instance order). Fills sprite_table, and sprite_names when `with_names`. Returns the instance count.
+	/// Instance: transform pixels -> unit space at the anchor tile's bottom right; colour: the anchor and visitable tile
+	/// in minimap UV (the fog test); custom: first frame in the table, frame count + 1024 when mirrored, owner colour
+	/// (0-7 players, 8 neutral, 9 none), object id + 0.5 (the frame phase; the .5 checks the float precision).
+	/// shortcut: rebuilds every instance, and the table holds the atlas places of now: plan step 6 updates the changed
+	/// instances, and must run this again when atlas_stats().refills rises (a refill moves the frames)
+	int64_t update_sprites(const Ref<MultiMesh> & multimesh, const Rect2i & tiles, int level, bool with_names)
+	{
+		if(multimesh.is_null() || !atlas || map.width == 0)
+			return 0;
+		struct Sprite { uint16_t y; uint8_t fixed; uint16_t x; uint32_t id; uint8_t order; float custom[4]; float origin[2]; float fog[4]; std::string name; };
+		std::vector<Sprite> sprites;
+		// 8 floats per frame: page, x, y, width; height, then left and top from the full frame's bottom right (each frame
+		// its own full size), full width (for mirroring)
+		std::vector<float> table;
+		std::map<std::pair<std::string, int>, std::array<int, 2>> groups; // first, count (+ 1024 when mirrored)
+		// the 2D map mirrors these groups of heroes and boats (MapRendererObjects::getAnimation, createFlippedGroup)
+		static const std::map<int, int> mirrored = {{13, 1}, {14, 2}, {15, 3}, {10, 6}, {11, 7}, {12, 8}};
+		const auto group = [&](const std::string & name, int wanted) -> std::array<int, 2>
+		{
+			const auto key = std::make_pair(name, wanted);
+			if(auto it = groups.find(key); it != groups.end())
+				return it->second;
+			const std::vector<SpriteAtlas::Placed> placed = atlas->frames(name);
+			const auto has = [&](int g) { return std::any_of(placed.begin(), placed.end(), [g](const auto & f) { return f.group == g; }); };
+			int source = wanted;
+			bool mirror = false;
+			if(!has(wanted))
+				if(auto m = mirrored.find(wanted); m != mirrored.end() && has(m->second))
+				{
+					source = m->second;
+					mirror = true;
+				}
+			std::vector<SpriteAtlas::Placed> frames;
+			for(const auto & f : placed)
+				if(f.group == source)
+					frames.push_back(f);
+			std::sort(frames.begin(), frames.end(), [](const auto & l, const auto & r) { return l.frame < r.frame; });
+			std::array<int, 2> entry{int(table.size() / 8), int(frames.size()) + (mirror ? 1024 : 0)};
+			for(const auto & f : frames)
+			{
+				const float values[8] = {float(f.page), float(f.x), float(f.y), float(f.width), float(f.height),
+					float(f.left - f.fullWidth), float(f.top - f.fullHeight), float(f.fullWidth)};
+				table.insert(table.end(), values, values + 8);
+			}
+			groups[key] = entry;
+			return entry;
+		};
+		const Rect2i anchors(tiles.position, tiles.size + Vector2i(8, 8));
+		const float columns = float(map.width) * map.levels;
+		for(const VcmiObject & o : objects)
+		{
+			if(!(o.flags & VCMI_OBJECT_PRESENT) || (o.flags & VCMI_OBJECT_HIDDEN) || o.z != level || o.animation >= animations.size()
+				|| !anchors.has_point(Vector2i(o.x, o.y)))
+				continue;
+			const int vx = int(o.x) - (o.visit >> 4);
+			const int vy = int(o.y) - (o.visit & 15);
+			const float fog[4] = {(o.z * map.width + o.x + 0.5f) / columns, (o.y + 0.5f) / map.height,
+				(o.z * map.width + vx + 0.5f) / columns, (vy + 0.5f) / map.height};
+			// heroes draw their flag from a separate animation, not in the owner colour (MapRendererObjects::renderImage)
+			const bool hero = o.flags & VCMI_OBJECT_HERO;
+			const int owner = hero ? 9 : o.owner < 8 ? o.owner : o.owner == 255 ? 8 : 9;
+			const auto add = [&](const std::string & name, uint8_t order, int ownerCode)
+			{
+				const std::array<int, 2> g = group(name, o.group);
+				if((g[1] & 1023) == 0)
+					return;
+				// the full frame's bottom right sits on the anchor tile's bottom right (MapRendererObjects::renderImage).
+				// Heroes and boats come after the other objects of their row, as the 2D map draws them last on a tile
+				// (MapObjectDrawOrder::usesFixedDrawSlot). shortcut: special ground (clover field, cursed ground) is not
+				// drawn first as renderGround does: the bridge has no flag for it yet; a hero on its upper row is covered
+				Sprite sprite{o.y, uint8_t((o.flags & (VCMI_OBJECT_HERO | VCMI_OBJECT_BOAT)) ? 1 : 0), o.x, o.id, order,
+					{float(g[0]), float(g[1]), float(ownerCode), o.id + 0.5f},
+					{float((o.z * map.width + o.x + 1) * 32), float((o.y + 1) * 32)}, {fog[0], fog[1], fog[2], fog[3]},
+					with_names ? name + " " + std::to_string(o.x) + "," + std::to_string(o.y) + " " + std::to_string(o.group) : std::string()};
+				sprites.push_back(sprite);
+			};
+			add(animations[o.animation].utf8().get_data(), 0, owner);
+			// shortcut: a boat with a hero flies boat->flagAnimations[owner] with a wave overlay (MapRendererObjects::
+			// getFlagAnimation, getOverlayAnimation); not published by the bridge yet, so boats have no flag
+			if(hero && o.owner < 8)
+				add("AF0" + std::to_string(o.owner), 1, 9);
+		}
+		std::sort(sprites.begin(), sprites.end(), [](const Sprite & l, const Sprite & r)
+		{ return std::tie(l.y, l.fixed, l.x, l.id, l.order) < std::tie(r.y, r.fixed, r.x, r.id, r.order); });
+
+		// the table: 512 texels a row, 2 per frame
+		const int64_t texels = std::max<int64_t>(table.size() / 4, 1);
+		const int64_t rows = (texels + 511) / 512;
+		table.resize(rows * 512 * 4, 0.0f);
+		PackedByteArray bytes;
+		bytes.resize(table.size() * sizeof(float));
+		std::memcpy(bytes.ptrw(), table.data(), bytes.size());
+		spriteTable = Image::create_from_data(512, rows, false, Image::FORMAT_RGBAF, bytes);
+
+		const float sx = 1.0f / (32.0f * columns);
+		const float sz = 1.0f / (32.0f * map.height);
+		multimesh->set_instance_count(0);
+		multimesh->set_use_colors(true);
+		multimesh->set_use_custom_data(true);
+		multimesh->set_transform_format(MultiMesh::TRANSFORM_3D);
+		multimesh->set_instance_count(sprites.size());
+		spriteNames.clear();
+		if(with_names)
+			for(const Sprite & sprite : sprites)
+				spriteNames.push_back(String(sprite.name.c_str()));
+		PackedFloat32Array buffer;
+		buffer.resize(int64_t(sprites.size()) * 20);
+		float * out = buffer.ptrw();
+		for(const Sprite & sprite : sprites)
+		{
+			const float values[20] = {sx, 0, 0, sprite.origin[0] * sx - 0.5f, 0, 1, 0, 0.003f, 0, 0, sz, sprite.origin[1] * sz - 0.5f,
+				sprite.fog[0], sprite.fog[1], sprite.fog[2], sprite.fog[3],
+				sprite.custom[0], sprite.custom[1], sprite.custom[2], sprite.custom[3]};
+			std::memcpy(out, values, sizeof(values));
+			out += 20;
+		}
+		multimesh->set_buffer(buffer);
+		return sprites.size();
+	}
+
+	/// the frames of the last update_sprites: RGBAF, 512 texels a row, 2 per frame (page, x, y, width; height, left and
+	/// top from the full frame's bottom right, full width)
+	Ref<Image> sprite_table() const { return spriteTable; }
+	PackedStringArray sprite_names() const { return spriteNames; }
+
 	/// the animation names the objects use, by index (VcmiObject.animation)
 	PackedStringArray animation_names() const { return animations; }
 	int64_t object_count() const { return objects.size(); }
@@ -479,8 +618,6 @@ public:
 	/// the 20 floats of one marker instance, in MultiMesh buffer order
 	void markerInstance(const VcmiObject & o, double metres, float * out) const
 	{
-		static const uint8_t playerColours[8][3] = {{0xff, 0, 0}, {0x31, 0x52, 0xff}, {0x9c, 0x73, 0x52}, {0x42, 0x94, 0x29},
-			{0xff, 0x84, 0}, {0x8c, 0x29, 0xa5}, {0x09, 0x9c, 0xa5}, {0xc6, 0x7b, 0x8c}}; // Graphics.cpp
 		const float columns = float(map.width) * map.levels;
 		const int vx = int(o.x) - (o.visit >> 4);
 		const int vy = int(o.y) - (o.visit & 15);
@@ -494,7 +631,7 @@ public:
 			(o.z * map.width + o.x + 0.5f) / columns, (o.y + 0.5f) / map.height, u, v};
 		std::memcpy(out, values, sizeof(values));
 		for(int c = 0; c < 3; c++)
-			out[12 + c] = (o.owner < 8 ? playerColours[o.owner][c] : 0x84) / 255.0f;
+			out[12 + c] = PLAYER_COLOURS[o.owner < 8 ? o.owner : 8][c] / 255.0f;
 	}
 };
 

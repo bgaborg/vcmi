@@ -154,6 +154,63 @@ var _minimap: MeshInstance3D ## the game's minimap on the war table, from the da
 var _markers: MultiMeshInstance3D ## heroes, towns and flaggable objects on the minimap, in unit space of the panel
 const MINIMAP_AREA := Vector2(0.8, 0.5) ## metres on the table inside the corner figures
 const MARKER_METRES := 0.012 ## width of an object marker on the minimap
+var _sprites: MultiMeshInstance3D ## the objects' sprites from the atlas (quest/MILESTONE_3B.md), VcmiData.update_sprites
+## The sprites of the map objects from the atlas pages (VcmiData.update_sprites, quest/MILESTONE_3B.md): the quad of the
+## current frame, built from the frame table; pixels -> panel by the instance transform. Premultiplied colour, drawn in
+## instance order without depth (the order is the 2D map's). The owner colour goes on the mask of owned objects.
+const SPRITE_SHADER := "shader_type spatial;
+render_mode unshaded, shadows_disabled, blend_premul_alpha, depth_draw_never, cull_disabled;
+uniform sampler2DArray atlas : filter_linear_mipmap; // premultiplied sRGB: decoded after dividing by alpha
+uniform sampler2DArray masks : filter_linear_mipmap;
+uniform sampler2D frames : filter_nearest;
+uniform sampler2D fog : filter_nearest;
+uniform vec4 owner_colours[9];
+uniform bool precision_check = false;
+varying vec3 page_uv;
+varying flat int owner;
+varying flat float lost;
+vec4 texel(int i) {
+	return texelFetch(frames, ivec2(i % 512, i / 512), 0);
+}
+void vertex() {
+	float seen = max(textureLod(fog, COLOR.yx, 0.0).r, textureLod(fog, COLOR.wz, 0.0).r);
+	int id = int(floor(INSTANCE_CUSTOM.w));
+	lost = precision_check && abs(fract(INSTANCE_CUSTOM.w) - 0.5) > 0.01 ? 1.0 : 0.0;
+	int first = int(INSTANCE_CUSTOM.x + 0.5);
+	int packed = int(INSTANCE_CUSTOM.y + 0.5);
+	int count = max(packed % 1024, 1);
+	bool mirror = packed >= 1024;
+	// as MapRendererAdventureContext::objectImageIndex: 180 ms a frame, the clock and the frame offset by the id
+	int t = int(TIME * 1000.0);
+	int frame = ((t + (id * 97) % 180) / 180 + id) % count;
+	vec4 a = texel(2 * (first + frame)); // page, x, y, width
+	vec4 b = texel(2 * (first + frame) + 1); // height, left and top from the full frame's bottom right, full width
+	// the instance sits on the anchor tile's bottom right; mirrored, the frame's left edge is full width - left - width
+	float left = mirror ? -(b.y + b.w) - a.w : b.y;
+	VERTEX = vec3(left + UV.x * a.w, 0.0, b.z + UV.y * b.x);
+	vec2 source = vec2(mirror ? 1.0 - UV.x : UV.x, UV.y);
+	page_uv = vec3((a.yz + source * vec2(a.w, b.x)) / 512.0, a.x);
+	owner = int(INSTANCE_CUSTOM.z + 0.5);
+	if (seen == 0.0) {
+		VERTEX = vec3(0.0);
+	}
+}
+void fragment() {
+	vec4 c = texture(atlas, page_uv);
+	// sRGB to linear on the straight colour, then premultiplied again
+	vec3 straight = c.a > 0.0 ? c.rgb / c.a : vec3(0.0);
+	vec3 linear = mix(straight / 12.92, pow((straight + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), straight));
+	c.rgb = linear * c.a;
+	if (owner < 9) {
+		c.rgb = mix(c.rgb, owner_colours[owner].rgb * c.a, texture(masks, page_uv).r);
+	}
+	if (lost > 0.5) {
+		c = vec4(c.a, 0.0, 0.0, c.a);
+	}
+	ALBEDO = c.rgb;
+	ALPHA = c.a;
+}
+"
 ## markers sit in the fog unless their anchor or visitable tile is seen (INSTANCE_CUSTOM: both in minimap UV; the fog is x-major)
 const MARKER_SHADER := "shader_type spatial;
 render_mode unshaded, shadows_disabled;
@@ -272,6 +329,31 @@ func _ready() -> void:
 	_markers.name = "Markers"
 	_minimap.add_child(_markers)
 
+	var sprite_shader := Shader.new()
+	sprite_shader.code = SPRITE_SHADER
+	var sprite_material := ShaderMaterial.new()
+	sprite_material.shader = sprite_shader
+	var colours := PackedVector4Array()
+	for c in ["#ff0000", "#3152ff", "#9c7352", "#429429", "#ff8400", "#8c29a5", "#099ca5", "#c67b8c", "#848484"]:
+		var linear := Color(c).srgb_to_linear() # Graphics.cpp:72-90; the shader works in linear colour
+		colours.append(Vector4(linear.r, linear.g, linear.b, 1.0))
+	sprite_material.set_shader_parameter("owner_colours", colours)
+	var sprite_mesh := PlaneMesh.new()
+	sprite_mesh.size = Vector2.ONE
+	sprite_mesh.material = sprite_material
+	var sprite_multimesh := MultiMesh.new()
+	sprite_multimesh.transform_format = MultiMesh.TRANSFORM_3D
+	sprite_multimesh.use_colors = true
+	sprite_multimesh.use_custom_data = true
+	sprite_multimesh.mesh = sprite_mesh
+	sprite_multimesh.custom_aabb = multimesh.custom_aabb
+	_sprites = MultiMeshInstance3D.new()
+	_sprites.multimesh = sprite_multimesh
+	_sprites.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
+	_sprites.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_sprites.name = "Sprites"
+	_minimap.add_child(_sprites)
+
 
 ## The minimap from main.gd: new images when the game published them (else null), hidden outside a game
 func set_minimap(terrain: Image, fog: Image, in_game: bool) -> void:
@@ -281,6 +363,7 @@ func set_minimap(terrain: Image, fog: Image, in_game: bool) -> void:
 		var size := Vector2(terrain.get_size())
 		(_minimap.mesh as PlaneMesh).size = size * minf(MINIMAP_AREA.x / size.x, MINIMAP_AREA.y / size.y)
 		_markers.scale = Vector3(minimap_size().x, 1.0, minimap_size().y)
+		_sprites.scale = _markers.scale
 	if fog != null:
 		var texture: ImageTexture = material.get_shader_parameter("fog")
 		if texture != null and texture.get_size() == Vector2(fog.get_size()):
@@ -291,6 +374,9 @@ func set_minimap(terrain: Image, fog: Image, in_game: bool) -> void:
 	var marker_material: ShaderMaterial = _markers.multimesh.mesh.material
 	if marker_material.get_shader_parameter("fog") != material.get_shader_parameter("fog"):
 		marker_material.set_shader_parameter("fog", material.get_shader_parameter("fog"))
+	var sprite_material: ShaderMaterial = _sprites.multimesh.mesh.material
+	if sprite_material.get_shader_parameter("fog") != material.get_shader_parameter("fog"):
+		sprite_material.set_shader_parameter("fog", material.get_shader_parameter("fog"))
 
 
 ## metres of the minimap panel on the table
@@ -301,6 +387,22 @@ func minimap_size() -> Vector2:
 ## the object markers, which VcmiData.update_markers fills (main.gd)
 func marker_multimesh() -> MultiMesh:
 	return _markers.multimesh
+
+
+## the object sprites, which VcmiData.update_sprites fills (main.gd)
+func sprite_multimesh() -> MultiMesh:
+	return _sprites.multimesh
+
+
+## the atlas pages and the frame table of VcmiData (atlas_textures, sprite_table); markers off while sprites show.
+## precision_check tints sprites red whose instance data lost precision (MILESTONE_3B.md check 2)
+func set_sprites(textures: Array, table: Image, precision_check: bool) -> void:
+	var material: ShaderMaterial = _sprites.multimesh.mesh.material
+	material.set_shader_parameter("atlas", textures[0])
+	material.set_shader_parameter("masks", textures[1])
+	material.set_shader_parameter("frames", ImageTexture.create_from_image(table))
+	material.set_shader_parameter("precision_check", precision_check)
+	_markers.visible = false
 
 
 func _make_environment() -> Environment:
