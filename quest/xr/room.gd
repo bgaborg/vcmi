@@ -159,13 +159,14 @@ const MARKER_METRES := 0.012 ## width of an object marker on the minimap
 ## The sprites of the map objects from the atlas pages (VcmiData.update_sprites, quest/MILESTONE_3B.md): the quad of the
 ## current frame, built from the frame table; pixels -> panel by the instance transform. Premultiplied colour, drawn in
 ## instance order without depth (the order is the 2D map's). The owner colour goes on the mask of owned objects.
+## Owner 10: a terrain, river or road tile (quest/PHASE4.md 4c), 11 a fog tile: sampled inside the frame so the atlas
+## padding does not show between tiles. The fog tiles, last, cover what the local team does not see, as in 2D.
 const SPRITE_SHADER := """shader_type spatial;
 render_mode unshaded, shadows_disabled, blend_premul_alpha, depth_draw_never, cull_disabled;
 // premultiplied in linear light, sRGB-encoded (SpriteAtlas.h)
 uniform sampler2DArray atlas : source_color, filter_linear_mipmap;
 uniform sampler2DArray masks : filter_linear_mipmap;
 uniform sampler2D frames : filter_nearest;
-uniform sampler2D fog : filter_nearest;
 uniform vec4 owner_colours[9];
 uniform bool precision_check = false;
 uniform mat4 world_to_panel; // the minimap's world transform, inverted: content outside the panel is cut
@@ -178,13 +179,13 @@ vec4 texel(int i) {
 	return texelFetch(frames, ivec2(i % 512, i / 512), 0);
 }
 void vertex() {
-	float seen = max(textureLod(fog, COLOR.yx, 0.0).r, textureLod(fog, COLOR.wz, 0.0).r);
 	int id = int(floor(INSTANCE_CUSTOM.w));
 	lost = precision_check && abs(fract(INSTANCE_CUSTOM.w) - 0.5) > 0.01 ? 1.0 : 0.0;
 	int first = int(INSTANCE_CUSTOM.x + 0.5);
 	int packed = int(INSTANCE_CUSTOM.y + 0.5);
 	int count = max(packed % 1024, 1);
-	bool mirror = packed >= 1024;
+	bool mirror = (packed / 1024) % 2 == 1; // left-right
+	bool flip = packed >= 2048; // top-bottom: tiles only, whose full frame is square (32 x 32)
 	// as MapRendererAdventureContext::objectImageIndex: 180 ms a frame, the clock and the frame offset by the id
 	int t = int(TIME * 1000.0);
 	int frame = ((t + (id * 97) % 180) / 180 + id) % count;
@@ -192,20 +193,24 @@ void vertex() {
 	vec4 b = texel(2 * (first + frame) + 1); // height, left and top from the full frame's bottom right, full width
 	// the instance sits on the anchor tile's bottom right; mirrored, the frame's left edge is full width - left - width
 	float left = mirror ? -(b.y + b.w) - a.w : b.y;
-	VERTEX = vec3(left + UV.x * a.w, 0.0, b.z + UV.y * b.x);
-	vec2 source = vec2(mirror ? 1.0 - UV.x : UV.x, UV.y);
-	page_uv = vec3((a.yz + source * vec2(a.w, b.x)) / 512.0, a.x);
+	float top = flip ? -(b.z + b.w) - b.x : b.z;
+	VERTEX = vec3(left + UV.x * a.w, 0.0, top + UV.y * b.x);
+	vec2 source = vec2(mirror ? 1.0 - UV.x : UV.x, flip ? 1.0 - UV.y : UV.y);
 	owner = int(INSTANCE_CUSTOM.z + 0.5);
-	if (seen == 0.0) {
-		VERTEX = vec3(0.0);
-	}
+	// a tile's edge texels sampled at their centres: no blend with the clear padding around the frame
+	vec2 inset = owner >= 10 ? vec2(0.5) : vec2(0.0);
+	page_uv = vec3((a.yz + inset + source * (vec2(a.w, b.x) - 2.0 * inset)) / 512.0, a.x);
 	panel_xz = (world_to_panel * (MODEL_MATRIX * vec4(VERTEX, 1.0))).xz;
 }
 void fragment() {
 	if (abs(panel_xz.x) > panel_half.x || abs(panel_xz.y) > panel_half.y) {
 		discard;
 	}
-	vec4 c = texture(atlas, page_uv);
+	// tiles lie side by side: from mip 3 the 4 texels of padding between frames shrink below one texel and blend
+	// neighbours into the edges (SpriteAtlas.h PAD, extrude), so they stop at mip 2
+	vec2 texels = page_uv.xy * 512.0;
+	float lod = log2(max(max(length(dFdx(texels)), length(dFdy(texels))), 1.0));
+	vec4 c = owner >= 10 ? textureLod(atlas, page_uv, min(lod, 2.0)) : texture(atlas, page_uv);
 	// most of a sprite's quad is clear: no blending there (MILESTONE_3B.md section 1e)
 	if (c.a < 0.004) {
 		discard;
@@ -439,9 +444,6 @@ func set_minimap(terrain: Image, fog: Image, in_game: bool) -> void:
 	var marker_material: ShaderMaterial = _markers.multimesh.mesh.material
 	if marker_material.get_shader_parameter("fog") != material.get_shader_parameter("fog"):
 		marker_material.set_shader_parameter("fog", material.get_shader_parameter("fog"))
-	var sprite_material: ShaderMaterial = _sprites.multimesh.mesh.material
-	if sprite_material.get_shader_parameter("fog") != material.get_shader_parameter("fog"):
-		sprite_material.set_shader_parameter("fog", material.get_shader_parameter("fog"))
 
 
 ## The minimap shows 1 / `factor` of the map around `centre` (minimap UV), clamped to the map: the terrain by its UV,

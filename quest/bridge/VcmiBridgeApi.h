@@ -10,7 +10,7 @@
 #include <stdint.h>
 
 // raise on any change to the structs below; the extension refuses a table with another version
-#define VCMI_BRIDGE_VERSION 8
+#define VCMI_BRIDGE_VERSION 9
 
 typedef struct VcmiBridgeStats
 {
@@ -103,11 +103,15 @@ typedef struct VcmiObjectChanges
 	uint8_t pad[3];
 } VcmiObjectChanges;
 
-// one tile as the game stores it; terrain, river and road are the game's ids
+// one tile as the game stores it; terrain, river and road are the game's ids (0: no river, no road). flips: the game's
+// extTileFlags, 2 bits each for terrain, river and road (bits 0-1, 2-3, 4-5): 1 mirrored left-right, 2 top-bottom
 typedef struct VcmiTile
 {
-	uint8_t terrain, terrainView, river, riverDir, road, roadDir, flags, pad; // flags: VCMI_TILE_*
+	uint8_t terrain, terrainView, river, riverDir, road, roadDir, flags, flips; // flags: VCMI_TILE_*
 } VcmiTile;
+#define VCMI_LAYER_TERRAIN 0
+#define VCMI_LAYER_RIVER 1
+#define VCMI_LAYER_ROAD 2
 #define VCMI_TILE_BLOCKED 1
 #define VCMI_TILE_VISITABLE 2
 
@@ -189,4 +193,9 @@ typedef struct VcmiBridgeApi
 	// copies the selected hero's path (stats.pathGeneration) and returns its node count; copies nothing when capacity
 	// is smaller. VCMI_NONE while the game is writing: try next frame. Never waits, any thread
 	uint32_t (*path)(VcmiPathNode * out, uint32_t capacity);
+	// copies how the 2D map draws the tiles of terrain, river or road `id` (VCMI_LAYER_*) and returns its length, 0
+	// when there is none (no river, no road, an unknown id) or no game: "<file>#<mode>[,<start>:<length>]...", the
+	// animation (its frame is the tile's view or direction), the mode (o: opaque, k: palette index 0 clear) and the
+	// palette ranges that rotate by one colour every 180 ms (paletteAnimation). Any thread
+	uint32_t (*tileAnimation)(uint8_t layer, uint8_t id, char * out, uint32_t capacity);
 } VcmiBridgeApi;

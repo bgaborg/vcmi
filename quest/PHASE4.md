@@ -1,6 +1,6 @@
 # Phase 4: the tabletop adventure map (plan)
 
-Status: 2026-11-09, required checks done except check 3, which waits for a person in the headset (section 3a); milestones 4a and 4b built and played on the Quest with a simulated ray (sections 4a and 4b results; a battle, spells and the real buttons not yet checked). Next: milestone 4c.
+Status: 2026-11-09, required checks done except check 3, which waits for a person in the headset (section 3a); milestones 4a, 4b and 4c built and played on the Quest with a simulated ray (sections 4a, 4b and 4c results; a battle, spells and the real buttons not yet checked). Next: milestone 4d.
 
 Goal (from [`PROJECT_PLAN.md`](PROJECT_PLAN.md#phase-4---tabletop-adventure-map-after-data-bridge-milestones-2-and-3)): the adventure map is fully playable on the war table, and one button goes back to the 2D screen.
 
@@ -222,6 +222,43 @@ Each one is tested on the Quest, reviewed, and recorded here with its numbers be
 - **GPU:** measure with the sprites. The budget is the 7 ms left for the table. If over, the opaque-first pass ([`MILESTONE_3B.md`](MILESTONE_3B.md) section 1e).
 - **Exit:** the table looks like the 2D map at the same zoom (a screenshot next to the 2D view), within budget on the heaviest map.
 
+#### 4c results (2026-11-09)
+
+- **Bridge, version 9:**
+  - `VcmiTile.flips` (the free byte) carries the game's `extTileFlags`: 2 bits each for terrain, river and road. Bit 1 mirrors left-right, which is VCMI's `CAnimation::verticalFlip`; bit 2 flips top-bottom.
+  - `tileAnimation(layer, id)` names how the 2D map draws a terrain, river or road: `<file>#<mode>[,<start>:<length>]...`. The mode is opaque (terrain) or colour key (rivers, roads), and each range is a palette range that rotates (`paletteAnimation`).
+- **Atlas** (`decodeBaked`):
+  - Tile animations are baked with that palette.
+  - The rotating ones get one group per rotation step, as `AssetGenerator::generatePaletteShiftedAnimation` makes the 2D map's `_Shifted` animations. Water bakes 12 steps of 80 tiles; the clear river 12 of 13.
+  - Frames that are opaque to their border get their edge pixels copied into the padding (`extrude`), so the smaller mipmaps show no seams between tiles.
+  - **64 pages (about 112 MB) instead of 48.** The heaviest map's tabletop view overflowed 48 pages once its terrain came in, and the table fell back to markers. With 64 it used 51.
+- **Sprites:**
+  - Each instance has a layer that sorts first: terrain, rivers, roads, objects, then fog, as the 2D map draws a tile.
+  - Roads are drawn half a tile down.
+  - Tiles cycle their palette steps every 180 ms (`terrainImageIndex`).
+  - The shader flips top-bottom (frame count + 2048). It samples tiles inside their frame (a half-texel inset) and at most from mip 2, where the atlas padding still separates frames.
+- **Fog as in 2D** (`MapRendererFow`):
+  - Hidden tiles get a fog sprite over the objects: a soft edge from `TSHRE`, picked by the visible neighbours as `NeighborTilesInfo` does (the last 17 edges mirrored), else a starry `TSHRC` tile picked by the tile's coordinates.
+  - Objects are now drawn whatever the fog, as in 2D. Before, an object whose anchor tile was hidden vanished whole, even where it stood on seen tiles.
+  - A fog change renews only the fog sprites, in `update_sprite_changes`: 0.45-0.8 ms per hero step on the first scenario.
+  - Fog lies over every tile an object drawn in the view can reach (the anchors' band, 8 tiles right and below). A pan that waits for the atlas then shows no hidden object.
+  - The fog's two animations are asked for first, so an overflowing view fails an object animation, never the fog.
+- **On the Quest** (`quest/out/phase4c/`):
+  - **First scenario:**
+    - Grass, the clear river, the cobblestone roads and the fog's soft edge match the 2D view of the same place (`6-table-fog-extruded.jpg`, `3-2d-view.jpg`). The pine forest at the fog's edge now stands half covered, as in 2D.
+    - After the hero walked 3 steps, the fog opened onto the coast and the sea (`11-after-walk.jpg`), and the sprites still matched a full rebuild.
+    - 72-73 fps, with an app GPU time of 5.8-7.0 ms.
+  - **Heaviest map, revealed:**
+    - Tabletop zoom, 20 pans of 2 tiles and 3 far jumps: 72-73 fps, with an app GPU time of 5.7-6.7 ms. That is 0.3-0.5 ms more than without terrain, inside the 7 ms left for the table.
+    - No overflow, and sprites matched a full rebuild (`9-heavy-64-pages.jpg`, `heavy-terrain-pan64.csv`).
+  - **Local render** (`render-room.sh sprites`): with the headset's saved sprites, the shader change rendered on the PC before an APK build.
+- **Not checked yet / left:**
+  - The review's other findings are fixed: the tile names are read again for each map (mods), and a palette rotating in more than 64 steps is baked still.
+  - The water's motion was not watched (screenshots are stills); the frame table holds the 12 steps per tile.
+  - A rebuild of the view's sprites now takes up to 3.5 ms on the heaviest map, right after a far jump, and up to 3 ms on the first scenario, whose view is mostly fog. That is over the 1 ms budget for one frame, but held 72 fps. `shortcut:` main thread; a worker or keeping the tile sprites between views if it shows.
+  - Below the sprite zoom (markers), the fog's tiles show faint seams; that zoom draws markers, not sprites.
+  - The 2D map's special ground (clover fields, cursed ground) under the roads, and the map border outside the map, are not drawn.
+
 ### 4d. The side panel on the table
 
 - Resources and the date at the table edge; the hero and town lists (movement, mana) with selection through the bridge; the end turn button as the hourglass.
@@ -248,7 +285,7 @@ Each one is tested on the Quest, reviewed, and recorded here with its numbers be
 | Main thread, per frame | the bridge consumer 0.5 ms; no single frame over 1 ms of table work (rebuilds go to a worker in 4b) |
 | A click to the hero starting to move | under 100 ms, as in 2D |
 | Hero step | the game's own time (150 ms default), waited for as in milestone 3c |
-| Memory | atlas pages 84 MB (48 pages, raised in 4b from the 64 MB of [`MILESTONE_3B.md`](MILESTONE_3B.md) section 1a), terrain on top |
+| Memory | atlas pages 112 MB (64 pages, raised in 4b and 4c from the 64 MB of [`MILESTONE_3B.md`](MILESTONE_3B.md) section 1a), terrain in them |
 
 ## 6. Open decisions
 

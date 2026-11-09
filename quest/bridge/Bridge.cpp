@@ -32,6 +32,8 @@
 #include "../../lib/CPlayerState.h"
 #include "../../lib/CThreadHelper.h"
 #include "../../lib/GameLibrary.h"
+#include "../../lib/RiverHandler.h"
+#include "../../lib/RoadHandler.h"
 #include "../../lib/StartInfo.h"
 #include "../../lib/TerrainHandler.h"
 #include "../../lib/UnlockGuard.h"
@@ -462,6 +464,7 @@ void publishTiles(const CCallback & cb, const int3 & size)
 				out.roadDir = tile->roadDir;
 				// shortcut: blocking as at map load; objects that appear or vanish later update it with the object buffer (milestone 3)
 				out.flags = (tile->blocked() ? VCMI_TILE_BLOCKED : 0) | (tile->visitable() ? VCMI_TILE_VISITABLE : 0);
+				out.flips = tile->extTileFlags;
 			}
 	std::array<uint32_t, VCMI_TERRAIN_COLOURS * 2> colours{};
 	for(const auto & terrain : LIBRARY->terrainTypeHandler->getObjects())
@@ -872,6 +875,45 @@ uint32_t copyAnimation(uint32_t index, char * out, uint32_t capacity)
 	return length;
 }
 
+// as MapRendererTerrain, MapRendererRiver and MapRendererRoad load them (client/mapView/MapRenderer.cpp)
+uint32_t tileAnimation(uint8_t layer, uint8_t id, char * out, uint32_t capacity)
+{
+	if(!inGame.load() || capacity == 0)
+		return 0;
+	std::string spec;
+	const auto describe = [&spec](const AnimationPath & file, char mode, const auto & palette)
+	{
+		spec = file.getOriginalName() + "#" + mode;
+		for(const auto & range : palette)
+			spec += "," + std::to_string(range.start) + ":" + std::to_string(range.length);
+	};
+	// terrain ids past the colour table share its last slot (publishTiles): no animation for that one
+	if(layer == VCMI_LAYER_TERRAIN && id < VCMI_TERRAIN_COLOURS - 1 && id < LIBRARY->terrainTypeHandler->size())
+	{
+		const auto * terrain = LIBRARY->terrainTypeHandler->getById(TerrainId(id));
+		if(terrain)
+			describe(terrain->tilesFilename, 'o', terrain->paletteAnimation);
+	}
+	else if(layer == VCMI_LAYER_RIVER && id != RiverId::NO_RIVER.getNum() && id < LIBRARY->riverTypeHandler->size())
+	{
+		const auto * river = LIBRARY->riverTypeHandler->getById(RiverId(id));
+		if(river)
+			describe(river->tilesFilename, 'k', river->paletteAnimation);
+	}
+	else if(layer == VCMI_LAYER_ROAD && id != RoadId::NO_ROAD.getNum() && id < LIBRARY->roadTypeHandler->size())
+	{
+		const auto * road = LIBRARY->roadTypeHandler->getById(RoadId(id));
+		if(road)
+			describe(road->tilesFilename, 'k', std::vector<RiverPaletteAnimation>());
+	}
+	if(spec.empty() || spec[0] == '#')
+		return 0;
+	const size_t length = std::min<size_t>(spec.size(), capacity - 1);
+	std::memcpy(out, spec.data(), length);
+	out[length] = 0;
+	return length;
+}
+
 uint32_t decodeFrames(const char * name, VcmiAnimationData * out)
 {
 	// per calling thread, so Godot's workers decode side by side; valid until that thread's next call
@@ -916,4 +958,5 @@ extern "C" __attribute__((visibility("default"))) const VcmiBridgeApi vcmi_bridg
 	confirmMove,
 	tileInput,
 	copyPath,
+	tileAnimation,
 };

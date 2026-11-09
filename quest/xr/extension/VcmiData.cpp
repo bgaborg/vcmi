@@ -34,6 +34,8 @@ using namespace godot;
 
 #include "SpriteAtlas.h"
 
+#include <bitset>
+
 namespace
 {
 // the game library loads after Godot, so it is looked up again until found; the table lives as long as the process
@@ -57,6 +59,7 @@ protected:
 		ClassDB::bind_method(D_METHOD("object_count"), &VcmiData::object_count);
 		ClassDB::bind_method(D_METHOD("update_markers", "multimesh", "panel_size", "metres"), &VcmiData::update_markers);
 		ClassDB::bind_method(D_METHOD("decode_animation", "name"), &VcmiData::decode_animation);
+		ClassDB::bind_method(D_METHOD("tile_animation", "layer", "id"), &VcmiData::tile_animation);
 		ClassDB::bind_method(D_METHOD("atlas_view", "tiles", "level"), &VcmiData::atlas_view);
 		ClassDB::bind_method(D_METHOD("atlas_busy"), &VcmiData::atlas_busy);
 		ClassDB::bind_method(D_METHOD("atlas_stats"), &VcmiData::atlas_stats);
@@ -113,9 +116,15 @@ protected:
 	// of the last atlas_view: which animations it asked for, by animation index, and the hero flags by owner
 	std::vector<uint8_t> inAtlas;
 	std::array<bool, 8> flagInAtlas{};
+	// by layer * 256 + id; layer FOG_TILES: the fog's two animations
+	std::array<bool, 4 * 256> tileInAtlas{};
+	std::array<std::string, 4 * 256> tileNames; // tileName: the bridge's tileAnimation, by layer * 256 + id
+	Rect2i fogArea; // of the last update_sprites: the tiles that get fog sprites
+	bool fogStale = false; // the fog changed: update_sprite_changes renews the fog sprites
 
 	struct Sprite
 	{
+		uint8_t layer; // VCMI_LAYER_* for tiles, OBJECT_LAYER: all terrain first, then rivers, roads, objects
 		uint16_t y;
 		uint8_t fixed;
 		uint16_t x;
@@ -126,7 +135,7 @@ protected:
 		float fog[4];
 		auto key() const
 		{
-			return std::tie(y, fixed, x, id, order);
+			return std::tie(layer, y, fixed, x, id, order);
 		} // the 2D map's drawing order
 	};
 	std::vector<Sprite> sprites; // of the last update_sprites and the changes since, in drawing order
@@ -142,6 +151,11 @@ protected:
 	// every object (53 808 on the heaviest map). Empty until first used after a new list or map; changes keep it
 	static constexpr int BUCKET = 8;
 	static constexpr uint32_t FLAG_KEY = 0x10000; // animation keys above the indices (uint16_t): a hero's flag, + owner
+	static constexpr uint32_t TILE_KEY = 0x20000; // then the tiles' animations: + layer * 256 + id
+	static constexpr uint8_t OBJECT_LAYER = 3;
+	static constexpr uint8_t FOG_LAYER = 4; // the fog over everything, as MapRendererFow draws it last on a tile
+	static constexpr int FOG_TILES = 3; // the fog's animations in the tile names: id 0 full (TSHRC), 1 edges (TSHRE)
+	static constexpr uint32_t TILE_ID = UINT32_MAX; // the object id of a tile's sprite: none
 	std::vector<std::vector<uint32_t>> buckets;
 	int bucketColumns = 0, bucketRows = 0;
 	VcmiBridgeStats latest{}; // of the last update
@@ -332,6 +346,7 @@ public:
 			markersReset = true;
 			spritesStale = true;
 			buckets.clear();
+			tileNames = {}; // another game may have other terrain, river and road types (mods)
 			terrain = Image::create_from_data(
 				grid.width * grid.levels,
 				grid.height,
@@ -369,6 +384,7 @@ public:
 			// level, the tiles of a column along it, values 0 or 1. No mipmaps: on the table it is barely minified.
 			fogMap = Image::create_from_data(grid.height, grid.width * grid.levels, false, Image::FORMAT_L8, fog);
 			changed |= FOG_CHANGED;
+			fogStale = true;
 		}
 		if(s.objectsSnapshot != seenSnapshot || resync ? fetchObjects() : s.objectsSequence != seenSequence && fetchChanges())
 			changed |= OBJECTS_CHANGED;
@@ -470,7 +486,33 @@ public:
 		return fogMap;
 	}
 
-	/// the frames of animation `name` (an animation_names entry) as the 2D map draws them (quest/MILESTONE_3B.md):
+	/// how the 2D map draws the tiles of terrain, river or road `id` (layer 0, 1, 2: VcmiBridgeApi.tileAnimation), a
+	/// name for the atlas and decode_animation; cached once known, empty when there is none or no game
+	String tile_animation(int layer, int id)
+	{
+		return String::utf8(tileName(layer, id).c_str());
+	}
+
+	const std::string & tileName(int layer, int id)
+	{
+		static const std::string none;
+		// as MapRendererFow loads them: the full fog opaque, the edges with shadow (the objects' palette)
+		static const std::string fog[2] = {"TSHRC#o", "TSHRE"};
+		if(layer == FOG_TILES)
+			return id == 0 || id == 1 ? fog[id] : none;
+		if(!api || layer < 0 || layer > 2 || id < 0 || id > 255)
+			return none;
+		std::string & name = tileNames[layer * 256 + id];
+		if(name.empty())
+		{
+			char buffer[256];
+			if(api->tileAnimation(uint8_t(layer), uint8_t(id), buffer, sizeof(buffer)))
+				name = buffer;
+		}
+		return name;
+	}
+
+	/// the frames of animation `name` (an animation_names entry, or a tile_animation) as the 2D map draws them (quest/MILESTONE_3B.md):
 	/// {frames: [{group, frame, left, top, full_size, image (RGBA8, shadow in alpha), mask (L8 owner flag,
 	/// or null), png (from a mod's PNG)}], bridge_us, bake_us}; empty frames when missing or no game is loaded. Reads the game's files: for a
 	/// test, or from a worker thread
@@ -483,11 +525,10 @@ public:
 			return result;
 		using Clock = std::chrono::steady_clock;
 		auto from = Clock::now();
-		VcmiAnimationData anim{};
-		api->decodeAnimation(name.utf8().get_data(), &anim);
+		const std::vector<BakedFrame> baked = decodeBaked(api, name.utf8().get_data());
 		result["bridge_us"] = int64_t(std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - from).count());
 		from = Clock::now();
-		for(const BakedFrame & b : bakeFrames(anim))
+		for(const BakedFrame & b : baked)
 		{
 			PackedByteArray px;
 			px.resize(b.rgba.size());
@@ -548,6 +589,151 @@ public:
 					visit(objects[id]);
 	}
 
+	/// calls `visit(tile, x, y, own)` for the tiles of `area` on `level` that are in the map (own true), and the row above
+	/// it (own false): a road is drawn half a tile down (MapRendererRoad::renderTile), so that row's roads reach `area`
+	template<typename Visit>
+	void forTilesIn(const Rect2i & area, int level, Visit visit) const
+	{
+		if(map.width == 0 || level < 0 || level >= map.levels || tiles.size() < size_t(map.width) * map.height * map.levels)
+			return;
+		const int x0 = std::max(area.position.x, 0), x1 = std::min(area.get_end().x, int(map.width));
+		const int y0 = std::max(area.position.y - 1, 0), y1 = std::min(area.get_end().y, int(map.height));
+		for(int x = x0; x < x1; x++)
+			for(int y = y0; y < y1; y++)
+				visit(tiles[(size_t(level) * map.width + x) * map.height + y], x, y, y >= area.position.y);
+	}
+
+	/// the sprites of the tiles of `area` on level `level`: terrain, river and road frames as the 2D map draws them
+	/// (MapRendererTerrain, MapRendererRiver, MapRendererRoad), appended to `out`. `missing` as spritesOf
+	void tileSprites(const Rect2i & area, int level, std::vector<Sprite> & out, bool & missing)
+	{
+		const float columns = float(map.width) * map.levels;
+		forTilesIn(
+			area,
+			level,
+			[&](const VcmiTile & tile, int x, int y, bool own)
+			{
+				const float fog[2] = {(level * map.width + x + 0.5f) / columns, (y + 0.5f) / map.height};
+				const int ids[3] = {tile.terrain, tile.river, tile.road};
+				const int views[3] = {tile.terrainView, tile.riverDir, tile.roadDir};
+				for(int layer = own ? 0 : VCMI_LAYER_ROAD; layer < 3; layer++)
+				{
+					if(layer > 0 && ids[layer] == 0)
+						continue;
+					const int key = layer * 256 + ids[layer];
+					if(!tileInAtlas[key])
+					{
+						missing |= !tileName(layer, ids[layer]).empty();
+						continue;
+					}
+					const std::array<int, 2> g = groupFrames(TILE_KEY + key, views[layer]);
+					if(g[1] == 0)
+						continue;
+					const int flips = (tile.flips >> (2 * layer)) & 3;
+					// a road lies half a tile down: its lower half on the tile below (MapRendererRoad::renderTile)
+					const float down = layer == VCMI_LAYER_ROAD ? 16.0f : 0.0f;
+					out.push_back(
+						Sprite{
+							uint8_t(layer),
+							uint16_t(y),
+							0,
+							uint16_t(x),
+							TILE_ID,
+							0,
+							{float(g[0]), float(g[1] + flips * 1024), 10.0f, 0.5f},
+							{float((level * map.width + x + 1) * 32), float((y + 1) * 32) + down},
+							{fog[0], fog[1], fog[0], fog[1]}
+					}
+					);
+				}
+			}
+		);
+	}
+
+	bool visible(int x, int y, int level) const
+	{
+		return x >= 0 && y >= 0 && x < map.width && y < map.height && fog.size() >= int64_t(map.width) * map.height * map.levels
+			&& fog[(int64_t(level) * map.width + x) * map.height + y] != 0;
+	}
+
+	/// the fog sprites of the hidden tiles of `area` on `level`, as MapRendererFow::renderTile draws them: the edge
+	/// frame by the visible neighbours (NeighborTilesInfo), else a full fog frame by the tile. `missing` as spritesOf
+	void fogSprites(const Rect2i & area, int level, std::vector<Sprite> & out, bool & missing)
+	{
+		if(!tileInAtlas[FOG_TILES * 256] || !tileInAtlas[FOG_TILES * 256 + 1])
+		{
+			missing = true;
+			return;
+		}
+		// NeighborTilesInfo::getBitmapID (MapRenderer.cpp): the edge frame for each pattern of visible neighbours
+		static const int8_t visBitmaps[256] = {
+			-1, 34, 4,  4,  22, 23, 4,  4,  36, 36, 38, 38, 47, 47, 38, 38, 3,  25, 12, 12, 3,  25, 12, 12, 9,  9,  6,  6,  9,  9,  6,  6,  35, 39, 48, 48, 41,
+			43, 48, 48, 36, 36, 38, 38, 47, 47, 38, 38, 26, 49, 28, 28, 26, 49, 28, 28, 9,  9,  6,  6,  9,  9,  6,  6,  0,  45, 29, 29, 24, 33, 29, 29, 37, 37,
+			7,  7,  50, 50, 7,  7,  13, 27, 44, 44, 13, 27, 44, 44, 8,  8,  10, 10, 8,  8,  10, 10, 0,  45, 29, 29, 24, 33, 29, 29, 37, 37, 7,  7,  50, 50, 7,
+			7,  13, 27, 44, 44, 13, 27, 44, 44, 8,  8,  10, 10, 8,  8,  10, 10, 15, 17, 30, 30, 16, 19, 30, 30, 46, 46, 40, 40, 32, 32, 40, 40, 2,  25, 12, 12,
+			2,  25, 12, 12, 9,  9,  6,  6,  9,  9,  6,  6,  18, 42, 31, 31, 20, 21, 31, 31, 46, 46, 40, 40, 32, 32, 40, 40, 26, 49, 28, 28, 26, 49, 28, 28, 9,
+			9,  6,  6,  9,  9,  6,  6,  0,  45, 29, 29, 24, 33, 29, 29, 37, 37, 7,  7,  50, 50, 7,  7,  13, 27, 44, 44, 13, 27, 44, 44, 8,  8,  10, 10, 8,  8,
+			10, 10, 0,  45, 29, 29, 24, 33, 29, 29, 37, 37, 7,  7,  50, 50, 7,  7,  13, 27, 44, 44, 13, 27, 44, 44, 8,  8,  10, 10, 8,  8,  10, 10
+		};
+		// MapRendererFow: the edges past the file's frames are these frames mirrored left-right
+		static const int rotations[17] = {22, 15, 2, 13, 12, 16, 28, 17, 20, 19, 7, 24, 26, 25, 30, 32, 27};
+		const int fullFrames = int(atlas->frames(tileName(FOG_TILES, 0)).size());
+		const int edgeFrames = int(atlas->frames(tileName(FOG_TILES, 1)).size());
+		const float columns = float(map.width) * map.levels;
+		forTilesIn(
+			area,
+			level,
+			[&](const VcmiTile &, int x, int y, bool own)
+			{
+				if(!own || visible(x, y, level))
+					return;
+				const auto seen = [&](int dx, int dy)
+				{
+					return visible(x + dx, y + dy, level);
+				};
+				// 567 / 3 4 / 012; a corner counts as visible when a side next to it is
+				std::bitset<8> d;
+				d[1] = seen(0, 1);
+				d[3] = seen(-1, 0);
+				d[4] = seen(1, 0);
+				d[6] = seen(0, -1);
+				d[0] = d[1] || d[3] || seen(-1, 1);
+				d[2] = d[1] || d[4] || seen(1, 1);
+				d[5] = d[3] || d[6] || seen(-1, -1);
+				d[7] = d[4] || d[6] || seen(1, -1);
+				const int edge = visBitmaps[d.to_ulong()];
+				int id = 1, frame = edge, flips = 0;
+				if(edge < 0)
+				{
+					id = 0;
+					frame = fullFrames ? int(size_t(((x * 997) ^ (y * 1009)) / 101) % size_t(fullFrames)) : 0;
+				}
+				else if(edge >= edgeFrames && edge - edgeFrames < 17)
+				{
+					frame = rotations[edge - edgeFrames];
+					flips = 1;
+				}
+				const std::array<int, 2> g = groupFrames(TILE_KEY + FOG_TILES * 256 + id, frame);
+				if(g[1] == 0)
+					return;
+				const float u = (level * map.width + x + 0.5f) / columns, v = (y + 0.5f) / map.height;
+				out.push_back(
+					Sprite{
+						FOG_LAYER,
+						uint16_t(y),
+						0,
+						uint16_t(x),
+						TILE_ID,
+						0,
+						{float(g[0]), float(g[1] + flips * 1024), 11.0f, 0.5f},
+						{float((level * map.width + x + 1) * 32), float((y + 1) * 32)},
+						{u, v, u, v}
+				}
+				);
+			}
+		);
+	}
+
 	/// asks the sprite atlas for the animations of the objects on `tiles` of map level `level` (quest/MILESTONE_3B.md,
 	/// plan step 3), and the hero flags there; returns how many animations that is. The workers load the missing ones,
 	/// update() uploads them.
@@ -561,7 +747,8 @@ public:
 		const Rect2i anchors(tiles.position, tiles.size + Vector2i(8, 8));
 		std::unordered_set<uint16_t> seen;
 		std::unordered_set<int> flags;
-		std::vector<std::string> names;
+		// the fog first: an overflowing view then fails an object's animation, never the fog over hidden tiles
+		std::vector<std::string> names = {tileName(FOG_TILES, 0), tileName(FOG_TILES, 1)};
 		forObjectsIn(
 			anchors,
 			level,
@@ -576,12 +763,33 @@ public:
 					names.push_back("AF0" + std::to_string(o.owner));
 			}
 		);
+		std::array<bool, 4 * 256> tileSeen{};
+		tileSeen[FOG_TILES * 256] = tileSeen[FOG_TILES * 256 + 1] = true;
+		forTilesIn(
+			tiles,
+			level,
+			[&](const VcmiTile & tile, int, int, bool own)
+			{
+				const int ids[3] = {tile.terrain, tile.river, tile.road};
+				for(int layer = own ? 0 : VCMI_LAYER_ROAD; layer < 3; layer++)
+				{
+					const int key = layer * 256 + ids[layer];
+					if((layer == 0 || ids[layer] != 0) && !tileSeen[key])
+					{
+						tileSeen[key] = true;
+						if(const std::string & name = tileName(layer, ids[layer]); !name.empty())
+							names.push_back(name);
+					}
+				}
+			}
+		);
 		atlas->want(names);
 		inAtlas.assign(animationNames.size(), 0);
 		for(uint16_t animation : seen)
 			inAtlas[animation] = 1;
 		for(int owner = 0; owner < 8; owner++)
 			flagInAtlas[owner] = flags.count(owner);
+		tileInAtlas = tileSeen;
 		return names.size();
 	}
 
@@ -674,6 +882,7 @@ public:
 			// drawn first as renderGround does: the bridge has no flag for it yet; a hero on its upper row is covered
 			out.push_back(
 				Sprite{
+					OBJECT_LAYER,
 					o.y,
 					uint8_t((o.flags & (VCMI_OBJECT_HERO | VCMI_OBJECT_BOAT)) ? 1 : 0),
 					o.x,
@@ -699,6 +908,8 @@ public:
 		const uint64_t key = uint64_t(animation) << 8 | uint8_t(wanted);
 		if(auto it = groups.find(key); it != groups.end())
 			return it->second;
+		if(animation >= TILE_KEY)
+			return tileFrames(key, animation - TILE_KEY, wanted);
 		const std::string name = animation >= FLAG_KEY ? "AF0" + std::to_string(animation - FLAG_KEY) : animationNames[animation];
 		// the 2D map mirrors these groups of heroes and boats (MapRendererObjects::getAnimation, createFlippedGroup)
 		static const std::map<int, int> mirrored = {
@@ -742,6 +953,36 @@ public:
 			}
 		);
 		std::array<int, 2> entry{int(table.size() / 8), int(frames.size()) + (mirror ? 1024 : 0)};
+		appendFrames(frames);
+		groups[key] = entry;
+		return entry;
+	}
+
+	/// groupFrames for a tile: frame `view` of each group of its animation (the palette rotation steps of decodeBaked),
+	/// which the shader cycles as the 2D map's terrainImageIndex does
+	std::array<int, 2> tileFrames(uint64_t key, uint32_t tile, int view)
+	{
+		std::vector<SpriteAtlas::Placed> frames;
+		for(const auto & f : atlas->frames(tileName(int(tile / 256), int(tile % 256))))
+			if(f.frame == view)
+				frames.push_back(f);
+		std::sort(
+			frames.begin(),
+			frames.end(),
+			[](const auto & l, const auto & r)
+			{
+				return l.group < r.group;
+			}
+		);
+		std::array<int, 2> entry{int(table.size() / 8), int(frames.size())};
+		appendFrames(frames);
+		groups[key] = entry;
+		return entry;
+	}
+
+	/// the frames into the table, 8 floats each (sprite_table)
+	void appendFrames(const std::vector<SpriteAtlas::Placed> & frames)
+	{
 		for(const auto & f : frames)
 		{
 			const float values[8] = {
@@ -756,8 +997,6 @@ public:
 			};
 			table.insert(table.end(), values, values + 8);
 		}
-		groups[key] = entry;
-		return entry;
 	}
 
 	/// sprite_table from the table: 512 texels a row, 2 per frame
@@ -831,8 +1070,10 @@ public:
 	/// instance per object and hero flag, in drawing order (the shader draws without depth, so the order is the
 	/// instance order). Fills sprite_table, and sprite_names when `with_names`. Returns the instance count.
 	/// Instance: transform pixels -> unit space at the anchor tile's bottom right; colour: the anchor and visitable tile
-	/// in minimap UV (the fog test); custom: first frame in the table, frame count + 1024 when mirrored, owner colour
-	/// (0-7 players, 8 neutral, 9 none), object id + 0.5 (the frame phase; the .5 checks the float precision).
+	/// in minimap UV (unused since the fog tiles cover the hidden ones); custom: first frame in the table, frame count
+	/// + 1024 mirrored left-right + 2048 top-bottom, owner colour (0-7 players, 8 neutral, 9 none, 10 a tile, 11 fog),
+	/// object id + 0.5 (the frame phase; the .5 checks the float precision). Before the objects: the terrain, river and
+	/// road tiles of `tiles` (tileSprites); after them the fog tiles (fogSprites).
 	/// The table holds the atlas places of now: run this again when atlas_stats().refills rises (a refill moves the frames).
 	/// Then update_sprite_changes keeps them up to date.
 	int64_t update_sprites(const Ref<MultiMesh> & multimesh, const Rect2i & tiles, int level, bool with_names)
@@ -856,6 +1097,12 @@ public:
 				spritesOf(o, sprites, missing);
 			}
 		);
+		tileSprites(tiles, level, sprites, missing);
+		// over every tile an object drawn here can reach: the anchors' band right and below, while a pan waits for
+		// the atlas with the old instances
+		fogArea = spriteAnchors;
+		fogStale = false;
+		fogSprites(fogArea, level, sprites, missing);
 		// objects that changed while the atlas loaded may need animations the view did not ask for: ask again
 		spritesStale = missing;
 		std::sort(
@@ -872,6 +1119,12 @@ public:
 		if(with_names)
 			for(const Sprite & sprite : sprites)
 			{
+				if(sprite.id == TILE_ID)
+				{
+					const std::string tile = std::to_string(sprite.x) + "," + std::to_string(sprite.y);
+					spriteNames.push_back(String(("tile " + tile + " layer " + std::to_string(sprite.layer)).c_str()));
+					continue;
+				}
 				const VcmiObject & o = objects[sprite.id];
 				const std::string name = sprite.order ? "AF0" + std::to_string(o.owner) : animationNames[o.animation];
 				spriteNames.push_back(String((name + " " + std::to_string(o.x) + "," + std::to_string(o.y) + " " + std::to_string(o.group)).c_str()));
@@ -888,7 +1141,7 @@ public:
 	{
 		if(spritesStale || multimesh.is_null() || !atlas)
 			return -1;
-		if(spriteChanges.empty())
+		if(spriteChanges.empty() && !fogStale)
 			return 0;
 		const auto from = std::chrono::steady_clock::now();
 		std::sort(spriteChanges.begin(), spriteChanges.end());
@@ -899,7 +1152,7 @@ public:
 				sprites.end(),
 				[this](const Sprite & sprite)
 				{
-					return std::binary_search(spriteChanges.begin(), spriteChanges.end(), sprite.id);
+					return (fogStale && sprite.layer == FOG_LAYER) || std::binary_search(spriteChanges.begin(), spriteChanges.end(), sprite.id);
 				}
 			),
 			sprites.end()
@@ -911,6 +1164,11 @@ public:
 			if(id < objects.size())
 				spritesOf(objects[id], added, missing);
 		spriteChanges.clear();
+		if(fogStale)
+		{
+			fogStale = false;
+			fogSprites(fogArea, spriteLevel, added, missing);
+		}
 		if(missing)
 		{
 			spritesStale = true;

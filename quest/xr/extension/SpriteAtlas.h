@@ -10,6 +10,7 @@
 #include <condition_variable>
 #include <deque>
 #include <mutex>
+#include <numeric>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -76,11 +77,12 @@ inline std::array<uint8_t, 1024> bakePalette(const uint8_t * rgb)
 	return out;
 }
 
-/// the frames of a decoded animation, baked; frames whose data is out of range or no PNG are left out. Any thread.
-inline std::vector<BakedFrame> bakeFrames(const VcmiAnimationData & anim)
+/// the frames of a decoded animation, baked; frames whose data is out of range or no PNG are left out. Indexed frames
+/// use `palette` when given (RGBA), else the map objects' (bakePalette). Any thread.
+inline std::vector<BakedFrame> bakeFrames(const VcmiAnimationData & anim, const std::array<uint8_t, 1024> * tilePalette = nullptr)
 {
 	std::vector<BakedFrame> out;
-	const auto palette = bakePalette(anim.palette);
+	const auto palette = tilePalette ? *tilePalette : bakePalette(anim.palette);
 	for(uint32_t i = 0; i < anim.frameCount; i++)
 	{
 		const VcmiFrame & f = anim.frames[i];
@@ -140,15 +142,77 @@ inline std::vector<BakedFrame> bakeFrames(const VcmiAnimationData & anim)
 	return out;
 }
 
+/// animation `name` decoded and baked: an object animation (VcmiObject.animation), or tile frames as the bridge's
+/// tileAnimation describes them, "<file>#<o|k>[,<start>:<length>]...": the palette opaque (o) or with index 0 clear
+/// (k), and one group per step of its rotating ranges, frame by frame of group 0, as AssetGenerator::
+/// generatePaletteShiftedAnimation makes the 2D map's "_Shifted" animations. Any thread.
+inline std::vector<BakedFrame> decodeBaked(const VcmiBridgeApi * api, const std::string & name)
+{
+	const size_t hash = name.find('#');
+	VcmiAnimationData anim{};
+	api->decodeAnimation(name.substr(0, hash).c_str(), &anim);
+	if(hash == std::string::npos || hash + 1 >= name.size())
+		return bakeFrames(anim);
+	std::array<uint8_t, 1024> base{};
+	for(int i = 0; anim.palette && i < 256; i++)
+	{
+		std::memcpy(&base[i * 4], &anim.palette[i * 3], 3);
+		base[i * 4 + 3] = 255;
+	}
+	if(name[hash + 1] == 'k')
+		base[0] = base[1] = base[2] = base[3] = 0;
+	std::vector<std::pair<int, int>> ranges;
+	int steps = 1;
+	for(size_t at = name.find(',', hash); at != std::string::npos; at = name.find(',', at + 1))
+	{
+		int start = 0, length = 0;
+		if(std::sscanf(name.c_str() + at + 1, "%d:%d", &start, &length) == 2 && start >= 0 && length > 0 && start + length <= 256)
+		{
+			ranges.emplace_back(start, length);
+			steps = std::lcm(steps, length);
+		}
+	}
+	// group 0 only, the source of the 2D map's tiles
+	std::vector<VcmiFrame> source;
+	bool png = false;
+	for(uint32_t i = 0; i < anim.frameCount; i++)
+		if(anim.frames[i].group == 0)
+		{
+			source.push_back(anim.frames[i]);
+			png |= anim.frames[i].format == VCMI_FRAME_PNG;
+		}
+	// a mod's PNG frames have no palette to rotate; ranges of coprime lengths would bake hundreds of steps per frame
+	if(png || steps > 64)
+		steps = 1;
+	VcmiAnimationData group0 = anim;
+	group0.frames = source.data();
+	group0.frameCount = uint32_t(source.size());
+	std::vector<BakedFrame> out;
+	for(int step = 0; step < steps; step++)
+	{
+		std::array<uint8_t, 1024> palette = base;
+		for(const auto & [start, length] : ranges)
+			for(int i = 0; i < length; i++)
+				std::memcpy(&palette[(start + (i + step) % length) * 4], &base[(start + i) * 4], 4);
+		for(BakedFrame & f : bakeFrames(group0, &palette))
+		{
+			f.group = uint16_t(step);
+			out.push_back(std::move(f));
+		}
+	}
+	return out;
+}
+
 class SpriteAtlas
 {
 public:
 	// small pages, many layers: an upload of a 2048² page with mipmaps took 7-11 ms of the main thread on the Quest
-	// (MILESTONE_3B.md section 1c); 512² layers hold the same pixels and upload in pieces. 48 x 512² RGBA8 with
-	// mipmaps and masks: about 84 MB on the GPU (the budget revised in PHASE4.md 4b)
+	// (MILESTONE_3B.md section 1c); 512² layers hold the same pixels and upload in pieces. 64 x 512² RGBA8 with
+	// mipmaps and masks: about 112 MB on the GPU (the budget revised in PHASE4.md 4c)
 	static constexpr int PAGE = 512;
-	// 48: the tabletop view of the heaviest map (1.5 cm tiles, PHASE4.md 4b) needed about 10 % more than 32 pages
-	static constexpr int PAGES = 48;
+	// 64: the tabletop view of the heaviest map (1.5 cm tiles) needed about 10 % more than 32 pages for its objects
+	// (PHASE4.md 4b), and overflowed 48 once its terrain came in (4c: water and lava bake a frame per palette step)
+	static constexpr int PAGES = 64;
 	static constexpr int PAD = 4; // between sprites: they stay apart in mips 0-1 and mostly in 2; the LOD switch keeps
 	// sprites from being drawn smaller than that (MILESTONE_3B.md section 5)
 	static constexpr int WORKERS = 3; // the Quest 3 has 6 cores; the game thread takes one, Godot's main and render threads two
@@ -214,6 +278,7 @@ public:
 		stats.wanted = names.size();
 		wantSerial++;
 		wantedNow = std::unordered_set<std::string>(names.begin(), names.end());
+		wantedOrder = names;
 		for(Page & page : pages)
 			if(std::any_of(
 				   page.animations.begin(),
@@ -402,7 +467,7 @@ private:
 	// lock held: the wanted animations that are not loaded, failed or queued go into the queue
 	void queueWanted()
 	{
-		for(const std::string & name : wantedNow)
+		for(const std::string & name : wantedOrder)
 			if(!placed.count(name) && !failed.count(name) && std::find(queue.begin(), queue.end(), name) == queue.end())
 				queue.push_back(name);
 	}
@@ -447,11 +512,9 @@ private:
 				busy++;
 			}
 			const auto from = std::chrono::steady_clock::now();
-			VcmiAnimationData anim{};
-			api->decodeAnimation(name.c_str(), &anim);
+			std::vector<BakedFrame> baked = decodeBaked(api, name);
 			VcmiBridgeStats game{};
 			api->stats(&game);
-			std::vector<BakedFrame> baked = bakeFrames(anim);
 			for(BakedFrame & f : baked)
 			{
 				trim(f);
@@ -653,6 +716,7 @@ private:
 					if(!f.mask.empty())
 						std::memcpy(&target.mask[size_t(p.y + row) * PAGE + p.x], &f.mask[size_t(row) * f.width], f.width);
 				}
+				extrude(target, p, f);
 				target.x += f.width + PAD;
 				target.dirty = true;
 				stats.pixels += int64_t(f.width) * f.height;
@@ -661,6 +725,34 @@ private:
 		}
 		stats.frames += out.size();
 		placed[name] = std::move(out);
+	}
+
+	// a frame opaque to its border (terrain, full fog) gets its edge pixels copied PAD / 2 outward, where the page has
+	// room: tiles lie side by side, and the clear padding would show between them in the smaller mipmaps. Its
+	// neighbours take at most the other half of the padding
+	static void extrude(Page & page, const Placed & p, const BakedFrame & f)
+	{
+		const auto alpha = [&f](int x, int y)
+		{
+			return f.rgba[(size_t(y) * f.width + x) * 4 + 3];
+		};
+		for(int x = 0; x < f.width; x++)
+			if(alpha(x, 0) < 255 || alpha(x, f.height - 1) < 255)
+				return;
+		for(int y = 0; y < f.height; y++)
+			if(alpha(0, y) < 255 || alpha(f.width - 1, y) < 255)
+				return;
+		constexpr int E = PAD / 2;
+		const auto at = [&page](int x, int y)
+		{
+			return &page.rgba[(size_t(y) * PAGE + x) * 4];
+		};
+		const int x0 = std::max(int(p.x) - E, 0), x1 = std::min(int(p.x) + f.width + E, PAGE);
+		const int y0 = std::max(int(p.y) - E, 0), y1 = std::min(int(p.y) + f.height + E, PAGE);
+		for(int y = y0; y < y1; y++)
+			for(int x = x0; x < x1; x++)
+				if(x < p.x || y < p.y || x >= p.x + f.width || y >= p.y + f.height)
+					std::memcpy(at(x, y), at(std::clamp(x, int(p.x), p.x + f.width - 1), std::clamp(y, int(p.y), p.y + f.height - 1)), 4);
 	}
 
 	// a page the current view does not need, the one unneeded for longest, cleared for new frames; its animations are
@@ -759,6 +851,7 @@ private:
 	uint64_t generation = 0; // raised by a refill: work of an older generation is dropped
 	uint64_t wantSerial = 0; // raised by each want()
 	std::unordered_set<std::string> wantedNow; // the names of the last want()
+	std::vector<std::string> wantedOrder; // the same in the caller's order: the first ones are loaded and placed first
 	std::vector<Page> pages;
 	std::unordered_map<std::string, std::vector<Placed>> placed;
 	std::unordered_set<std::string> failed; // missing or JSON-only without files: markers stay
