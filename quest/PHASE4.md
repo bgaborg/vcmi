@@ -1,6 +1,6 @@
 # Phase 4: the tabletop adventure map (plan)
 
-Status: 2026-11-09, required checks done except check 3, which waits for a person in the headset (section 3a); milestones 4a, 4b and 4c built and played on the Quest with a simulated ray (sections 4a, 4b and 4c results; a battle, spells and the real buttons not yet checked); 4d built and tested on the PC, its headset test waits (2026-11-11). Next: milestone 4e.
+Status: 2026-11-09, required checks done except check 3, which waits for a person in the headset (section 3a); milestones 4a, 4b and 4c built and played on the Quest with a simulated ray (sections 4a, 4b and 4c results; a battle, spells and the real buttons not yet checked); 4d built and tested on the PC, its headset test waits; 4e paper cards built and tested on the PC (2026-11-11). Next: the rest of milestone 4e.
 
 Goal (from [`PROJECT_PLAN.md`](PROJECT_PLAN.md#phase-4---tabletop-adventure-map-after-data-bridge-milestones-2-and-3)): the adventure map is fully playable on the war table, and one button goes back to the 2D screen.
 
@@ -290,6 +290,21 @@ Each one is tested on the Quest, reviewed, and recorded here with its numbers be
 - Hero flags: the trace in milestone 3c showed an enemy flag not moving with its hero.
 - The animations the tabletop does not time yet: boats' flags, teleports, embarking and fades.
 - **Exit:** a look review by a person wearing the headset.
+
+#### 4e results so far (2026-11-11, the paper cards; built and tested on the PC)
+
+- **Cards:** an object whose anchor or visitable tile is seen turns up about its anchor tile's bottom edge. It leans back `lean_degrees` (70) from the table, in `SPRITE_SHADER` (`xr/room.gd`).
+  - Objects in the fog stay flat under it, as in 2D.
+  - The hero's flag stands with its hero.
+  - The 2D shadows fade as a card rises.
+- **Flat objects:** animations whose name starts with one of the `flat` prefixes in `xr/cards.json` lie on the table, as ground does: lakes, lava, swamps, holes, craters, moss, flowers, kelp, reefs and river deltas. `VcmiData.set_flat_cards` puts bit 4096 in the instance's frame count.
+  - `shortcut:` the file sits in the APK; mods cannot change it yet, and it has a lean and a flat list only, not a height, anchor or fold per object. Read it from the mods' configuration when a mod needs it.
+- **Pop-up:** when the table comes near enough for sprites, the cards rise in 0.45 s with a small overshoot (not again after an atlas refill).
+- **Order:** the cards draw in a second pass of the sprite material, after the fog tiles, which would otherwise paint over them from behind. Neither pass writes depth: a depth write hid the hero in front of its town (equal depths) and is costly on the Quest.
+  - `shortcut:` the cards draw in map order, back to front from the near edge. Seen from the far side, a near card goes behind a far one; sort by view or use depth when that matters.
+  - `shortcut:` a moving hero's card stands or lies by the fog at its destination for the whole step, as its instance keeps the end tile.
+- **Checked on the PC:** `render-room.sh sprites` with the headset's sprite dump, and the new low view `sprites-cards`. The APK builds. A missing or broken `cards.json` logs an error and every object stands.
+- **Left in 4e:** hero flags on moving heroes, boats' flags, teleports, embarking and fades, and the look review in the headset.
 
 ### 4f. Exit pass
 

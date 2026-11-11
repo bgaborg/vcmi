@@ -127,6 +127,18 @@ func _minimap_view(room: Node3D, view: String, eye: Vector3, target: Vector3) ->
 	views[view] = [minimap * eye, minimap * target]
 
 
+## the cards.json rules as main.gd gives them to VcmiData, on a dump saved before them: the flat bit by name
+func _flat_cards(buffer: PackedFloat32Array, names: PackedStringArray, room: Node3D) -> PackedFloat32Array:
+	var cards: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://cards.json"))
+	room.set_card_lean(cards["lean_degrees"])
+	for i in names.size():
+		var name := names[i].get_slice(" ", 0).get_file().to_lower()
+		var flat: bool = cards["flat"].any(func(p): return name.begins_with(p.to_lower()))
+		if flat and buffer[i * 20 + 18] < 9.5 and buffer[i * 20 + 17] < 4096.0:
+			buffer[i * 20 + 17] += 4096.0
+	return buffer
+
+
 ## the headset's sprite data (main.gd _save_sprites) into the room, and views from above the minimap, as the test
 ## command `table_view` (0.45 and 0.25 m above it)
 func _load_sprites(room: Node3D) -> void:
@@ -151,9 +163,10 @@ func _load_sprites(room: Node3D) -> void:
 		layers.append(texture)
 	var multimesh: MultiMesh = room.sprite_multimesh()
 	multimesh.instance_count = data.count
-	multimesh.buffer = data.buffer
+	var names: PackedStringArray = data.get("names", PackedStringArray())
+	multimesh.buffer = _flat_cards(data.buffer, names, room)
 	room.set_sprites(layers, image.call(data.table), true)
-	room.show_sprites(true)
+	room.show_sprites(true, false)
 	var minimap: Transform3D = room._table * Transform3D(Basis(), Vector3(0.0, room.TABLE_TOP, 0.0))
 	views["sprites"] = [minimap * Vector3(0.0, 0.45, 0.15), minimap.origin]
 	views["sprites-close"] = [minimap * Vector3(0.0, 0.25, 0.08), minimap.origin]
@@ -163,12 +176,13 @@ func _load_sprites(room: Node3D) -> void:
 	var map_size := Vector2(terrain.get_width(), terrain.get_height()) # the levels side by side
 	var at := Vector3((zoom_tile.x / map_size.x - 0.5) * panel.x, 0.0, (zoom_tile.y / map_size.y - 0.5) * panel.y)
 	views["sprites-zoom"] = [minimap * (at + Vector3(0.0, 0.13, 0.04)), minimap * at]
+	# the paper cards, low from the near edge
+	views["sprites-cards"] = [minimap * (at + Vector3(0.0, 0.07, 0.16)), minimap * at]
 	print("room preview: sprites ", data.count, " instances, ", layers[0].get_layers(), " pages")
 	# with `-- sprites <name part>`: the frames the table gives the first instance of that animation, cut from the pages
 	var args := OS.get_cmdline_user_args()
 	var after := args.find("sprites") + 1
 	var wanted := args[after] if after > 0 and args.size() > after and not args[after].begins_with("zoom=") else ""
-	var names: PackedStringArray = data.get("names", PackedStringArray())
 	if wanted == "near": # frame 0 of every instance near the zoom tile
 		var table: Image = image.call(data.table)
 		for i in names.size():

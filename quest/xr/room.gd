@@ -164,6 +164,11 @@ const TABLE_PANEL_POSE := Transform3D(Basis(Vector3.RIGHT, deg_to_rad(-60.0)), V
 ## instance order without depth (the order is the 2D map's). The owner colour goes on the mask of owned objects.
 ## Owner 10: a terrain, river or road tile (quest/PHASE4.md 4c), 11 a fog tile: sampled inside the frame so the atlas
 ## padding does not show between tiles. The fog tiles, last, cover what the local team does not see, as in 2D.
+## Paper cards (quest/PHASE4.md 4e): an object whose anchor or visitable tile is seen stands up `stand` of the way,
+## turned about its anchor tile's bottom edge to `lean` from the table, unless it is flat (cards.json); its shadow fades
+## as it rises. The cards draw in a second pass (`cards_pass`, the material's next_pass), after the fog tiles, which
+## would cover them from behind; no pass writes depth. shortcut: the cards draw in map order, back to front from the
+## table's near edge; seen from its far side a near card goes behind a far one. Depth or a sort by view when needed.
 const SPRITE_SHADER := """shader_type spatial;
 render_mode unshaded, shadows_disabled, blend_premul_alpha, depth_draw_never, cull_disabled;
 // premultiplied in linear light, sRGB-encoded (SpriteAtlas.h)
@@ -174,10 +179,15 @@ uniform vec4 owner_colours[9];
 uniform bool precision_check = false;
 uniform mat4 world_to_panel; // the minimap's world transform, inverted: content outside the panel is cut
 uniform vec2 panel_half = vec2(1000.0);
+uniform sampler2D fog : filter_nearest; // x-major, as the minimap's
+uniform float stand = 1.0; // 0 flat, 1 standing: the pop-up animation (show_sprites)
+uniform float lean = 1.22; // radians from the table, cards.json
+uniform bool cards_pass = false; // the second pass: the standing cards only; the first: all else
 varying vec2 panel_xz;
 varying vec3 page_uv;
 varying flat int owner;
 varying flat float lost;
+varying flat float card;
 vec4 texel(int i) {
 	return texelFetch(frames, ivec2(i % 512, i / 512), 0);
 }
@@ -188,7 +198,7 @@ void vertex() {
 	int packed = int(INSTANCE_CUSTOM.y + 0.5);
 	int count = max(packed % 1024, 1);
 	bool mirror = (packed / 1024) % 2 == 1; // left-right
-	bool flip = packed >= 2048; // top-bottom: tiles only, whose full frame is square (32 x 32)
+	bool flip = (packed / 2048) % 2 == 1; // top-bottom: tiles only, whose full frame is square (32 x 32)
 	// as MapRendererAdventureContext::objectImageIndex: 180 ms a frame, the clock and the frame offset by the id
 	int t = int(TIME * 1000.0);
 	int frame = ((t + (id * 97) % 180) / 180 + id) % count;
@@ -200,6 +210,21 @@ void vertex() {
 	VERTEX = vec3(left + UV.x * a.w, 0.0, top + UV.y * b.x);
 	vec2 source = vec2(mirror ? 1.0 - UV.x : UV.x, flip ? 1.0 - UV.y : UV.y);
 	owner = int(INSTANCE_CUSTOM.z + 0.5);
+	card = 0.0;
+	if (owner < 10 && packed < 4096) { // an object, not flat (VcmiData.update_sprites)
+		float seen = max(textureLod(fog, COLOR.yx, 0.0).r, textureLod(fog, COLOR.wz, 0.0).r);
+		card = seen > 0.0 ? stand : 0.0;
+	}
+	if (card > 0.0) {
+		// pixels up from the anchor tile's bottom edge, turned up about it; local y is metres, local z pixels
+		float up = -VERTEX.z;
+		float angle = card * lean;
+		VERTEX.z = -up * cos(angle);
+		VERTEX.y = up * sin(angle) * length(MODEL_MATRIX[2].xyz) / length(MODEL_MATRIX[1].xyz);
+	}
+	if ((card > 0.0) != cards_pass) {
+		VERTEX = vec3(0.0); // drawn by the other pass
+	}
 	// a tile's edge texels sampled at their centres: no blend with the clear padding around the frame
 	vec2 inset = owner >= 10 ? vec2(0.5) : vec2(0.0);
 	page_uv = vec3((a.yz + inset + source * (vec2(a.w, b.x) - 2.0 * inset)) / 512.0, a.x);
@@ -215,6 +240,10 @@ void fragment() {
 	float lod = log2(max(max(length(dFdx(texels)), length(dFdy(texels))), 1.0));
 	vec4 c = owner >= 10 ? textureLod(atlas, page_uv, min(lod, 2.0)) : texture(atlas, page_uv);
 	// most of a sprite's quad is clear: no blending there (MILESTONE_3B.md section 1e)
+	// a card's shadow (dark, half clear) fades as it rises: the 2D map paints it on the ground
+	if (card > 0.0 && c.a < 0.8 && max(c.r, max(c.g, c.b)) < 0.02) {
+		c *= 1.0 - card;
+	}
 	if (c.a < 0.004) {
 		discard;
 	}
@@ -410,6 +439,10 @@ func _ready() -> void:
 		var linear := Color(c).srgb_to_linear() # Graphics.cpp:72-90; the shader works in linear colour
 		colours.append(Vector4(linear.r, linear.g, linear.b, 1.0))
 	sprite_material.set_shader_parameter("owner_colours", colours)
+	var card_material: ShaderMaterial = sprite_material.duplicate()
+	card_material.set_shader_parameter("cards_pass", true)
+	card_material.render_priority = 1 # after the first pass, the fog included
+	sprite_material.next_pass = card_material
 	var sprite_mesh := PlaneMesh.new()
 	sprite_mesh.size = Vector2.ONE
 	sprite_mesh.material = sprite_material
@@ -444,9 +477,9 @@ func set_minimap(terrain: Image, fog: Image, in_game: bool) -> void:
 		else:
 			material.set_shader_parameter("fog", ImageTexture.create_from_image(fog))
 	_minimap.visible = in_game and material.get_shader_parameter("terrain") != null
-	var marker_material: ShaderMaterial = _markers.multimesh.mesh.material
-	if marker_material.get_shader_parameter("fog") != material.get_shader_parameter("fog"):
-		marker_material.set_shader_parameter("fog", material.get_shader_parameter("fog"))
+	for node_material in [_markers.multimesh.mesh.material] + _sprite_materials():
+		if node_material.get_shader_parameter("fog") != material.get_shader_parameter("fog"):
+			node_material.set_shader_parameter("fog", material.get_shader_parameter("fog"))
 
 
 ## The minimap shows 1 / `factor` of the map around `centre` (minimap UV), clamped to the map: the terrain by its UV,
@@ -467,8 +500,7 @@ func set_zoom(factor: float, centre: Vector2) -> void:
 	_markers.transform = content * Transform3D(Basis(), Vector3(0.5, 0.0, 0.5))
 	_sprites.transform = _markers.transform
 	_path.transform = _markers.transform
-	for node in [_markers, _sprites]:
-		var shader_material: ShaderMaterial = node.multimesh.mesh.material
+	for shader_material in [_markers.multimesh.mesh.material] + _sprite_materials():
 		shader_material.set_shader_parameter("world_to_panel", Projection(_minimap.global_transform.affine_inverse()))
 		shader_material.set_shader_parameter("panel_half", size * 0.5)
 
@@ -548,7 +580,12 @@ func minimap_centre() -> Vector3:
 
 
 ## sprites instead of markers, or back (main.gd: by the size of a tile on screen)
-func show_sprites(on: bool) -> void:
+## The sprites instead of the markers; `animate`: the cards pop up when the sprites appear
+func show_sprites(on: bool, animate := true) -> void:
+	if on and not _sprites.visible and animate:
+		var tween := create_tween().set_parallel().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		for material in _sprite_materials():
+			tween.tween_property(material, "shader_parameter/stand", 1.0, 0.45).from(0.0)
 	_sprites.visible = on
 	_markers.visible = not on
 
@@ -563,6 +600,18 @@ func marker_multimesh() -> MultiMesh:
 	return _markers.multimesh
 
 
+## the cards' lean from the table (cards.json)
+func set_card_lean(degrees: float) -> void:
+	for material in _sprite_materials():
+		material.set_shader_parameter("lean", deg_to_rad(degrees))
+
+
+## the sprites' two passes: all but the standing cards, then the cards
+func _sprite_materials() -> Array[ShaderMaterial]:
+	var material: ShaderMaterial = _sprites.multimesh.mesh.material
+	return [material, material.next_pass]
+
+
 ## the object sprites, which VcmiData.update_sprites fills (main.gd)
 func sprite_multimesh() -> MultiMesh:
 	return _sprites.multimesh
@@ -571,11 +620,12 @@ func sprite_multimesh() -> MultiMesh:
 ## the atlas pages and the frame table of VcmiData (atlas_textures, sprite_table); markers off while sprites show.
 ## precision_check tints sprites red whose instance data lost precision (MILESTONE_3B.md check 2)
 func set_sprites(textures: Array, table: Image, precision_check: bool) -> void:
-	var material: ShaderMaterial = _sprites.multimesh.mesh.material
-	material.set_shader_parameter("atlas", textures[0])
-	material.set_shader_parameter("masks", textures[1])
-	material.set_shader_parameter("frames", ImageTexture.create_from_image(table))
-	material.set_shader_parameter("precision_check", precision_check)
+	var frames := ImageTexture.create_from_image(table)
+	for material in _sprite_materials():
+		material.set_shader_parameter("atlas", textures[0])
+		material.set_shader_parameter("masks", textures[1])
+		material.set_shader_parameter("frames", frames)
+		material.set_shader_parameter("precision_check", precision_check)
 
 
 func _make_environment() -> Environment:

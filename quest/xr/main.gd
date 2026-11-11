@@ -82,6 +82,7 @@ var followed_move := 0 ## the sequence of the last hero step the view followed
 ## the side panel at the table's near edge (quest/PHASE4.md 4d): resources, date, heroes, towns, end turn
 var table_panel: Node3D
 var table_icons_tried := false ## SMALRES decoded once, found or not
+var pop_cards := true ## the next sprites shown pop their cards up (room.show_sprites): the table came near
 var shown_selection := Vector3i(-2, -2, -2) ## the selected hero's tile the table last followed and marked
 var sprites_held := false ## the test command `sprites` set them: the view does not change them until `table_zoom`
 var atlas_refills := 0 ## of the atlas, at the last view: a refill moves the frames, so the sprites wait for the rebuild
@@ -177,9 +178,15 @@ void fragment() {
 	layer.use_android_surface = true
 	layer.android_surface_size = SURFACE_SIZE
 	bridge.connect("test_command", _on_test_command)
+	var cards: Variant = JSON.parse_string(FileAccess.get_file_as_string("res://cards.json"))
+	if not cards is Dictionary:
+		push_error("VCMI XR: res://cards.json is missing or not valid JSON; every object stands as a card")
+		cards = {}
+	room.set_card_lean(cards.get("lean_degrees", 70.0))
 	# the extension (quest/xr/extension) finds the game's bridge once the game library has loaded, after Godot
 	if ClassDB.class_exists("VcmiData"):
 		vcmi_data = ClassDB.instantiate("VcmiData")
+		vcmi_data.set_flat_cards(PackedStringArray(cards.get("flat", [])))
 		var bridge_timer := Timer.new()
 		bridge_timer.timeout.connect(func():
 			if vcmi_data.connect_bridge():
@@ -342,7 +349,9 @@ func _update_sprite_view(head: Vector3) -> void:
 			if vcmi_data.atlas_stats().get("view_overflowed", false):
 				too_far_zoom = room.zoom # some objects would have no sprite: markers until closer
 				print("VCMI XR: the atlas cannot hold the view at zoom ", room.zoom, ": markers")
-	room.show_sprites(near and (not sprites_pending or room.sprite_multimesh().instance_count > 0))
+	var shown: bool = near and (not sprites_pending or room.sprite_multimesh().instance_count > 0)
+	room.show_sprites(shown, pop_cards)
+	pop_cards = not near or (pop_cards and not shown) # the cards rise when the table comes near, not after a refill
 	vcmi_data.animate_move(room.sprite_multimesh())
 
 

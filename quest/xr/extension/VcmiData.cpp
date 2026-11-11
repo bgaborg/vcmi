@@ -67,6 +67,7 @@ protected:
 		ClassDB::bind_method(D_METHOD("atlas_textures"), &VcmiData::atlas_textures);
 		ClassDB::bind_method(D_METHOD("update_sprites", "multimesh", "tiles", "level", "with_names"), &VcmiData::update_sprites, DEFVAL(false));
 		ClassDB::bind_method(D_METHOD("update_sprite_changes", "multimesh"), &VcmiData::update_sprite_changes);
+		ClassDB::bind_method(D_METHOD("set_flat_cards", "prefixes"), &VcmiData::set_flat_cards);
 		ClassDB::bind_method(D_METHOD("set_tabletop", "shown"), &VcmiData::set_tabletop);
 		ClassDB::bind_method(D_METHOD("tile_input", "tile", "kind"), &VcmiData::tile_input);
 		ClassDB::bind_method(D_METHOD("heroes"), &VcmiData::heroes);
@@ -116,6 +117,7 @@ protected:
 	Ref<Image> fogMap;
 	std::unique_ptr<SpriteAtlas> atlas; // made by the first atlas_view
 	std::vector<std::string> animationNames; // animations in UTF-8, for the atlas
+	std::vector<std::string> flatPrefixes; // lower case: animations that lie on the table, not stand (set_flat_cards)
 	// of the last atlas_view: which animations it asked for, by animation index, and the hero flags by owner
 	std::vector<uint8_t> inAtlas;
 	std::array<bool, 8> flagInAtlas{};
@@ -900,11 +902,43 @@ public:
 			}
 			);
 		};
+		// a flat object, and its flag, lie on the table (SPRITE_SHADER in room.gd)
+		const bool flat = isFlat(animationNames[o.animation]);
+		const size_t first = out.size();
 		add(o.animation, 0, owner);
 		// shortcut: a boat with a hero flies boat->flagAnimations[owner] with a wave overlay (MapRendererObjects::
 		// getFlagAnimation, getOverlayAnimation); not published by the bridge yet, so boats have no flag
 		if(hero && o.owner < 8)
 			add(FLAG_KEY + o.owner, 1, 9);
+		if(flat)
+			for(size_t i = first; i < out.size(); i++)
+				out[i].custom[1] += 4096;
+	}
+
+	bool isFlat(const std::string & name) const
+	{
+		for(const std::string & prefix : flatPrefixes)
+			if(name.size() >= prefix.size()
+			   && std::equal(
+				   prefix.begin(),
+				   prefix.end(),
+				   name.begin(),
+				   [](char p, char n)
+				   {
+					   return p == std::tolower(static_cast<unsigned char>(n));
+				   }
+			   ))
+				return true;
+		return false;
+	}
+
+	/// the animations whose name starts with one of `prefixes` (any case) lie on the table instead of standing as
+	/// cards (cards.json); from the next update_sprites
+	void set_flat_cards(const PackedStringArray & prefixes)
+	{
+		flatPrefixes.clear();
+		for(const String & prefix : prefixes)
+			flatPrefixes.push_back(prefix.to_lower().utf8().get_data());
 	}
 
 	/// the frames of group `wanted` of animation `name` in the frame table, added to it on first use: first, count
@@ -1077,7 +1111,7 @@ public:
 	/// instance order). Fills sprite_table, and sprite_names when `with_names`. Returns the instance count.
 	/// Instance: transform pixels -> unit space at the anchor tile's bottom right; colour: the anchor and visitable tile
 	/// in minimap UV (unused since the fog tiles cover the hidden ones); custom: first frame in the table, frame count
-	/// + 1024 mirrored left-right + 2048 top-bottom, owner colour (0-7 players, 8 neutral, 9 none, 10 a tile, 11 fog),
+	/// + 1024 mirrored left-right + 2048 top-bottom + 4096 a flat object (set_flat_cards), owner colour (0-7 players, 8 neutral, 9 none, 10 a tile, 11 fog),
 	/// object id + 0.5 (the frame phase; the .5 checks the float precision). Before the objects: the terrain, river and
 	/// road tiles of `tiles` (tileSprites); after them the fog tiles (fogSprites).
 	/// The table holds the atlas places of now: run this again when atlas_stats().refills rises (a refill moves the frames).
