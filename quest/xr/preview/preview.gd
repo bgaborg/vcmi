@@ -119,7 +119,10 @@ func _add_table_panel(room: Node3D) -> void:
 			"towns": [{"id": 10, "name": "Kirkwall"}, {"id": 11, "name": "Stonecastle"}]})
 	panel.set_selected(1)
 	panel.set_hover(4)
-	_minimap_view(room, "sprites-panel", Vector3(0.0, 0.55, 0.85), Vector3(0.0, 0.05, 0.3))
+	# from the lord's chair, as main.gd seats the player in tabletop mode
+	var seat: Transform3D = room.seat()
+	views["sprites-panel"] = [seat.origin, seat.origin - seat.basis.z]
+	_minimap_view(room, "sprites-board", Vector3(-0.22, 0.3, 0.4), Vector3(-0.58, 0.22, -0.17))
 
 
 func _minimap_view(room: Node3D, view: String, eye: Vector3, target: Vector3) -> void:

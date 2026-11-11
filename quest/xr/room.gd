@@ -156,19 +156,28 @@ void fragment() {
 """
 const MINIMAP_AREA := Vector2(0.8, 0.5) ## metres on the table inside the corner figures
 const MARKER_METRES := 0.012 ## width of an object marker on the minimap
-## the table's side panel (table_panel.gd) in the minimap's space: along the near edge, the player's side (+z), its
-## lower edge just above the table and its face tilted 30 degrees from flat towards the player
-const TABLE_PANEL_POSE := Transform3D(Basis(Vector3.RIGHT, deg_to_rad(-60.0)), Vector3(0.0, 0.045, 0.40))
+## The war table as the phase 0 concept (quest/concept/screenshots/table.png): the map on the cream pages of a book in
+## red leather, the minimap's tablet on an easel right of it (all of the map, the view framed), and the lord's chair at
+## the near edge, where the player sits in tabletop mode (seat)
+const BOOK_COVER := Color(0.3, 0.06, 0.045)
+const BOOK_PAGES := Color(0.93, 0.88, 0.76)
+const TABLET_POSE := Transform3D(Basis(Vector3.UP, -0.55) * Basis(Vector3.RIGHT, -0.35), Vector3(0.64, 0.12, -0.14))
+const TABLET_WIDTH := 0.26
+## the seated player's eyes in the table's space: over the chair, 0.45 m above the map, looking at the map's middle
+const SEAT := Vector3(0.0, TABLE_TOP + 0.45, 0.82)
+const CHAIR_Z := 1.0
 ## The sprites of the map objects from the atlas pages (VcmiData.update_sprites, quest/MILESTONE_3B.md): the quad of the
 ## current frame, built from the frame table; pixels -> panel by the instance transform. Premultiplied colour, drawn in
 ## instance order without depth (the order is the 2D map's). The owner colour goes on the mask of owned objects.
 ## Owner 10: a terrain, river or road tile (quest/PHASE4.md 4c), 11 a fog tile: sampled inside the frame so the atlas
 ## padding does not show between tiles. The fog tiles, last, cover what the local team does not see, as in 2D.
 ## Paper cards (quest/PHASE4.md 4e): an object whose anchor or visitable tile is seen stands up `stand` of the way,
-## turned about its anchor tile's bottom edge to `lean` from the table, unless it is flat (cards.json); its shadow fades
-## as it rises. The cards draw in a second pass (`cards_pass`, the material's next_pass), after the fog tiles, which
-## would cover them from behind; no pass writes depth. shortcut: the cards draw in map order, back to front from the
-## table's near edge; seen from its far side a near card goes behind a far one. Depth or a sort by view when needed.
+## turned about its anchor tile's bottom edge to `lean` from the table, unless it is flat (cards.json). Its 2D shadow
+## stays on the table (the first pass draws only the shadow of a card, flat), and it gets a die-cut paper edge, as the
+## concept's pop-up book. The cards draw in a second pass (`cards_pass`, the material's next_pass), after the fog
+## tiles, which would cover them from behind; no pass writes depth. shortcut: the cards draw in map order, back to
+## front from the table's near edge; seen from its far side a near card goes behind a far one. Depth or a sort by view
+## when needed.
 const SPRITE_SHADER := """shader_type spatial;
 render_mode unshaded, shadows_disabled, blend_premul_alpha, depth_draw_never, cull_disabled;
 // premultiplied in linear light, sRGB-encoded (SpriteAtlas.h)
@@ -182,8 +191,12 @@ uniform vec2 panel_half = vec2(1000.0);
 uniform sampler2D fog : filter_nearest; // x-major, as the minimap's
 uniform float stand = 1.0; // 0 flat, 1 standing: the pop-up animation (show_sprites)
 uniform float lean = 1.22; // radians from the table, cards.json
-uniform bool cards_pass = false; // the second pass: the standing cards only; the first: all else
+uniform bool cards_pass = false; // the second pass: the standing cards only; the first: all else, and cards' shadows
+const float EDGE = 2.0; // texels of paper around a card (SpriteAtlas.h pads frames with 4)
+const vec3 PAPER = vec3(0.85, 0.75, 0.54); // cream, linear
 varying vec2 panel_xz;
+varying flat float shadow_only;
+varying flat vec4 frame_uv; // the frame's texels on its page: the paper edge looks at no neighbour's
 varying vec3 page_uv;
 varying flat int owner;
 varying flat float lost;
@@ -215,19 +228,25 @@ void vertex() {
 		float seen = max(textureLod(fog, COLOR.yx, 0.0).r, textureLod(fog, COLOR.wz, 0.0).r);
 		card = seen > 0.0 ? stand : 0.0;
 	}
-	if (card > 0.0) {
+	vec2 paper = vec2(0.0);
+	if (card > 0.0 && cards_pass) {
+		// the quad EDGE texels larger on every side, for the paper edge
+		paper = (source * 2.0 - 1.0) * EDGE;
+		VERTEX.xz += (UV * 2.0 - 1.0) * EDGE;
 		// pixels up from the anchor tile's bottom edge, turned up about it; local y is metres, local z pixels
 		float up = -VERTEX.z;
 		float angle = card * lean;
 		VERTEX.z = -up * cos(angle);
 		VERTEX.y = up * sin(angle) * length(MODEL_MATRIX[2].xyz) / length(MODEL_MATRIX[1].xyz);
 	}
-	if ((card > 0.0) != cards_pass) {
-		VERTEX = vec3(0.0); // drawn by the other pass
+	if (cards_pass && card <= 0.0) {
+		VERTEX = vec3(0.0); // drawn by the first pass
 	}
+	shadow_only = !cards_pass && card > 0.0 ? 1.0 : 0.0;
 	// a tile's edge texels sampled at their centres: no blend with the clear padding around the frame
 	vec2 inset = owner >= 10 ? vec2(0.5) : vec2(0.0);
-	page_uv = vec3((a.yz + inset + source * (vec2(a.w, b.x) - 2.0 * inset)) / 512.0, a.x);
+	page_uv = vec3((a.yz + inset + source * (vec2(a.w, b.x) - 2.0 * inset) + paper) / 512.0, a.x);
+	frame_uv = vec4(a.yz, a.yz + vec2(a.w, b.x)) / 512.0;
 	panel_xz = (world_to_panel * (MODEL_MATRIX * vec4(VERTEX, 1.0))).xz;
 }
 void fragment() {
@@ -239,11 +258,26 @@ void fragment() {
 	vec2 texels = page_uv.xy * 512.0;
 	float lod = log2(max(max(length(dFdx(texels)), length(dFdy(texels))), 1.0));
 	vec4 c = owner >= 10 ? textureLod(atlas, page_uv, min(lod, 2.0)) : texture(atlas, page_uv);
-	// most of a sprite's quad is clear: no blending there (MILESTONE_3B.md section 1e)
-	// a card's shadow (dark, half clear) fades as it rises: the 2D map paints it on the ground
-	if (card > 0.0 && c.a < 0.8 && max(c.r, max(c.g, c.b)) < 0.02) {
-		c *= 1.0 - card;
+	// a shadow texel: dark and half clear. A card's lie on the table (first pass); the card itself has none
+	bool shade = c.a < 0.8 && max(c.r, max(c.g, c.b)) < 0.02;
+	if (shadow_only > 0.5 && !shade) {
+		discard;
 	}
+	if (cards_pass) {
+		if (shade) {
+			c = vec4(0.0);
+		}
+		if (c.a < 0.8) { // paper under the clear texels near the body: the die-cut edge
+			float body = 0.0;
+			for (int i = 0; i < 8; i++) {
+				vec2 at = page_uv.xy + vec2(cos(float(i) * 0.7854), sin(float(i) * 0.7854)) * EDGE / 512.0;
+				bool inside = all(greaterThanEqual(at, frame_uv.xy)) && all(lessThanEqual(at, frame_uv.zw));
+				body = max(body, inside ? step(0.8, textureLod(atlas, vec3(at, page_uv.z), 0.0).a) : 0.0);
+			}
+			c += vec4(PAPER, 1.0) * (1.0 - c.a) * body;
+		}
+	}
+	// most of a sprite's quad is clear: no blending there (MILESTONE_3B.md section 1e)
 	if (c.a < 0.004) {
 		discard;
 	}
@@ -285,10 +319,20 @@ uniform sampler2D terrain : source_color, filter_nearest_mipmap;
 uniform sampler2D fog : filter_linear;
 uniform float zoom = 1.0; // set_zoom: the panel shows 1 / zoom of the map around centre
 uniform vec2 centre = vec2(0.5);
+uniform bool framed = false; // the tablet: the whole map, the table's view in a white frame
+uniform vec4 view = vec4(0.0, 0.0, 1.0, 1.0); // its corners in map UV
 void fragment() {
 	vec2 uv = (UV - 0.5) / zoom + centre;
 	// the fog image is x-major (VcmiData.fog_image), 1 of 255 where visible
 	ALBEDO = texture(terrain, uv).rgb * min(texture(fog, uv.yx).r * 255.0, 1.0) * 0.85;
+	if (framed) {
+		vec2 line = fwidth(uv) * 1.5;
+		bool inside = all(greaterThan(uv, view.xy - line)) && all(lessThan(uv, view.zw + line));
+		bool core = all(greaterThan(uv, view.xy + line)) && all(lessThan(uv, view.zw - line));
+		if (inside && !core) {
+			ALBEDO = vec3(1.0);
+		}
+	}
 }
 """
 
@@ -309,6 +353,9 @@ var _markers: MultiMeshInstance3D ## heroes, towns and flaggable objects on the 
 var _path: MultiMeshInstance3D
 ## the objects' sprites from the atlas (quest/MILESTONE_3B.md), VcmiData.update_sprites
 var _sprites: MultiMeshInstance3D
+var _book_cover: MeshInstance3D ## under the minimap, sized with it (set_minimap)
+var _book_pages: MeshInstance3D
+var _tablet: MeshInstance3D ## the whole map beside the table
 
 
 ## Test command `gfx <feature> <0|1>` (main.gd): switches one costly part off or on, to measure its GPU time on the
@@ -388,6 +435,7 @@ func _ready() -> void:
 	_minimap.transform = _table * Transform3D(Basis(), Vector3(0.0, TABLE_TOP + 0.015, 0.0))
 	_minimap.visible = false
 	_add(_minimap, "Minimap")
+	_build_book()
 	var marker_shader := Shader.new()
 	marker_shader.code = MARKER_SHADER
 	var marker_material := ShaderMaterial.new()
@@ -466,8 +514,23 @@ func set_minimap(terrain: Image, fog: Image, in_game: bool) -> void:
 	var material: ShaderMaterial = _minimap.material_override
 	if terrain != null:
 		material.set_shader_parameter("terrain", ImageTexture.create_from_image(terrain))
+		_tablet.material_override.set_shader_parameter("terrain", material.get_shader_parameter("terrain"))
 		var size := Vector2(terrain.get_size())
 		(_minimap.mesh as PlaneMesh).size = size * minf(MINIMAP_AREA.x / size.x, MINIMAP_AREA.y / size.y)
+		var panel := minimap_size()
+		# the cover from the table up, the pages just under the map (which lies 15 mm above the table)
+		(_book_cover.mesh as BoxMesh).size = Vector3(panel.x + 0.07, 0.011, panel.y + 0.07)
+		_book_cover.position.y = -0.0095
+		(_book_pages.mesh as BoxMesh).size = Vector3(panel.x + 0.03, 0.004, panel.y + 0.03)
+		_book_pages.position.y = -0.0025
+		var tablet_size := Vector2(TABLET_WIDTH, TABLET_WIDTH * size.y / size.x)
+		(_tablet.mesh as QuadMesh).size = tablet_size
+		var frame: MeshInstance3D = _tablet.get_child(0)
+		frame.scale = Vector3(tablet_size.x + 0.024, tablet_size.y + 0.024, 1.0)
+		var leg: MeshInstance3D = _tablet.get_child(1)
+		leg.scale = Vector3(1.0, tablet_size.y + 0.1, 1.0)
+		leg.position.y = -0.05
+		leg.rotation.x = 0.5
 		map_cells = Vector2i(terrain.get_size())
 		set_zoom(zoom, zoom_centre)
 	if fog != null:
@@ -477,7 +540,7 @@ func set_minimap(terrain: Image, fog: Image, in_game: bool) -> void:
 		else:
 			material.set_shader_parameter("fog", ImageTexture.create_from_image(fog))
 	_minimap.visible = in_game and material.get_shader_parameter("terrain") != null
-	for node_material in [_markers.multimesh.mesh.material] + _sprite_materials():
+	for node_material in [_markers.multimesh.mesh.material, _tablet.material_override] + _sprite_materials():
 		if node_material.get_shader_parameter("fog") != material.get_shader_parameter("fog"):
 			node_material.set_shader_parameter("fog", material.get_shader_parameter("fog"))
 
@@ -493,6 +556,8 @@ func set_zoom(factor: float, centre: Vector2) -> void:
 	var material: ShaderMaterial = _minimap.material_override
 	material.set_shader_parameter("zoom", zoom)
 	material.set_shader_parameter("centre", zoom_centre)
+	_tablet.material_override.set_shader_parameter("view", Vector4(zoom_centre.x - half, zoom_centre.y - half,
+			zoom_centre.x + half, zoom_centre.y + half))
 	var size := minimap_size()
 	# a point at minimap UV u lands at (u - centre) * size * zoom
 	var content := Transform3D(Basis.from_scale(Vector3(size.x * zoom, 1.0, size.y * zoom)),
@@ -510,10 +575,68 @@ func visible_uv() -> Rect2:
 	return Rect2(zoom_centre - Vector2.ONE * 0.5 / zoom, Vector2.ONE / zoom)
 
 
-## Puts the table's side panel (table_panel.gd) on the war table; it shows and hides with the minimap
+## Puts the table's side panel (table_panel.gd) on the war table, at the map's middle; it shows and hides with the
+## minimap
 func add_table_panel(panel: Node3D) -> void:
-	panel.transform = TABLE_PANEL_POSE
 	_minimap.add_child(panel)
+
+
+## Where the player's eyes are when seated in the lord's chair (main.gd, tabletop mode): world, looking at the map
+func seat() -> Transform3D:
+	var table: Transform3D = global_transform * _table # main.gd moves the room with the screen
+	return Transform3D(Basis(), table * SEAT).looking_at(table * Vector3(0.0, TABLE_TOP, 0.0), Vector3.UP)
+
+
+## The book under the minimap and the tablet beside it (the concept's pop-up book map and minimap)
+func _build_book() -> void:
+	var leather := StandardMaterial3D.new()
+	leather.albedo_color = BOOK_COVER
+	leather.roughness = 0.55
+	leather.normal_enabled = true
+	leather.normal_texture = load(TEX + SETS["fabric"][1])
+	leather.normal_scale = 0.4
+	leather.uv1_scale = Vector3(6.0, 6.0, 1.0)
+	var pages := StandardMaterial3D.new()
+	pages.albedo_color = BOOK_PAGES
+	pages.roughness = 0.9
+	_book_cover = _book_part("BookCover", leather)
+	_book_pages = _book_part("BookPages", pages)
+	var tablet_shader := Shader.new()
+	tablet_shader.code = MINIMAP_SHADER
+	var tablet_material := ShaderMaterial.new()
+	tablet_material.shader = tablet_shader
+	tablet_material.set_shader_parameter("framed", true)
+	_tablet = MeshInstance3D.new()
+	_tablet.mesh = QuadMesh.new()
+	_tablet.material_override = tablet_material
+	_tablet.transform = TABLET_POSE
+	_tablet.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
+	_tablet.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_minimap.add_child(_tablet)
+	# its wooden frame and the easel's back leg
+	var wood := _material("beam", Vector2(2.0, 2.0))
+	for part in [["TabletFrame", Vector3(1.0, 1.0, 0.012), Vector3(0.0, 0.0, -0.007)],
+			["TabletLeg", Vector3(0.025, 1.0, 0.012), Vector3(0.0, -0.2, -0.06)]]:
+		var mesh := MeshInstance3D.new()
+		mesh.name = part[0]
+		mesh.mesh = BoxMesh.new()
+		(mesh.mesh as BoxMesh).size = part[1]
+		mesh.material_override = wood
+		mesh.position = part[2]
+		mesh.gi_mode = GeometryInstance3D.GI_MODE_DYNAMIC
+		mesh.layers = DECOR
+		_tablet.add_child(mesh)
+
+
+func _book_part(name_: String, material: Material) -> MeshInstance3D:
+	var part := MeshInstance3D.new()
+	part.name = name_
+	part.mesh = BoxMesh.new()
+	part.material_override = material
+	part.gi_mode = GeometryInstance3D.GI_MODE_DYNAMIC
+	part.layers = DECOR # made after _ready's layer loop
+	_minimap.add_child(part)
+	return part
 
 
 ## the panel UV (0..1 across the minimap, not clamped) straight below or above a point in the world: where a hand
@@ -912,8 +1035,9 @@ func _build_props() -> void:
 			0.0, -0.34), 0.05, 2.6],
 			["building_tower_A_green", Vector3(0.66, 0.0, 0.38), 0.08, 1.0], ["building_tower_A_yellow", Vector3(-0.64,
 					0.0, -0.38), 0.08, 4.0],
-			["flag_red", Vector3(-0.44, 0.0, 0.3), 0.55, 0.3], ["flag_blue", Vector3(0.46, 0.0, -0.24), 0.55, 2.0],
-			["flag_green", Vector3(0.47, 0.0, 0.27), 0.55, 1.2], ["flag_yellow", Vector3(-0.4, 0.0, -0.42), 0.55, 3.5]]:
+			# the four players' flags in a row along the far edge, behind the map
+			["flag_red", Vector3(-0.39, 0.0, -0.45), 0.55, 0.3], ["flag_blue", Vector3(0.13, 0.0, -0.45), 0.55, 2.0],
+			["flag_green", Vector3(0.39, 0.0, -0.45), 0.55, 1.2], ["flag_yellow", Vector3(-0.13, 0.0, -0.45), 0.55, 3.5]]:
 		# the tower model starts above its (left out) base
 		var lift: float = -1.278 * piece[2] if "tower" in piece[0] else 0.0
 		var at: Vector3 = table * (piece[1] + Vector3(0.0, TABLE_TOP + lift, 0.0))
@@ -937,7 +1061,7 @@ func _build_props() -> void:
 	wax_material.roughness = 0.5
 	_merged("TableCandles", wax, wax_material)
 	_table_light = table * Vector3(0.0, TABLE_TOP + 0.6, -0.3)
-	_prop("LordsChair", "meshy/lords_chair.gltf", table * Vector3(0.0, 0.0, -1.35), table.basis)
+	_prop("LordsChair", "meshy/lords_chair.gltf", table * Vector3(0.0, 0.0, CHAIR_Z), table.basis * Basis(Vector3.UP, PI))
 	_prop("WeaponRack", "meshy/weapon_rack.gltf", Vector3(HALF - 0.35, 0.0, 0.3), Basis(Vector3.UP, -PI / 2.0))
 	for i in 2:
 		_prop("Bookshelf%d" % i, "polyhaven/wooden_bookshelf_worn/wooden_bookshelf_worn.gltf", _bookshelf(i).origin,
@@ -1174,6 +1298,17 @@ func _build_lights() -> void:
 		_light("MoonFill%d" % int(side), Vector3(side * WINDOW_X, 2.6, BACK + 1.2), Color(0.35, 0.45, 0.9), 0.6, 9.0,
 				1.5)
 	_light("TableLight", _table_light, FLAME, 0.9, 3.5, 0.3)
+	# a reading candle over the near edge, where the player sits: lights the faces of the side panel, the book and the
+	# figures (the baked lights stand behind them); real time, on the decor layer only
+	var reading := OmniLight3D.new()
+	reading.name = "ReadingLight"
+	reading.light_color = FLAME
+	reading.light_energy = 0.8
+	reading.omni_range = 1.6
+	reading.light_cull_mask = DECOR
+	reading.light_bake_mode = Light3D.BAKE_DISABLED # not in the lightmap: the room's baked light is as before
+	reading.position = _table * Vector3(0.0, TABLE_TOP + 0.55, 0.55)
+	add_child(reading)
 	# a soft wash, the screen stays brighter
 	_light("TapestryLight", Vector3(0.0, 4.75, BACK + 0.9), FLAME, 0.7, 2.5, 0.3)
 	_light("ChandelierLight", Vector3(0.0, SIZE.y - 1.25, -1.5), Color(1.0, 0.72, 0.45), 3.2, 8.0, 0.8)

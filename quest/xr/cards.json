@@ -1,5 +1,5 @@
 {
 	"comment": "Paper cards on the war table (quest/PHASE4.md 4e): seen map objects stand on their anchor tile's bottom edge, leaning back lean_degrees from the table; animations whose name starts with one of flat (any case) lie on the table, as ground does: lakes, lava, swamps, holes, craters, moss, flowers, kelp, reefs, river deltas.",
-	"lean_degrees": 70,
+	"lean_degrees": 82,
 	"flat": ["AVLlk", "AVLlav", "AVLlv", "AVLmoss", "AVLswp", "AVLhold", "AVLca", "AVLct", "AVLc1", "AVLflk", "AVLf0", "AVLf1", "AVLfl", "AVLklp", "AVLref", "AVLms", "AVLs0", "AVLs1", "clrdelt"]
 }

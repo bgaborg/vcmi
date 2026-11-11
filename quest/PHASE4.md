@@ -304,6 +304,18 @@ Each one is tested on the Quest, reviewed, and recorded here with its numbers be
   - `shortcut:` the cards draw in map order, back to front from the near edge. Seen from the far side, a near card goes behind a far one; sort by view or use depth when that matters.
   - `shortcut:` a moving hero's card stands or lies by the fog at its destination for the whole step, as its instance keeps the end tile.
 - **Checked on the PC:** `render-room.sh sprites` with the headset's sprite dump, and the new low view `sprites-cards`. The APK builds. A missing or broken `cards.json` logs an error and every object stands.
+- **The table as the phase 0 concept** (`concept/screenshots/table.png`), made of real things in the war room, rendered on the PC (`out/room-preview/table-design-*.png`):
+  - The map lies on the cream pages of a book bound in red leather.
+  - The heroes (initial on an enamel square, movement and mana bars) and the towns (`ITPA` icons) are on a dark wooden board in a brass rim, standing left of the map.
+  - The resources and the date are on a wooden bar along the near edge.
+  - The end turn is an hourglass right of the map. It flips when the turn ends.
+  - A tablet on an easel shows the whole map, with the table's view framed in white.
+  - The four players' flags stand in a row along the far edge.
+- **Pop-up book cards:** the cards stand at 82 degrees, with a cream die-cut paper edge (2 texels, sampled inside the frame only). Their 2D shadow stays flat on the map: the first pass draws only a card's shadow texels.
+- **Lit like the room:** the panel parts and the book are on the room's decor layer, lit by the lightmap probes and a reading candle over the near edge (a real-time light on that layer only; the baked table light stands behind the panels' faces). A hero step updates the bars and numbers in place; the panel is laid out again only when the heroes, towns or number widths change.
+- **Resolution:** the panel's text is MSDF (sharp at any distance); its icons are the game's largest (`RESOUR82`, `ITPT`, mipmapped), the small ones when a mod lacks them. The map's sprites and tiles stay at the game's 1x (32 px a tile). At the default 1.5 cm a tile, seen from the chair (about 0.6 m), a tile covers about 36 of the Quest 3's pixels, so 1x is close to 1:1. Zoomed in, it is magnified.
+  - `shortcut:` 1x sprites. 2x needs HD sprites (`SPRITES2X/` from a mod, or VCMI's xBRZ upscaling through the bridge) and four times the atlas (about 450 MB at today's 64 pages), to be measured on the headset first.
+- **Seated:** the lord's chair stands at the near edge. Tabletop mode moves the player there (`main.gd _seat`: turned and moved along the floor only, so the real floor stays the floor) and back on leaving. The game screen moves before the chair while seated, so dialogs and battles stay in front. A recenter while seated places the room from the real head, then seats again. The lightmap is baked again for the chair.
 - **Left in 4e:** hero flags on moving heroes, boats' flags, teleports, embarking and fades, and the look review in the headset.
 
 ### 4f. Exit pass

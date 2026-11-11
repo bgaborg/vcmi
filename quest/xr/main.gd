@@ -73,6 +73,8 @@ var too_far_zoom := 0.0
 var sprites_pending := false ## the atlas loads them; update_sprites when it is done
 ## the map is played on the war table (quest/PHASE4.md milestone 4a); the screen shows dialogs only
 var tabletop := false
+var seated := false ## in tabletop mode, the player's place moved to the lord's chair (_seat)
+var standing_screen := Transform3D() ## the screen's place before seating: the seat puts the screen before the chair
 var table_tile := TableMath.NO_TILE ## the tile under the active ray on the table, sent to the game as a hover
 var table_popup := false ## a still grip opened a tile's popup from the table: its release closes it
 ## grips held on the table by hand: {start: hand position, ms: press time, drag: moving the map}
@@ -371,6 +373,17 @@ func _process(delta: float) -> void:
 			_end_test_head()
 	if test_head != null and tracked != null:
 		origin.transform = test_head * tracked.affine_inverse()
+	elif tracked != null and tabletop != seated and screen_placed:
+		seated = tabletop
+		origin.transform = _seat(tracked) if seated else Transform3D()
+		if seated: # dialogs and battles on the screen before the chair, past the table
+			standing_screen = screen_world
+			var seat: Transform3D = room.seat()
+			var ahead := -seat.basis.z
+			ahead.y = 0.0
+			screen_world = Transform3D(Basis.looking_at(ahead.normalized(), Vector3.UP), seat.origin)
+		else:
+			screen_world = standing_screen
 	if screen_stick != Vector2.ZERO:
 		var width := screen_width
 		if screen_stick.x != 0.0:
@@ -518,6 +531,16 @@ func _move_pointer(hit: Vector2) -> void:
 	bridge.pointerMove(float(pixel.x), float(pixel.y))
 
 
+## The origin that puts the head `tracked` (headset space) in the lord's chair at the war table (room.seat), facing
+## the map: turned about the vertical and moved along the floor only, so the real floor stays the floor
+func _seat(tracked: Transform3D) -> Transform3D:
+	var seat: Transform3D = room.seat()
+	var yaw := func(basis: Basis) -> float: return atan2(basis.z.x, basis.z.z) # of the forward axis, -z
+	var turn := Basis(Vector3.UP, yaw.call(seat.basis) - yaw.call(tracked.basis))
+	var at := seat.origin - turn * tracked.origin
+	return Transform3D(turn, Vector3(at.x, 0.0, at.z))
+
+
 func _head_moved(from: Transform3D, to: Transform3D) -> bool:
 	var turned := from.basis.get_rotation_quaternion().angle_to(to.basis.get_rotation_quaternion())
 	return from.origin.distance_to(to.origin) > 0.15 or rad_to_deg(turned) > 15.0
@@ -528,6 +551,7 @@ func _end_test_head() -> void:
 	test_head_start = null
 	test_aim = null
 	origin.transform = Transform3D()
+	seated = false
 	for model in models:
 		model.visible = true
 	screen_placed = false
@@ -654,6 +678,9 @@ func _place_screen() -> void:
 	var tracked: Variant = _tracked_head()
 	if tracked == null:
 		return
+	if seated and test_head == null: # placed from the real head; tabletop mode seats again in the moved room
+		origin.transform = Transform3D()
+		seated = false
 	var head: Transform3D = origin.transform * tracked
 	var forward := -head.basis.z
 	forward.y = 0.0
@@ -831,12 +858,29 @@ func _update_table_panel() -> void:
 	if not data.is_empty():
 		if not table_icons_tried:
 			table_icons_tried = true
-			# the 2D map's small resource icons (SMALRES.def), frame by resource id; read once, a few ms
-			for frame in vcmi_data.decode_animation("SMALRES").get("frames", []):
-				if int(frame["group"]) == 0:
-					table_panel.resource_icons.append(ImageTexture.create_from_image(frame["image"]))
+			# the game's largest icons, frame by resource id and by the panel's town icon; the small ones when a mod
+			# lacks them. Read once, a few ms
+			table_panel.resource_icons = _icons({"RESOUR82": 0, "SMALRES": 0})
+			# the panel's town icon is the 2D list's ITPA frame, 2 after ITPT's (CTownList, CKingdomInterface)
+			table_panel.town_icons = _icons({"ITPT": 2, "ITPA": 0})
 		table_panel.set_data(data)
 	table_panel.set_selected(vcmi_data.selected_object())
+
+
+## The group 0 frames of the first animation of `names` that decodes, as mipmapped textures (the panel shows them
+## smaller), after the number of empty entries its value gives
+func _icons(names: Dictionary) -> Array[Texture2D]:
+	var icons: Array[Texture2D] = []
+	for name in names:
+		icons.resize(names[name])
+		for frame in vcmi_data.decode_animation(name).get("frames", []):
+			if int(frame["group"]) == 0:
+				var image: Image = frame["image"]
+				image.generate_mipmaps()
+				icons.append(ImageTexture.create_from_image(image))
+		if icons.size() > names[name]: # decoded
+			return icons
+	return []
 
 
 ## A trigger on the side panel: selects a hero or town as the 2D lists do (the selected one opens its window), or ends
@@ -852,6 +896,7 @@ func _table_panel_press(hand: int) -> bool:
 	print("VCMI XR: table panel ", item["kind"], " ", item["id"])
 	_pulse(hand, 0.25)
 	if item["kind"] == "end_turn":
+		table_panel.flip_hourglass()
 		bridge.key(END_TURN_KEY, true)
 		await get_tree().create_timer(0.1).timeout
 		bridge.key(END_TURN_KEY, false)
@@ -935,7 +980,8 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 				test_head = Transform3D(Basis.from_euler(Vector3(deg_to_rad(b), deg_to_rad(a), 0.0)), Vector3(0.0,
 						c if c > 0.0 else 1.6, 0.0))
 			else:
-				var minimap: Transform3D = room._table * Transform3D(Basis(), Vector3(0.0, room.TABLE_TOP, 0.0))
+				var minimap: Transform3D = room.global_transform * room._table * Transform3D(Basis(), Vector3(0.0,
+						room.TABLE_TOP, 0.0))
 				var eye := minimap * Vector3(0.0, a if a > 0.0 else 0.45, 0.15)
 				test_head = Transform3D(Basis(), eye).looking_at(minimap.origin, Vector3.UP)
 			test_head_start = null
