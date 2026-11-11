@@ -156,6 +156,9 @@ void fragment() {
 """
 const MINIMAP_AREA := Vector2(0.8, 0.5) ## metres on the table inside the corner figures
 const MARKER_METRES := 0.012 ## width of an object marker on the minimap
+## the table's side panel (table_panel.gd) in the minimap's space: along the near edge, the player's side (+z), its
+## lower edge just above the table and its face tilted 30 degrees from flat towards the player
+const TABLE_PANEL_POSE := Transform3D(Basis(Vector3.RIGHT, deg_to_rad(-60.0)), Vector3(0.0, 0.045, 0.40))
 ## The sprites of the map objects from the atlas pages (VcmiData.update_sprites, quest/MILESTONE_3B.md): the quad of the
 ## current frame, built from the frame table; pixels -> panel by the instance transform. Premultiplied colour, drawn in
 ## instance order without depth (the order is the 2D map's). The owner colour goes on the mask of owned objects.
@@ -473,6 +476,12 @@ func set_zoom(factor: float, centre: Vector2) -> void:
 ## the tiles the minimap shows now, in map UV: position and size
 func visible_uv() -> Rect2:
 	return Rect2(zoom_centre - Vector2.ONE * 0.5 / zoom, Vector2.ONE / zoom)
+
+
+## Puts the table's side panel (table_panel.gd) on the war table; it shows and hides with the minimap
+func add_table_panel(panel: Node3D) -> void:
+	panel.transform = TABLE_PANEL_POSE
+	_minimap.add_child(panel)
 
 
 ## the panel UV (0..1 across the minimap, not clamped) straight below or above a point in the world: where a hand
@@ -854,7 +863,7 @@ func _build_props() -> void:
 			["building_tower_A_green", Vector3(0.66, 0.0, 0.38), 0.08, 1.0], ["building_tower_A_yellow", Vector3(-0.64,
 					0.0, -0.38), 0.08, 4.0],
 			["flag_red", Vector3(-0.44, 0.0, 0.3), 0.55, 0.3], ["flag_blue", Vector3(0.46, 0.0, -0.24), 0.55, 2.0],
-			["flag_green", Vector3(0.42, 0.0, 0.42), 0.55, 1.2], ["flag_yellow", Vector3(-0.4, 0.0, -0.42), 0.55, 3.5]]:
+			["flag_green", Vector3(0.47, 0.0, 0.27), 0.55, 1.2], ["flag_yellow", Vector3(-0.4, 0.0, -0.42), 0.55, 3.5]]:
 		# the tower model starts above its (left out) base
 		var lift: float = -1.278 * piece[2] if "tower" in piece[0] else 0.0
 		var at: Vector3 = table * (piece[1] + Vector3(0.0, TABLE_TOP + lift, 0.0))

@@ -32,18 +32,23 @@
 #include "../../lib/CPlayerState.h"
 #include "../../lib/CThreadHelper.h"
 #include "../../lib/GameLibrary.h"
+#include "../../lib/IGameSettings.h"
 #include "../../lib/RiverHandler.h"
 #include "../../lib/RoadHandler.h"
 #include "../../lib/StartInfo.h"
 #include "../../lib/TerrainHandler.h"
 #include "../../lib/UnlockGuard.h"
 #include "../../lib/callback/CCallback.h"
+#include "../../lib/entities/faction/CTown.h"
 #include "../../lib/int3.h"
 #include "../../lib/mapObjects/CGHeroInstance.h"
+#include "../../lib/mapObjects/CGTownInstance.h"
 #include "../../lib/mapObjects/MiscObjects.h"
 #include "../../lib/mapping/CMap.h"
 #include "../../lib/mapping/TerrainTile.h"
 #include "../../lib/pathfinder/CGPathNode.h"
+#include "../../lib/texts/CGeneralTextHandler.h"
+#include "../../lib/texts/MetaString.h"
 #include "render/IImage.h"
 
 namespace
@@ -347,6 +352,77 @@ void publishSelection()
 	}
 }
 
+std::mutex panelMutex;
+VcmiPanel publishedPanel{}; // generation 0 outside a game
+
+// game thread, each tick: what the 2D side panel shows (CResDataBar, CHeroList, CTownList), for the table's panel
+void publishPanel()
+{
+	VcmiPanel next{};
+	CPlayerInterface * player = GAME->interface();
+	if(player && player->cb && player->localState)
+	{
+		const ResourceSet resources = player->cb->getResourceAmount();
+		for(int i = 0; i < VCMI_PANEL_RESOURCES; i++)
+			next.resources[i] = resources[GameResID(i)];
+		const auto calendar = player->cb->getCalendar();
+		next.day = static_cast<uint16_t>(calendar.getDayOfWeek());
+		next.week = static_cast<uint16_t>(calendar.getWeek());
+		next.month = static_cast<uint16_t>(calendar.getMonth());
+		// as CResDataBar::buildDateString
+		MetaString date;
+		date.appendTextID("vcmi.adventureMap.dateFormat");
+		date.replaceTokenTextID("%MONTH", "core.genrltxt.62");
+		date.replaceTokenNumber("%MONTHNUMBER", calendar.getMonth());
+		date.replaceTokenTextID("%WEEK", "core.genrltxt.63");
+		date.replaceTokenNumber("%WEEKNUMBER", calendar.getWeek());
+		date.replaceTokenTextID("%DAY", "core.genrltxt.64");
+		date.replaceTokenNumber("%DAYNUMBER", calendar.getDayOfWeek());
+		const auto copyName = [](char * out, size_t capacity, const std::string & text)
+		{
+			// cut at a character boundary: no half UTF-8 sequence at the end
+			size_t length = std::min(text.size(), capacity - 1);
+			while(length > 0 && length < text.size() && (static_cast<uint8_t>(text[length]) & 0xc0) == 0x80)
+				length--;
+			std::memcpy(out, text.data(), length);
+			out[length] = 0;
+		};
+		copyName(next.date, sizeof(next.date), date.toString(&GAME->translator()));
+		for(const CGHeroInstance * hero : player->localState->getWanderingHeroes())
+		{
+			if(next.heroCount == VCMI_PANEL_HEROES)
+				break;
+			VcmiPanelHero & out = next.heroes[next.heroCount++];
+			out.id = hero->id.getNum();
+			out.portrait = static_cast<uint16_t>(hero->getIconIndex());
+			out.movement = static_cast<uint16_t>(std::clamp(hero->movementPointsRemaining(), 0, 0xffff));
+			out.maxMovement = static_cast<uint16_t>(std::clamp(hero->movementPointsLimit(), 0, 0xffff));
+			out.mana = static_cast<uint16_t>(std::clamp(hero->mana, 0, 0xffff));
+			out.maxMana = static_cast<uint16_t>(std::clamp(hero->manaLimit(), 0, 0xffff));
+			out.sleeping = player->localState->isHeroSleeping(hero) ? 1 : 0;
+			copyName(out.name, sizeof(out.name), GAME->translator().translate(hero->getNameTextID()));
+		}
+		const int buildCap = player->cb->getSettings().getInteger(EGameSettings::TOWNS_BUILDINGS_PER_TURN_CAP);
+		for(const CGTownInstance * town : player->localState->getOwnedTowns())
+		{
+			if(next.townCount == VCMI_PANEL_TOWNS)
+				break;
+			VcmiPanelTown & out = next.towns[next.townCount++];
+			out.id = town->id.getNum();
+			// as CTownList::CTownItem::update
+			out.icon = static_cast<uint16_t>(town->getTown()->clientInfo.icons[town->hasFort()][town->built >= buildCap] + 2);
+			copyName(out.name, sizeof(out.name), GAME->translator().translate(town->getNameTextID()));
+		}
+	}
+	std::lock_guard lock(panelMutex);
+	next.generation = publishedPanel.generation;
+	if(std::memcmp(&next, &publishedPanel, sizeof(next)) != 0 || next.generation == 0)
+	{
+		next.generation = publishedPanel.generation + 1 == 0 ? 1 : publishedPanel.generation + 1;
+		publishedPanel = next;
+	}
+}
+
 std::atomic<uint8_t> windowsAbove{0};
 std::atomic<uint32_t> inputsRun{0};
 std::atomic<uint32_t> inputsDropped{0};
@@ -356,7 +432,11 @@ struct TileInput
 {
 	int3 tile;
 	uint8_t kind;
+	uint32_t object = VCMI_NONE; // SELECT and OPEN: the hero or town
 };
+// panel selections in the tile input queue, after the tile kinds (selectObject)
+constexpr uint8_t SELECT_OBJECT = 100;
+constexpr uint8_t OPEN_OBJECT = 101;
 std::mutex inputMutex;
 std::optional<TileInput> pendingHover;
 std::vector<TileInput> pendingInputs;
@@ -364,6 +444,31 @@ std::vector<TileInput> pendingInputs;
 // game thread, interfaceMutex held, after updateTabletop: runs the queued tile inputs through the adventure map's own
 // tile handlers (PHASE4.md decision 1). They check only the adventure state, not whether the map is covered, so the
 // input is dropped while a window is over the tabletop window: a click would walk the hero away behind a dialog.
+// game thread: the local player's hero or town `id`, as CHeroList::CHeroItem and CTownList::CTownItem select and open
+// it; nothing for another player's object
+void selectOwned(uint32_t id, bool open)
+{
+	CPlayerInterface * player = GAME->interface();
+	for(const CGHeroInstance * hero : player->localState->getWanderingHeroes())
+		if(hero->id.getNum() == static_cast<int32_t>(id))
+		{
+			if(open)
+				player->openHeroWindow(hero);
+			else
+				player->localState->setSelection(hero);
+			return;
+		}
+	for(const CGTownInstance * town : player->localState->getOwnedTowns())
+		if(town->id.getNum() == static_cast<int32_t>(id))
+		{
+			if(open)
+				player->openTownWindow(town);
+			else
+				player->localState->setSelection(town);
+			return;
+		}
+}
+
 void runTileInputs()
 {
 	std::vector<TileInput> inputs;
@@ -391,6 +496,18 @@ void runTileInputs()
 			continue;
 		}
 		const CPlayerInterface * player = GAME->interface();
+		if(input.kind == SELECT_OBJECT || input.kind == OPEN_OBJECT)
+		{
+			// as the 2D lists: only in the player's own turn (AdventureMapShortcuts::optionSidePanelActive)
+			if(tabletop.empty() || !windows.isTopWindow(tabletop.front()) || !player || !player->localState || !player->makingTurn)
+				inputsDropped++;
+			else
+			{
+				inputsRun++;
+				selectOwned(input.object, input.kind == OPEN_OBJECT);
+			}
+			continue;
+		}
 		// per input: the click before may have opened a dialog in this same tick
 		if(tabletop.empty() || !windows.isTopWindow(tabletop.front()) || !player || !player->cb || !player->cb->isInTheMap(input.tile)
 		   || !player->localState->getCurrentArmy())
@@ -597,6 +714,10 @@ void tick()
 		tabletopShown = false;
 		selected = VCMI_NONE;
 		windowsAbove = 0;
+		{
+			std::lock_guard panelLock(panelMutex);
+			publishedPanel = {};
+		}
 		std::lock_guard lock(pathMutex);
 		if(!publishedPath.empty())
 		{
@@ -609,6 +730,7 @@ void tick()
 	updateTabletop();
 	runTileInputs();
 	publishSelection();
+	publishPanel();
 	const int3 size = GAME->interface() && GAME->interface()->cb ? GAME->interface()->cb->getMapSize() : int3();
 	mapSize = static_cast<uint32_t>(size.x) | static_cast<uint32_t>(size.y) << 12 | static_cast<uint32_t>(size.z) << 24;
 	bool listTaken = false;
@@ -752,6 +874,26 @@ void tileInput(uint16_t x, uint16_t y, uint8_t z, uint8_t kind)
 		pendingHover = TileInput{int3(x, y, z), kind};
 	else if(pendingInputs.size() < 64) // shortcut: the tick drains them every 100 ms; more is a stuck game
 		pendingInputs.push_back(TileInput{int3(x, y, z), kind});
+}
+
+void copyPanel(VcmiPanel * out)
+{
+	std::unique_lock lock(panelMutex, std::try_to_lock);
+	if(!out)
+		return;
+	if(!lock)
+	{
+		out->generation = 0;
+		return;
+	}
+	*out = publishedPanel;
+}
+
+void selectObject(uint32_t id, uint8_t open)
+{
+	std::lock_guard lock(inputMutex);
+	if(pendingInputs.size() < 64)
+		pendingInputs.push_back(TileInput{int3(), open ? OPEN_OBJECT : SELECT_OBJECT, id});
 }
 
 uint32_t copyPath(VcmiPathNode * out, uint32_t capacity)
@@ -942,6 +1084,8 @@ uint32_t decodeFrames(const char * name, VcmiAnimationData * out)
 static_assert(sizeof(VcmiFrame) == 36, "VcmiFrame is part of the bridge ABI");
 static_assert(sizeof(VcmiMove) == 20, "VcmiMove is part of the bridge ABI");
 static_assert(sizeof(VcmiPathNode) == 8, "VcmiPathNode is part of the bridge ABI");
+static_assert(sizeof(VcmiPanelHero) == 64, "VcmiPanelHero is part of the bridge ABI");
+static_assert(sizeof(VcmiPanelTown) == 56, "VcmiPanelTown is part of the bridge ABI");
 
 extern "C" __attribute__((visibility("default"))) const VcmiBridgeApi vcmi_bridge_api = {
 	VCMI_BRIDGE_VERSION,
@@ -959,4 +1103,6 @@ extern "C" __attribute__((visibility("default"))) const VcmiBridgeApi vcmi_bridg
 	tileInput,
 	copyPath,
 	tileAnimation,
+	copyPanel,
+	selectObject,
 };

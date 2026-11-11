@@ -14,6 +14,8 @@ const SCREEN_SPEED := 0.8 ## metres per second at full left thumbstick
 const SETTINGS_PATH := "user://screen.cfg"
 const SURFACE_SIZE := Vector2i(2560, 1440) ## pixels of the game window
 const TableMath := preload("res://table_math.gd")
+const TablePanel := preload("res://table_panel.gd")
+const END_TURN_KEY := 33 ## KEYCODE_E, as the wrist panel's "End turn (E)"
 ## a tile on the table in tabletop mode (quest/PHASE4.md decision D3). shortcut: check 3 (ray jitter against tile size)
 ## needs a person holding a controller; 1.5 cm is a safe guess until it is measured
 const TABLE_TILE_METRES := 0.015
@@ -77,6 +79,9 @@ var table_popup := false ## a still grip opened a tile's popup from the table: i
 var grabs := {}
 var grab_view := {} ## the view when the current drag or two-hand zoom began: centre, zoom, at, spread
 var followed_move := 0 ## the sequence of the last hero step the view followed
+## the side panel at the table's near edge (quest/PHASE4.md 4d): resources, date, heroes, towns, end turn
+var table_panel: Node3D
+var table_icons_tried := false ## SMALRES decoded once, found or not
 var shown_selection := Vector3i(-2, -2, -2) ## the selected hero's tile the table last followed and marked
 var sprites_held := false ## the test command `sprites` set them: the view does not change them until `table_zoom`
 var atlas_refills := 0 ## of the atlas, at the last view: a refill moves the frames, so the sprites wait for the rebuild
@@ -137,6 +142,9 @@ func _ready() -> void:
 	add_child(light)
 	room = preload("res://room.gd").new()
 	add_child(room)
+	table_panel = TablePanel.new()
+	table_panel.visible = false
+	room.add_table_panel(table_panel)
 	# Godot's hole punch does not write depth, so the room behind the screen would draw over the game.
 	# Multiplying by 0 clears colour and alpha whatever the opaque room drew there; its depth keeps what is behind it
 	# out later.
@@ -402,10 +410,12 @@ func _process(delta: float) -> void:
 	_update_hotkey_panel()
 	if hotkey_hover >= 0 and active_hand == 1:
 		pointer_dot.visible = false
+		table_panel.set_hover(-1)
 		return
 	if tabletop and not layer.visible:
 		_table_pointer()
 		return
+	table_panel.set_hover(-1)
 	var hit := _pointer_hit(active_hand)
 	pointer_dot.visible = hit != NO_HIT
 	if hit != NO_HIT:
@@ -453,6 +463,9 @@ func _update_table(changed: int) -> void:
 		var centre := TableMath.follow(room.visible_uv(), target, TABLE_KEEP)
 		room.set_zoom(room.zoom, TableMath.on_level(centre, room.zoom, move.z, map_size.z))
 	followed_move = move.w
+	table_panel.visible = tabletop and changed & 4 != 0
+	if table_panel.visible:
+		_update_table_panel()
 	if tabletop:
 		_update_grabs()
 		# also without the tabletop window: at a turn's start the game shows its dialogs (new week, the next player)
@@ -466,6 +479,13 @@ func _update_table(changed: int) -> void:
 ## The active ray on the table in tabletop mode: drawn to its hit, and the tile under it sent to the game as a hover
 func _table_pointer() -> void:
 	var ray := _aim_ray(active_hand)
+	var on_panel: Array = table_panel.ray_item(ray[0], ray[1]) if not ray.is_empty() else []
+	table_panel.set_hover(on_panel[0] if not on_panel.is_empty() else -1)
+	if not on_panel.is_empty():
+		_show_ray(active_hand, ray[0], ray[1].normalized(), ray[0].distance_to(on_panel[1]))
+		pointer_dot.visible = true
+		pointer_dot.global_position = on_panel[1]
+		return
 	var hit: Vector3 = room.table_hit(ray[0], ray[1]) if not ray.is_empty() else Vector3.INF
 	var tile := _table_tile(active_hand) if hit != Vector3.INF else TableMath.NO_TILE
 	pointer_dot.visible = tile.x >= 0
@@ -784,6 +804,8 @@ func _table_press(button: int, hand: int, pressed: bool) -> void:
 	if not pressed:
 		return
 	active_hand = hand
+	if await _table_panel_press(hand):
+		return
 	var tile := _table_tile(hand)
 	if tile.x < 0:
 		return
@@ -792,6 +814,41 @@ func _table_press(button: int, hand: int, pressed: bool) -> void:
 		vcmi_data.tile_input(tile, TILE_HOVER)
 	vcmi_data.tile_input(tile, TILE_CLICK)
 	_pulse(hand, 0.5)
+
+
+## The side panel's data when the game published new data, and the selection; the resource icons once
+func _update_table_panel() -> void:
+	var data: Dictionary = vcmi_data.panel()
+	if not data.is_empty():
+		if not table_icons_tried:
+			table_icons_tried = true
+			# the 2D map's small resource icons (SMALRES.def), frame by resource id; read once, a few ms
+			for frame in vcmi_data.decode_animation("SMALRES").get("frames", []):
+				if int(frame["group"]) == 0:
+					table_panel.resource_icons.append(ImageTexture.create_from_image(frame["image"]))
+		table_panel.set_data(data)
+	table_panel.set_selected(vcmi_data.selected_object())
+
+
+## A trigger on the side panel: selects a hero or town as the 2D lists do (the selected one opens its window), or ends
+## the turn; true when the ray of `hand` was on the panel, so the click does not go to the map behind it
+func _table_panel_press(hand: int) -> bool:
+	var ray := _aim_ray(hand)
+	var hit: Array = table_panel.ray_item(ray[0], ray[1]) if not ray.is_empty() else []
+	if hit.is_empty():
+		return false
+	if hit[0] < 0:
+		return true
+	var item: Dictionary = table_panel.items[hit[0]]
+	print("VCMI XR: table panel ", item["kind"], " ", item["id"])
+	_pulse(hand, 0.25)
+	if item["kind"] == "end_turn":
+		bridge.key(END_TURN_KEY, true)
+		await get_tree().create_timer(0.1).timeout
+		bridge.key(END_TURN_KEY, false)
+	else:
+		vcmi_data.select_object(item["id"], int(item["id"]) == table_panel.selected)
+	return true
 
 
 ## Each frame in tabletop mode, the grips held on the table: one moving hand drags the map with it, two hands zoom

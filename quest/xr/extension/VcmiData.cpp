@@ -84,9 +84,12 @@ protected:
 		BIND_CONSTANT(PATH_CHANGED);
 		ClassDB::bind_method(D_METHOD("path_nodes"), &VcmiData::path_nodes);
 		ClassDB::bind_method(D_METHOD("selected_tile"), &VcmiData::selected_tile);
+		ClassDB::bind_method(D_METHOD("selected_object"), &VcmiData::selected_object);
 		ClassDB::bind_method(D_METHOD("windows_above"), &VcmiData::windows_above);
 		ClassDB::bind_method(D_METHOD("tabletop_shown"), &VcmiData::tabletop_shown);
 		ClassDB::bind_method(D_METHOD("move_target"), &VcmiData::move_target);
+		ClassDB::bind_method(D_METHOD("panel"), &VcmiData::panel);
+		ClassDB::bind_method(D_METHOD("select_object", "id", "open"), &VcmiData::select_object);
 	}
 
 	uint32_t seenTiles = 0;
@@ -159,6 +162,7 @@ protected:
 	std::vector<std::vector<uint32_t>> buckets;
 	int bucketColumns = 0, bucketRows = 0;
 	VcmiBridgeStats latest{}; // of the last update
+	uint32_t seenPanel = 0; // generation of the panel data panel() last returned
 	uint32_t seenPath = 0;
 	std::vector<VcmiPathNode> path; // the selected hero's, from its first step to the end
 	VcmiMove move{}; // the last hero step the game asked the tabletop to show
@@ -312,6 +316,8 @@ public:
 		api->stats(&s);
 		latest = s;
 		const int inGame = s.inGame ? IN_GAME : 0;
+		if(!inGame)
+			seenPanel = 0; // the next game counts its panel generations from 1 again
 		int pathChanged = 0;
 		if(s.pathGeneration != seenPath)
 		{
@@ -1217,10 +1223,74 @@ public:
 		return Vector3i(int(o.x) - (o.visit >> 4), int(o.y) - (o.visit & 15), o.z);
 	}
 
+	/// the object id of the selected hero or town at the last update, -1 when none
+	int64_t selected_object() const
+	{
+		return latest.selected == VCMI_NONE ? -1 : int64_t(latest.selected);
+	}
+
 	/// windows over the tabletop window at the last update (dialogs, battles, popups): the game screen shows them
 	int windows_above() const
 	{
 		return latest.windowsAbove;
+	}
+
+	/// what the 2D side panel shows (VcmiBridgeApi.panel), when it changed since the last call, else an
+	/// empty Dictionary: {generation, resources: PackedInt32Array (by resource id), date (the 2D bar's text),
+	/// heroes: [{id, portrait, movement, max_movement, mana, max_mana, sleeping, name}],
+	/// towns: [{id, icon, name}]}, in the 2D lists' order
+	Dictionary panel()
+	{
+		Dictionary result;
+		if(!api)
+			return result;
+		// 3.8 kB: copied whole each call, which is once a frame
+		auto data = std::make_unique<VcmiPanel>();
+		api->panel(data.get());
+		if(data->generation == 0 || data->generation == seenPanel)
+			return result;
+		seenPanel = data->generation;
+		result["generation"] = data->generation;
+		PackedInt32Array resources;
+		for(int32_t amount : data->resources)
+			resources.push_back(amount);
+		result["resources"] = resources;
+		result["date"] = String::utf8(data->date);
+		Array heroes;
+		for(int i = 0; i < std::min<int>(data->heroCount, VCMI_PANEL_HEROES); i++)
+		{
+			const VcmiPanelHero & h = data->heroes[i];
+			Dictionary hero;
+			hero["id"] = h.id;
+			hero["portrait"] = h.portrait;
+			hero["movement"] = h.movement;
+			hero["max_movement"] = h.maxMovement;
+			hero["mana"] = h.mana;
+			hero["max_mana"] = h.maxMana;
+			hero["sleeping"] = h.sleeping != 0;
+			hero["name"] = String::utf8(h.name, strnlen(h.name, sizeof(h.name)));
+			heroes.push_back(hero);
+		}
+		result["heroes"] = heroes;
+		Array towns;
+		for(int i = 0; i < std::min<int>(data->townCount, VCMI_PANEL_TOWNS); i++)
+		{
+			const VcmiPanelTown & t = data->towns[i];
+			Dictionary town;
+			town["id"] = t.id;
+			town["icon"] = t.icon;
+			town["name"] = String::utf8(t.name, strnlen(t.name, sizeof(t.name)));
+			towns.push_back(town);
+		}
+		result["towns"] = towns;
+		return result;
+	}
+
+	/// selects the local player's hero or town `id` as the 2D lists do; `open`: its hero or town window instead
+	void select_object(int64_t id, bool open)
+	{
+		if(api && id >= 0 && id < int64_t(VCMI_NONE))
+			api->selectObject(uint32_t(id), open ? 1 : 0);
 	}
 
 	/// the last hero step the tabletop showed: Vector4i(x, y, level of its end (the anchor tile), its sequence; 0: none)

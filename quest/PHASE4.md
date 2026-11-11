@@ -1,6 +1,6 @@
 # Phase 4: the tabletop adventure map (plan)
 
-Status: 2026-11-09, required checks done except check 3, which waits for a person in the headset (section 3a); milestones 4a, 4b and 4c built and played on the Quest with a simulated ray (sections 4a, 4b and 4c results; a battle, spells and the real buttons not yet checked). Next: milestone 4d.
+Status: 2026-11-09, required checks done except check 3, which waits for a person in the headset (section 3a); milestones 4a, 4b and 4c built and played on the Quest with a simulated ray (sections 4a, 4b and 4c results; a battle, spells and the real buttons not yet checked); 4d built and tested on the PC, its headset test waits (2026-11-11). Next: milestone 4e.
 
 Goal (from [`PROJECT_PLAN.md`](PROJECT_PLAN.md#phase-4---tabletop-adventure-map-after-data-bridge-milestones-2-and-3)): the adventure map is fully playable on the war table, and one button goes back to the 2D screen.
 
@@ -263,6 +263,26 @@ Each one is tested on the Quest, reviewed, and recorded here with its numbers be
 
 - Resources and the date at the table edge; the hero and town lists (movement, mana) with selection through the bridge; the end turn button as the hourglass.
 - **Exit:** the 2D side panel is not needed for a whole turn.
+
+#### 4d results (2026-11-11, built and tested on the PC; the headset test waits)
+
+- **Bridge (version 10):** `panel` publishes, each tick, what the 2D side panel shows:
+  - the resources and the date, in `CResDataBar::buildDateString`'s words;
+  - the heroes in `CHeroList`'s order, with their movement, mana and sleep;
+  - the towns in `CTownList`'s order.
+
+  The generation goes up only when the data changes. `selectObject` goes into the tile input queue and works as a click in the 2D lists: it selects the hero or town, and opens its window when it is already selected. It is dropped outside the player's own turn and while a window is over the tabletop.
+- **Host (`xr/table_panel.gd`):** a strip at the table's near edge, tilted towards the player. From left to right:
+  - the date, and the resources with the game's `SMALRES` icons;
+  - up to 8 heroes and up to 8 towns;
+  - the End turn button, which sends the E key, as the wrist panel does.
+
+  The ray hovers an entry. The trigger acts on it, and never reaches the map behind the panel.
+- **Checked on the PC:** the headless test `tests/table_panel_test.gd` covers the layout, the ray from the front and the back, and the selection kept over new data. `render-room.sh sprites` shows the panel on the table (`sprites-panel`). A corner flag that covered the button moved beside it. The APK builds.
+- **Not checked yet / left:**
+  - The headset test is still to do: hover, select, open, end turn, and a whole turn without the 2D side panel. That last one is the exit.
+  - Heroes and towns show their names only. The portraits are BMP images in the game's archives, which the decoder cannot read yet.
+  - `shortcut:` heroes and towns past the 8th are not shown. 2D scrolls its lists; add paging if a map needs more.
 
 ### 4e. Paper cards and the remaining animations
 

@@ -39,7 +39,7 @@ Not closed yet:
 
 ### Next, in order
 
-1. **Phase 4, tabletop adventure map:** planned in [`PHASE4.md`](PHASE4.md); milestones 4a (play on the table: clicks, path, the screen for dialogs only), 4b (grab to pan and zoom, the view follows heroes, atlas eviction and refills, 72 fps panning the heaviest map) and 4c (terrain, rivers, roads and the 2D fog through the atlas) are built and played with a simulated ray; next is 4d, the side panel on the table. Also read: [`DATA_BRIDGE.md`](DATA_BRIDGE.md) Milestone 3c results (the tabletop window, `setTabletop`, the hero steps the game waits for, and what the game screen shows meanwhile).
+1. **Phase 4, tabletop adventure map:** planned in [`PHASE4.md`](PHASE4.md); milestones 4a (play on the table: clicks, path, the screen for dialogs only), 4b (grab to pan and zoom, the view follows heroes, atlas eviction and refills, 72 fps panning the heaviest map) and 4c (terrain, rivers, roads and the 2D fog through the atlas) are built and played with a simulated ray; 4d (the side panel on the table) is built and tested on the PC, its headset test waits; next is 4e, paper cards. Also read: [`DATA_BRIDGE.md`](DATA_BRIDGE.md) Milestone 3c results (the tabletop window, `setTabletop`, the hero steps the game waits for, and what the game screen shows meanwhile).
 2. **Milestone 4, battle**, then **phase 5, battle diorama**.
 
 Each milestone records its numbers in `DATA_BRIDGE.md` and is optimised before the next one starts.

@@ -10,7 +10,7 @@
 #include <stdint.h>
 
 // raise on any change to the structs below; the extension refuses a table with another version
-#define VCMI_BRIDGE_VERSION 9
+#define VCMI_BRIDGE_VERSION 10
 
 typedef struct VcmiBridgeStats
 {
@@ -53,6 +53,41 @@ typedef struct VcmiPathNode
 #define VCMI_TILE_CLICK 1 // left click
 #define VCMI_TILE_POPUP 2 // right button down: the info popup of the tile
 #define VCMI_TILE_POPUP_END 3 // right button up: closes it
+
+// what the 2D side panel shows (quest/PHASE4.md 4d), for the table's own panel; names in UTF-8, cut to fit
+typedef struct VcmiPanelHero
+{
+	uint32_t id; // object id
+	uint16_t portrait; // frame of PortraitsSmall (getIconIndex)
+	uint16_t movement, maxMovement; // movement points left this turn, and a full turn's
+	uint16_t mana, maxMana;
+	uint8_t sleeping;
+	uint8_t pad;
+	char name[48];
+} VcmiPanelHero; // 64 bytes
+
+typedef struct VcmiPanelTown
+{
+	uint32_t id; // object id
+	uint16_t icon; // frame of ITPA, as the 2D town list shows it
+	uint16_t pad;
+	char name[48];
+} VcmiPanelTown; // 56 bytes
+
+#define VCMI_PANEL_HEROES 16
+#define VCMI_PANEL_TOWNS 48
+#define VCMI_PANEL_RESOURCES 8
+
+typedef struct VcmiPanel
+{
+	uint32_t generation; // raised when anything below changes; 0: no game
+	int32_t resources[VCMI_PANEL_RESOURCES]; // by resource id: wood, mercury, ore, sulfur, crystal, gems, gold, ...
+	uint16_t day, week, month; // day of the week, week of the month, month
+	uint8_t heroCount, townCount; // the lists as the 2D panel orders them, cut to the arrays
+	char date[64]; // as the 2D resource bar writes it
+	VcmiPanelHero heroes[VCMI_PANEL_HEROES];
+	VcmiPanelTown towns[VCMI_PANEL_TOWNS];
+} VcmiPanel;
 
 // a hero step the tabletop shows: the game waits until Godot confirms it (confirmMove) or durationMs + 200 ms pass. The
 // object's record already holds the destination. Positions are anchor tiles, as VcmiObject's
@@ -198,4 +233,11 @@ typedef struct VcmiBridgeApi
 	// animation (its frame is the tile's view or direction), the mode (o: opaque, k: palette index 0 clear) and the
 	// palette ranges that rotate by one colour every 180 ms (paletteAnimation). Any thread
 	uint32_t (*tileAnimation)(uint8_t layer, uint8_t id, char * out, uint32_t capacity);
+	// copies the side panel's data (VcmiPanel); never waits (generation 0 while the game writes: try next frame).
+	// Any thread
+	void (*panel)(VcmiPanel * out);
+	// selects the local player's hero or town `id` as a click in the 2D hero or town list does; with `open` 1, opens
+	// its hero or town window instead. Run by the next lifecycle tick, dropped while a window is over the tabletop.
+	// Any thread
+	void (*selectObject)(uint32_t id, uint8_t open);
 } VcmiBridgeApi;

@@ -69,6 +69,7 @@ func _ready() -> void:
 		if arg.begins_with("zoom="):
 			zoom_tile = Vector2(float(arg.get_slice("=", 1).get_slice(",", 0)), float(arg.get_slice("=",
 					1).get_slice(",", 1)))
+	_add_table_panel(room)
 	if FileAccess.file_exists(SPRITES):
 		_load_sprites(room)
 	if "sprites" in OS.get_cmdline_user_args():
@@ -103,6 +104,27 @@ func _ready() -> void:
 		var error := picture.save_png(path)
 		print("room preview: ", path, " ", error_string(error))
 	get_tree().quit()
+
+
+## the table's side panel (table_panel.gd) with sample data, and a view of it from where the player stands at the table
+func _add_table_panel(room: Node3D) -> void:
+	var panel: Node3D = preload("res://table_panel.gd").new()
+	room.add_table_panel(panel)
+	var heroes := []
+	for i in 4:
+		heroes.append({"id": i, "name": ["Orrin", "Valeska", "Edric", "Sylvia"][i], "movement": 1560 - 400 * i,
+				"max_movement": 1560, "mana": 10 * i, "max_mana": 30, "sleeping": i == 3})
+	panel.set_data({"date": "Month: 1, Week: 1, Day: 3", "heroes": heroes,
+			"resources": PackedInt32Array([20, 10, 20, 10, 10, 10, 30000]),
+			"towns": [{"id": 10, "name": "Kirkwall"}, {"id": 11, "name": "Stonecastle"}]})
+	panel.set_selected(1)
+	panel.set_hover(4)
+	_minimap_view(room, "sprites-panel", Vector3(0.0, 0.55, 0.85), Vector3(0.0, 0.05, 0.3))
+
+
+func _minimap_view(room: Node3D, view: String, eye: Vector3, target: Vector3) -> void:
+	var minimap: Transform3D = room._table * Transform3D(Basis(), Vector3(0.0, room.TABLE_TOP, 0.0))
+	views[view] = [minimap * eye, minimap * target]
 
 
 ## the headset's sprite data (main.gd _save_sprites) into the room, and views from above the minimap, as the test
