@@ -56,6 +56,7 @@ const HOTKEY_PANEL_POSE := Transform3D(Basis(Vector3.RIGHT, deg_to_rad(-45.0)), 
 const PAD_RIGHT_X := 2
 const PAD_RIGHT_Y := 3
 const SPRITE_PIXELS := 12.0 ## sprites instead of markers from this many pixels per tile on screen (MILESTONE_3B.md 5)
+const HD_SCALE := 4 ## the table's sprites upscaled 4x with xBRZ (SpriteAtlas.h), lower while a view does not fit
 const PIXELS_PER_RADIAN := 1150.0 ## Quest 3: about 2064 eye-buffer pixels over 104 degrees
 const ENVIRONMENTS := ["war room", "passthrough", "black"] ## around the screen; a long left menu press goes to the next
 
@@ -70,6 +71,8 @@ var sprite_level := -1
 ## sprites again once zoomed in past it; 0 when none. shortcut: one value per map, so a sparse area at that zoom shows
 ## markers too; per area if players see it
 var too_far_zoom := 0.0
+var sprite_scale := HD_SCALE ## the atlas scale asked for (atlas_view): halved when a view overflows, back up zoomed in
+var scale_zoom := 0.0 ## the zoom at which sprite_scale was last halved
 var sprites_pending := false ## the atlas loads them; update_sprites when it is done
 ## the map is played on the war table (quest/PHASE4.md milestone 4a); the screen shows dialogs only
 var tabletop := false
@@ -301,6 +304,7 @@ func _save_sprites(path: String) -> void:
 	file.store_var({"terrain": entry.call(vcmi_data.terrain_image()), "fog": entry.call(vcmi_data.fog_image()),
 			"pages": pages,
 			"masks": masks, "table": entry.call(vcmi_data.sprite_table()), "count": multimesh.instance_count,
+			"scale": _atlas_scale(),
 			"buffer": multimesh.buffer, "names": vcmi_data.sprite_names()})
 	print("VCMI XR: sprites saved to ", path, ", ", file.get_length(), " bytes")
 
@@ -328,12 +332,24 @@ func _update_sprite_view(head: Vector3) -> void:
 		tiles = tiles.intersection(Rect2i(0, 0, map_size.x, map_size.y))
 		var changes: int = 0 if sprites_pending else vcmi_data.update_sprite_changes(room.sprite_multimesh())
 		if changes == 3: # the changed objects use frames the table did not have
-			room.set_sprites(vcmi_data.atlas_textures(), vcmi_data.sprite_table(), false)
+			room.set_sprites(vcmi_data.atlas_textures(), vcmi_data.sprite_table(), _atlas_scale(), false)
 		# a new request when the changes need it (a new list, a new animation), or the view moved a few tiles or
 		# changed its size
 		var moved := (tiles.position - sprite_rect.position).length() > 2.0
-		if changes < 0 or level != sprite_level or tiles.size != sprite_rect.size or moved:
-			vcmi_data.atlas_view(tiles, level)
+		# zoomed in to a quarter of the view that overflowed: the higher scale fits again
+		var sharper: bool = sprite_scale < HD_SCALE and room.zoom > scale_zoom * 1.9
+		if sharper:
+			sprite_scale *= 2
+			scale_zoom = room.zoom
+		# no more texels than the screen shows: a 32 px tile at `scale` covers at most 4 texels a screen pixel (mip 2,
+		# the tiles' cap and the padding between frames)
+		# the size a scale keeps until 20 % under it, so a head moving at a threshold does not reload the view each time
+		var held := func(at_scale: int) -> float: return 0.8 if _atlas_scale() >= at_scale else 1.0
+		var fit: int = 4 if pixels >= 32.0 * held.call(4) else (2 if pixels >= 16.0 * held.call(2) else 1)
+		var scale: int = mini(sprite_scale, fit)
+		if changes < 0 or level != sprite_level or tiles.size != sprite_rect.size or moved or sharper \
+				or scale != _atlas_scale():
+			vcmi_data.atlas_view(tiles, level, scale)
 			sprite_rect = tiles
 			sprite_level = level
 			sprites_pending = true
@@ -346,15 +362,27 @@ func _update_sprite_view(head: Vector3) -> void:
 				room.sprite_multimesh().instance_count = 0
 		if sprites_pending and not vcmi_data.atlas_busy():
 			vcmi_data.update_sprites(room.sprite_multimesh(), sprite_rect, sprite_level)
-			room.set_sprites(vcmi_data.atlas_textures(), vcmi_data.sprite_table(), false)
+			room.set_sprites(vcmi_data.atlas_textures(), vcmi_data.sprite_table(), _atlas_scale(), false)
 			sprites_pending = false
-			if vcmi_data.atlas_stats().get("view_overflowed", false):
-				too_far_zoom = room.zoom # some objects would have no sprite: markers until closer
+			if vcmi_data.atlas_stats().get("view_overflowed", false) and _atlas_scale() > 1:
+				# some objects would have no sprite: the view again at half the scale, a quarter of the texels
+				sprite_scale = _atlas_scale() / 2
+				scale_zoom = room.zoom
+				vcmi_data.atlas_view(sprite_rect, sprite_level, mini(sprite_scale, fit))
+				sprites_pending = true
+				print("VCMI XR: the atlas cannot hold the view at zoom ", room.zoom, ": scale ", sprite_scale)
+			elif vcmi_data.atlas_stats().get("view_overflowed", false):
+				too_far_zoom = room.zoom # some objects would have no sprite even at 1x: markers until closer
 				print("VCMI XR: the atlas cannot hold the view at zoom ", room.zoom, ": markers")
 	var shown: bool = near and (not sprites_pending or room.sprite_multimesh().instance_count > 0)
 	room.show_sprites(shown, pop_cards)
 	pop_cards = not near or (pop_cards and not shown) # the cards rise when the table comes near, not after a refill
 	vcmi_data.animate_move(room.sprite_multimesh())
+
+
+## texels per 2D map pixel of the atlas pages, for the sprite shader
+func _atlas_scale() -> int:
+	return vcmi_data.atlas_stats().get("scale", 1)
 
 
 func _exit_tree() -> void:
@@ -421,6 +449,7 @@ func _process(delta: float) -> void:
 		if changed & 1:
 			map_size = vcmi_data.stats().get("map", Vector3i.ZERO)
 			too_far_zoom = 0.0
+			sprite_scale = HD_SCALE
 		if changed & 4 and tracked != null and not sprites_held:
 			_update_sprite_view((origin.transform * (tracked as Transform3D)).origin)
 		_update_table(changed)
@@ -1101,7 +1130,7 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 			var map: Vector3i = vcmi_data.stats().get("map", Vector3i.ZERO)
 			var at := Vector2i(int(a), int(b)) if a >= 0.0 else Vector2i(map.x / 2 - size / 2, map.y / 2 - size / 2)
 			sprites_held = true # as `sprites`: the view's sprites wait until `table_zoom`
-			var wanted: int = vcmi_data.atlas_view(Rect2i(at, Vector2i(size, size)), 0)
+			var wanted: int = vcmi_data.atlas_view(Rect2i(at, Vector2i(size, size)), 0, sprite_scale)
 			var from := Time.get_ticks_msec()
 			while vcmi_data.atlas_busy() and Time.get_ticks_msec() - from < 20000:
 				await get_tree().process_frame
@@ -1122,14 +1151,14 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 			var map: Vector3i = vcmi_data.stats().get("map", Vector3i.ZERO)
 			var tiles := Rect2i(int(a), int(b), int(c), int(c)) if c > 0.0 else Rect2i(0, 0, map.x, map.y)
 			sprites_held = true # the view's sprites must not ask the atlas for their own view meanwhile
-			var wanted: int = vcmi_data.atlas_view(tiles, 0)
+			var wanted: int = vcmi_data.atlas_view(tiles, 0, sprite_scale)
 			var from := Time.get_ticks_msec()
 			while vcmi_data.atlas_busy() and Time.get_ticks_msec() - from < 20000:
 				await get_tree().process_frame
 			var started := Time.get_ticks_usec()
 			var count: int = vcmi_data.update_sprites(room.sprite_multimesh(), tiles, 0, true)
 			var fill_us := Time.get_ticks_usec() - started
-			room.set_sprites(vcmi_data.atlas_textures(), vcmi_data.sprite_table(), true)
+			room.set_sprites(vcmi_data.atlas_textures(), vcmi_data.sprite_table(), _atlas_scale(), true)
 			room.show_sprites(true)
 			print("VCMI XR: sprites ", tiles, ": ", wanted, " animations, ", count, " instances in ", fill_us, " us, ",
 					vcmi_data.atlas_stats())
@@ -1154,7 +1183,7 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 					if not same:
 						differ = i / 20
 						break
-				room.set_sprites(vcmi_data.atlas_textures(), vcmi_data.sprite_table(), false)
+				room.set_sprites(vcmi_data.atlas_textures(), vcmi_data.sprite_table(), _atlas_scale(), false)
 				print("VCMI XR: sprites check ", "same" if differ < 0 else "DIFFERENT at instance %d" % differ, ", ",
 						kept.size() / 20,
 						" -> ", now.size() / 20, " instances, ", stats)

@@ -1,5 +1,6 @@
 // SpriteAtlas.h, Meta Quest build: the map object sprites of the view in RGBA pages (quest/MILESTONE_3B.md, plan step 3).
-// Workers decode the wanted animations through the bridge, bake and trim them and pack them into pages of RGBA8 with
+// Workers decode the wanted animations through the bridge, bake and trim them, upscale them with VCMI's xBRZ to the
+// atlas scale (HD on the table, PHASE4.md 4e: the 1x art in place of an HD pack) and pack them into pages of RGBA8 with
 // premultiplied alpha (so mipmaps blend edges right; the shader blends premultiplied), with an R8 owner mask page of
 // the same layout; the main thread uploads at most one finished page per frame.
 // Included by VcmiData.cpp (one translation unit, as the bridge's files).
@@ -17,6 +18,8 @@
 
 #include <godot_cpp/classes/texture2d_array.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
+
+#include "../../../client/filters/xBRZ/xbrz.h" // standalone, compiled in by CMakeLists.txt
 
 /// one frame as the 2D map draws it: RGBA8 (shadow in alpha), the owner mask (empty when none), its place in the full frame
 struct BakedFrame
@@ -206,13 +209,13 @@ inline std::vector<BakedFrame> decodeBaked(const VcmiBridgeApi * api, const std:
 class SpriteAtlas
 {
 public:
-	// small pages, many layers: an upload of a 2048² page with mipmaps took 7-11 ms of the main thread on the Quest
-	// (MILESTONE_3B.md section 1c); 512² layers hold the same pixels and upload in pieces. 64 x 512² RGBA8 with
-	// mipmaps and masks: about 112 MB on the GPU (the budget revised in PHASE4.md 4c)
-	static constexpr int PAGE = 512;
-	// 64: the tabletop view of the heaviest map (1.5 cm tiles) needed about 10 % more than 32 pages for its objects
-	// (PHASE4.md 4b), and overflowed 48 once its terrain came in (4c: water and lava bake a frame per palette step)
-	static constexpr int PAGES = 64;
+	// an upload of a 2048² page with mipmaps took 7-11 ms of the main thread on the Quest (MILESTONE_3B.md section
+	// 1c); 1024² holds the largest map object at 4x (a town, 192 pixels wide) and uploads in about a quarter of that.
+	// 32 x 1024² RGBA8 with mipmaps and masks: about 224 MB on the GPU, twice the 1x atlas of PHASE4.md 4c, which
+	// held the heaviest map's view at 1x; a view that does not fit at the asked scale gets a lower one (main.gd)
+	static constexpr int PAGE = 1024;
+	static constexpr int PAGES = 32;
+	static constexpr int MAX_SCALE = 4;
 	static constexpr int PAD = 4; // between sprites: they stay apart in mips 0-1 and mostly in 2; the LOD switch keeps
 	// sprites from being drawn smaller than that (MILESTONE_3B.md section 5)
 	static constexpr int WORKERS = 3; // the Quest 3 has 6 cores; the game thread takes one, Godot's main and render threads two
@@ -269,12 +272,20 @@ public:
 			worker.join();
 	}
 
-	/// main thread: the animations the view needs, by name. Loads those not in the pages; a full atlas makes room by
-	/// clearing the page the view has not needed for longest (evict). Starts all pages again with only these when no
-	/// page can go (the view needs more than the pages), or when the pages would hold mostly other animations.
-	void want(const std::vector<std::string> & names)
+	/// main thread: the animations the view needs, by name, at `wantedScale` (1 to MAX_SCALE: texels per pixel of the
+	/// 2D map). Loads those not in the pages; a full atlas makes room by clearing the page the view has not needed for
+	/// longest (evict). Starts all pages again with only these when no page can go (the view needs more than the
+	/// pages), when the pages would hold mostly other animations, or at another scale.
+	void want(const std::vector<std::string> & names, int wantedScale)
 	{
 		std::lock_guard lock(mutex);
+		wantedScale = std::clamp(wantedScale, 1, MAX_SCALE);
+		const bool rescaled = wantedScale != scale;
+		if(rescaled)
+		{
+			scale = wantedScale;
+			refill();
+		}
 		stats.wanted = names.size();
 		wantSerial++;
 		wantedNow = std::unordered_set<std::string>(names.begin(), names.end());
@@ -302,7 +313,7 @@ public:
 		// shortcut: 64 animations stay cached when zooming in to a few; tune with the real views of phase 4
 		if(placed.size() > 2 * names.size() && placed.size() > 64)
 			refill();
-		else
+		else if(!rescaled) // a rescale's refill is a fresh batch: what does not fit then overflows the view
 			freshBatch = false;
 		queueWanted();
 		batchStart = std::chrono::steady_clock::now();
@@ -336,12 +347,13 @@ public:
 		if(body.is_null())
 		{
 			// all layers at once, empty: Texture2DArray takes its size and format from them
+			// one empty image for every layer: 32 of them would be 213 MB on the main thread at once
 			TypedArray<Image> bodies;
 			TypedArray<Image> masks;
+			const Ref<Image> b = Image::create_empty(PAGE, PAGE, true, Image::FORMAT_RGBA8);
+			const Ref<Image> m = Image::create_empty(PAGE, PAGE, true, Image::FORMAT_R8);
 			for(int i = 0; i < PAGES; i++)
 			{
-				Ref<Image> b = Image::create_empty(PAGE, PAGE, true, Image::FORMAT_RGBA8);
-				Ref<Image> m = Image::create_empty(PAGE, PAGE, true, Image::FORMAT_R8);
 				bodies.push_back(b);
 				masks.push_back(m);
 			}
@@ -380,6 +392,13 @@ public:
 	Ref<Texture2DArray> bodyTexture() const
 	{
 		return body;
+	}
+
+	/// texels per pixel of the 2D map in the pages (want); the frames' places and sizes are in texels
+	int scaleNow() const
+	{
+		std::lock_guard lock(mutex);
+		return scale;
 	}
 	Ref<Texture2DArray> maskTexture() const
 	{
@@ -490,6 +509,7 @@ private:
 		{
 			std::string name;
 			uint64_t gen;
+			int frameScale = 1;
 			{
 				std::unique_lock lock(mutex);
 				wake.wait(
@@ -509,15 +529,19 @@ private:
 				name = queue.front();
 				queue.pop_front();
 				gen = generation;
+				frameScale = scale;
 				busy++;
 			}
 			const auto from = std::chrono::steady_clock::now();
 			std::vector<BakedFrame> baked = decodeBaked(api, name);
 			VcmiBridgeStats game{};
 			api->stats(&game);
+			// tiles meet their neighbours: terrain, rivers and roads (tileAnimation names) and the fog's edges
+			const bool tile = name.find('#') != std::string::npos || name == "TSHRE";
 			for(BakedFrame & f : baked)
 			{
 				trim(f);
+				upscale(f, frameScale, tile);
 				premultiply(f);
 			}
 			std::unique_lock lock(mutex);
@@ -540,7 +564,7 @@ private:
 		int waiting = 0;
 		for(const Page & page : pages)
 			waiting += page.ready.is_valid();
-		if(waiting >= 2) // the upload takes one per frame: more built images would only hold memory (1.75 MB each)
+		if(waiting >= 2) // the upload takes one per frame: more built images would only hold memory (7 MB each)
 			return false;
 		for(const Page & page : pages)
 			if(page.dirty && page.ready.is_null())
@@ -586,6 +610,78 @@ private:
 		f.top = int16_t(f.top + y0);
 		f.width = uint16_t(w);
 		f.height = uint16_t(h);
+	}
+
+	// the frame `factor` times larger with VCMI's xBRZ, as the 2D game's own upscaling (SDLImageScaler, XBRZ_ALPHA or
+	// XBRZ_OPAQUE), on straight (not premultiplied) colour; the owner mask through the same filter as an alpha, so the
+	// flag's edge follows the body's. Its place in the full frame scales with it. The unbuffered colour distance: the
+	// buffered one keeps a 64 MB table for the process's life (xbrz.cpp distYCbCrBuffered), for 30 % speed
+	static void upscale(BakedFrame & f, int factor, bool tile)
+	{
+		if(factor < 2 || f.width == 0 || f.height == 0)
+			return;
+		// a tile meets its neighbours: where its (trimmed) frame reaches the full frame's side, its edge pixels are
+		// repeated past it (as ARGB_CLAMPED reads past the edge), elsewhere clear; cut off again after. Else a river or
+		// road would round off at every tile seam (xBRZ reads clear outside the image)
+		const int border = tile ? 2 : 0;
+		const int sw = f.width + 2 * border, sh = f.height + 2 * border;
+		const int w = f.width * factor, h = f.height * factor;
+		std::vector<uint32_t> in(size_t(sw) * sh), out(size_t(sw) * sh * factor * factor);
+		const auto scaled = [&](const auto & source) // source(x, y) of the frame
+		{
+			for(int y = 0; y < sh; y++)
+				for(int x = 0; x < sw; x++)
+				{
+					const int fx = x - border, fy = y - border;
+					const bool clear = (fx < 0 && f.left > 0) || (fy < 0 && f.top > 0) || (fx >= f.width && f.left + f.width < f.fullWidth)
+									|| (fy >= f.height && f.top + f.height < f.fullHeight);
+					in[size_t(y) * sw + x] = clear ? 0 : source(std::clamp(fx, 0, f.width - 1), std::clamp(fy, 0, f.height - 1));
+				}
+			xbrz::scale(factor, in.data(), out.data(), sw, sh, xbrz::ColorFormat::ARGB_UNBUFFERED);
+			return [&](int x, int y) // the result at (x, y) of the scaled frame
+			{
+				return out[size_t(y + border * factor) * sw * factor + x + border * factor];
+			};
+		};
+		std::vector<uint8_t> rgba(size_t(w) * h * 4);
+		const auto body = scaled(
+			[&](int x, int y)
+			{
+				const uint8_t * c = &f.rgba[(size_t(y) * f.width + x) * 4];
+				return uint32_t(c[3]) << 24 | uint32_t(c[0]) << 16 | uint32_t(c[1]) << 8 | c[2];
+			}
+		);
+		for(int y = 0; y < h; y++)
+			for(int x = 0; x < w; x++)
+			{
+				const uint32_t v = body(x, y);
+				uint8_t * o = &rgba[(size_t(y) * w + x) * 4];
+				o[0] = uint8_t(v >> 16);
+				o[1] = uint8_t(v >> 8);
+				o[2] = uint8_t(v);
+				o[3] = uint8_t(v >> 24);
+			}
+		f.rgba = std::move(rgba);
+		if(!f.mask.empty())
+		{
+			std::vector<uint8_t> mask(size_t(w) * h);
+			const auto flag = scaled(
+				[&](int x, int y)
+				{
+					return uint32_t(f.mask[size_t(y) * f.width + x]) << 24 | 0xffffffu;
+				}
+			);
+			for(int y = 0; y < h; y++)
+				for(int x = 0; x < w; x++)
+					mask[size_t(y) * w + x] = uint8_t(flag(x, y) >> 24);
+			f.mask = std::move(mask);
+		}
+		f.width = uint16_t(w);
+		f.height = uint16_t(h);
+		f.left = int16_t(f.left * factor);
+		f.top = int16_t(f.top * factor);
+		f.fullWidth = uint16_t(f.fullWidth * factor);
+		f.fullHeight = uint16_t(f.fullHeight * factor);
 	}
 
 	// sRGB byte -> linear, and linear (0..4095) -> sRGB byte
@@ -665,7 +761,12 @@ private:
 			{
 				if(f.width > PAGE || f.height > PAGE)
 				{
-					failed.insert(name); // stays a marker; no refill could place it
+					// larger than a page at this scale (a mod's frame over 256 pixels at 4x): the view overflows, so it
+					// is asked for at a lower scale; at 1x no refill could place it and it stays a marker
+					failed.insert(name);
+					overflowNames.insert(name);
+					viewOverflowed = true;
+					stats.overflowed++;
 					return;
 				}
 				int page = 0;
@@ -849,6 +950,7 @@ private:
 	std::deque<std::string> queue;
 	int busy = 0; // workers decoding or building outside the lock
 	uint64_t generation = 0; // raised by a refill: work of an older generation is dropped
+	int scale = 1; // texels per pixel of the 2D map in the pages (want)
 	uint64_t wantSerial = 0; // raised by each want()
 	std::unordered_set<std::string> wantedNow; // the names of the last want()
 	std::vector<std::string> wantedOrder; // the same in the caller's order: the first ones are loaded and placed first

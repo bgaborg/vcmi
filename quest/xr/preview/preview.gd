@@ -15,6 +15,9 @@ const MINIMAP := "res://../out/minimap-debug/minimap-%s.png"
 ## the sprites on the table as the headset drew them: the file the test command `sprites` saves (main.gd _save_sprites),
 ## pulled by `render-room.sh sprites`; with `-- sprites` only the views of the table are rendered
 const SPRITES := "res://../out/sprites-dump/sprites.bin"
+## with `-- sprites hd`: the dump as the 4x HD atlas holds it (made from sprites.bin with VCMI's xBRZ, see
+## quest/PHASE4.md 4e); the views then show the table's HD sprites
+const SPRITES_HD := "res://../out/sprites-dump/sprites-hd.bin"
 const SIZE := Vector2i(1920, 1080)
 const HEAD := Vector3(0.0, 1.6, 0.0)
 const SEATED := Vector3(0.0, 1.2, 0.0)
@@ -88,6 +91,7 @@ func _ready() -> void:
 	for view: String in views:
 		for camera in [eye_camera, layer_camera]:
 			camera.look_at_from_position(views[view][0], views[view][1])
+			camera.fov = views[view][2] if views[view].size() > 2 else 100.0 # a view may narrow it, as a zoom lens
 		for i in SETTLE_FRAMES:
 			await RenderingServer.frame_post_draw
 		if view == "head":
@@ -145,7 +149,8 @@ func _flat_cards(buffer: PackedFloat32Array, names: PackedStringArray, room: Nod
 ## the headset's sprite data (main.gd _save_sprites) into the room, and views from above the minimap, as the test
 ## command `table_view` (0.45 and 0.25 m above it)
 func _load_sprites(room: Node3D) -> void:
-	var data: Dictionary = FileAccess.open(SPRITES, FileAccess.READ).get_var()
+	var hd := "hd" in OS.get_cmdline_user_args() and FileAccess.file_exists(SPRITES_HD)
+	var data: Dictionary = FileAccess.open(SPRITES_HD if hd else SPRITES, FileAccess.READ).get_var()
 	var image := func(entry: Array) -> Image:
 		if entry.is_empty():
 			return null
@@ -168,7 +173,7 @@ func _load_sprites(room: Node3D) -> void:
 	multimesh.instance_count = data.count
 	var names: PackedStringArray = data.get("names", PackedStringArray())
 	multimesh.buffer = _flat_cards(data.buffer, names, room)
-	room.set_sprites(layers, image.call(data.table), true)
+	room.set_sprites(layers, image.call(data.table), data.get("scale", 1), true)
 	room.show_sprites(true, false)
 	var minimap: Transform3D = room._table * Transform3D(Basis(), Vector3(0.0, room.TABLE_TOP, 0.0))
 	views["sprites"] = [minimap * Vector3(0.0, 0.45, 0.15), minimap.origin]
@@ -181,11 +186,15 @@ func _load_sprites(room: Node3D) -> void:
 	views["sprites-zoom"] = [minimap * (at + Vector3(0.0, 0.13, 0.04)), minimap * at]
 	# the paper cards, low from the near edge
 	views["sprites-cards"] = [minimap * (at + Vector3(0.0, 0.07, 0.16)), minimap * at]
+	# the cards view through a 25 degree lens, four times larger: the sprites' own resolution shows
+	views["sprites-macro"] = [minimap * (at + Vector3(0.0, 0.07, 0.16)), minimap * (at + Vector3(-0.012, 0.0, -0.03)),
+			25.0]
 	print("room preview: sprites ", data.count, " instances, ", layers[0].get_layers(), " pages")
 	# with `-- sprites <name part>`: the frames the table gives the first instance of that animation, cut from the pages
 	var args := OS.get_cmdline_user_args()
 	var after := args.find("sprites") + 1
-	var wanted := args[after] if after > 0 and args.size() > after and not args[after].begins_with("zoom=") else ""
+	var named := after > 0 and args.size() > after and not args[after].begins_with("zoom=") and args[after] != "hd"
+	var wanted := args[after] if named else ""
 	if wanted == "near": # frame 0 of every instance near the zoom tile
 		var table: Image = image.call(data.table)
 		for i in names.size():

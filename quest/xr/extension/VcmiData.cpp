@@ -60,7 +60,7 @@ protected:
 		ClassDB::bind_method(D_METHOD("update_markers", "multimesh", "panel_size", "metres"), &VcmiData::update_markers);
 		ClassDB::bind_method(D_METHOD("decode_animation", "name"), &VcmiData::decode_animation);
 		ClassDB::bind_method(D_METHOD("tile_animation", "layer", "id"), &VcmiData::tile_animation);
-		ClassDB::bind_method(D_METHOD("atlas_view", "tiles", "level"), &VcmiData::atlas_view);
+		ClassDB::bind_method(D_METHOD("atlas_view", "tiles", "level", "scale"), &VcmiData::atlas_view, DEFVAL(1));
 		ClassDB::bind_method(D_METHOD("atlas_busy"), &VcmiData::atlas_busy);
 		ClassDB::bind_method(D_METHOD("atlas_stats"), &VcmiData::atlas_stats);
 		ClassDB::bind_method(D_METHOD("atlas_page", "layer"), &VcmiData::atlas_page);
@@ -743,9 +743,9 @@ public:
 	}
 
 	/// asks the sprite atlas for the animations of the objects on `tiles` of map level `level` (quest/MILESTONE_3B.md,
-	/// plan step 3), and the hero flags there; returns how many animations that is. The workers load the missing ones,
-	/// update() uploads them.
-	int64_t atlas_view(const Rect2i & tiles, int level)
+	/// plan step 3), and the hero flags there, upscaled `scale` times (1 to 4, xBRZ; another scale loads all again);
+	/// returns how many animations that is. The workers load the missing ones, update() uploads them.
+	int64_t atlas_view(const Rect2i & tiles, int level, int scale)
 	{
 		if(!api)
 			return 0;
@@ -791,7 +791,7 @@ public:
 				}
 			}
 		);
-		atlas->want(names);
+		atlas->want(names, scale);
 		inAtlas.assign(animationNames.size(), 0);
 		for(uint16_t animation : seen)
 			inAtlas[animation] = 1;
@@ -822,6 +822,7 @@ public:
 		result["overflowed"] = s.overflowed;
 		result["evicted"] = s.evicted;
 		result["view_overflowed"] = s.viewOverflowed;
+		result["scale"] = atlas->scaleNow(); // texels per 2D map pixel of the frames in the pages
 		result["decode_us"] = s.decodeMicros;
 		result["mipmap_us"] = s.mipmapMicros;
 		result["batch_ms"] = s.batchMillis;

@@ -173,9 +173,9 @@ const CHAIR_Z := 1.0
 ## padding does not show between tiles. The fog tiles, last, cover what the local team does not see, as in 2D.
 ## Paper cards (quest/PHASE4.md 4e): an object whose anchor or visitable tile is seen stands up `stand` of the way,
 ## turned about its anchor tile's bottom edge to `lean` from the table, unless it is flat (cards.json). Its 2D shadow
-## stays on the table (the first pass draws only the shadow of a card, flat), and it gets a die-cut paper edge, as the
-## concept's pop-up book. The cards draw in a second pass (`cards_pass`, the material's next_pass), after the fog
-## tiles, which would cover them from behind; no pass writes depth. shortcut: the cards draw in map order, back to
+## stays on the table (the first pass draws only the shadow of a card, flat). The cards draw in a second pass
+## (`cards_pass`, the material's next_pass), after the fog tiles, which would cover them from behind; no pass writes
+## depth. shortcut: the cards draw in map order, back to
 ## front from the table's near edge; seen from its far side a near card goes behind a far one. Depth or a sort by view
 ## when needed.
 const SPRITE_SHADER := """shader_type spatial;
@@ -192,11 +192,10 @@ uniform sampler2D fog : filter_nearest; // x-major, as the minimap's
 uniform float stand = 1.0; // 0 flat, 1 standing: the pop-up animation (show_sprites)
 uniform float lean = 1.22; // radians from the table, cards.json
 uniform bool cards_pass = false; // the second pass: the standing cards only; the first: all else, and cards' shadows
-const float EDGE = 2.0; // texels of paper around a card (SpriteAtlas.h pads frames with 4)
-const vec3 PAPER = vec3(0.85, 0.75, 0.54); // cream, linear
+uniform float texel_scale = 1.0; // texels per 2D map pixel in the pages (SpriteAtlas scale: xBRZ HD)
+uniform float PAGE = 1024.0; // texels a page side (SpriteAtlas::PAGE), from the texture (set_sprites)
 varying vec2 panel_xz;
 varying flat float shadow_only;
-varying flat vec4 frame_uv; // the frame's texels on its page: the paper edge looks at no neighbour's
 varying vec3 page_uv;
 varying flat int owner;
 varying flat float lost;
@@ -217,10 +216,11 @@ void vertex() {
 	int frame = ((t + (id * 97) % 180) / 180 + id) % count;
 	vec4 a = texel(2 * (first + frame)); // page, x, y, width
 	vec4 b = texel(2 * (first + frame) + 1); // height, left and top from the full frame's bottom right, full width
-	// the instance sits on the anchor tile's bottom right; mirrored, the frame's left edge is full width - left - width
-	float left = mirror ? -(b.y + b.w) - a.w : b.y;
-	float top = flip ? -(b.z + b.w) - b.x : b.z;
-	VERTEX = vec3(left + UV.x * a.w, 0.0, top + UV.y * b.x);
+	// the instance sits on the anchor tile's bottom right; mirrored, the frame's left edge is full width - left - width.
+	// The table is in texels; the geometry in 2D map pixels
+	float left = (mirror ? -(b.y + b.w) - a.w : b.y) / texel_scale;
+	float top = (flip ? -(b.z + b.w) - b.x : b.z) / texel_scale;
+	VERTEX = vec3(left + UV.x * a.w / texel_scale, 0.0, top + UV.y * b.x / texel_scale);
 	vec2 source = vec2(mirror ? 1.0 - UV.x : UV.x, flip ? 1.0 - UV.y : UV.y);
 	owner = int(INSTANCE_CUSTOM.z + 0.5);
 	card = 0.0;
@@ -228,11 +228,7 @@ void vertex() {
 		float seen = max(textureLod(fog, COLOR.yx, 0.0).r, textureLod(fog, COLOR.wz, 0.0).r);
 		card = seen > 0.0 ? stand : 0.0;
 	}
-	vec2 paper = vec2(0.0);
 	if (card > 0.0 && cards_pass) {
-		// the quad EDGE texels larger on every side, for the paper edge
-		paper = (source * 2.0 - 1.0) * EDGE;
-		VERTEX.xz += (UV * 2.0 - 1.0) * EDGE;
 		// pixels up from the anchor tile's bottom edge, turned up about it; local y is metres, local z pixels
 		float up = -VERTEX.z;
 		float angle = card * lean;
@@ -245,8 +241,7 @@ void vertex() {
 	shadow_only = !cards_pass && card > 0.0 ? 1.0 : 0.0;
 	// a tile's edge texels sampled at their centres: no blend with the clear padding around the frame
 	vec2 inset = owner >= 10 ? vec2(0.5) : vec2(0.0);
-	page_uv = vec3((a.yz + inset + source * (vec2(a.w, b.x) - 2.0 * inset) + paper) / 512.0, a.x);
-	frame_uv = vec4(a.yz, a.yz + vec2(a.w, b.x)) / 512.0;
+	page_uv = vec3((a.yz + inset + source * (vec2(a.w, b.x) - 2.0 * inset)) / PAGE, a.x);
 	panel_xz = (world_to_panel * (MODEL_MATRIX * vec4(VERTEX, 1.0))).xz;
 }
 void fragment() {
@@ -255,7 +250,7 @@ void fragment() {
 	}
 	// tiles lie side by side: from mip 3 the 4 texels of padding between frames shrink below one texel and blend
 	// neighbours into the edges (SpriteAtlas.h PAD, extrude), so they stop at mip 2
-	vec2 texels = page_uv.xy * 512.0;
+	vec2 texels = page_uv.xy * PAGE;
 	float lod = log2(max(max(length(dFdx(texels)), length(dFdy(texels))), 1.0));
 	vec4 c = owner >= 10 ? textureLod(atlas, page_uv, min(lod, 2.0)) : texture(atlas, page_uv);
 	// a shadow texel: dark and half clear. A card's lie on the table (first pass); the card itself has none
@@ -263,19 +258,8 @@ void fragment() {
 	if (shadow_only > 0.5 && !shade) {
 		discard;
 	}
-	if (cards_pass) {
-		if (shade) {
-			c = vec4(0.0);
-		}
-		if (c.a < 0.8) { // paper under the clear texels near the body: the die-cut edge
-			float body = 0.0;
-			for (int i = 0; i < 8; i++) {
-				vec2 at = page_uv.xy + vec2(cos(float(i) * 0.7854), sin(float(i) * 0.7854)) * EDGE / 512.0;
-				bool inside = all(greaterThanEqual(at, frame_uv.xy)) && all(lessThanEqual(at, frame_uv.zw));
-				body = max(body, inside ? step(0.8, textureLod(atlas, vec3(at, page_uv.z), 0.0).a) : 0.0);
-			}
-			c += vec4(PAPER, 1.0) * (1.0 - c.a) * body;
-		}
+	if (cards_pass && shade) {
+		c = vec4(0.0);
 	}
 	// most of a sprite's quad is clear: no blending there (MILESTONE_3B.md section 1e)
 	if (c.a < 0.004) {
@@ -742,13 +726,15 @@ func sprite_multimesh() -> MultiMesh:
 
 ## the atlas pages and the frame table of VcmiData (atlas_textures, sprite_table); markers off while sprites show.
 ## precision_check tints sprites red whose instance data lost precision (MILESTONE_3B.md check 2)
-func set_sprites(textures: Array, table: Image, precision_check: bool) -> void:
+func set_sprites(textures: Array, table: Image, texel_scale: int, precision_check: bool) -> void:
 	var frames := ImageTexture.create_from_image(table)
 	for material in _sprite_materials():
 		material.set_shader_parameter("atlas", textures[0])
 		material.set_shader_parameter("masks", textures[1])
 		material.set_shader_parameter("frames", frames)
 		material.set_shader_parameter("precision_check", precision_check)
+		material.set_shader_parameter("texel_scale", float(texel_scale))
+		material.set_shader_parameter("PAGE", float((textures[0] as Texture2DArray).get_width()))
 
 
 func _make_environment() -> Environment:
