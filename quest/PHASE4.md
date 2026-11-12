@@ -334,7 +334,8 @@ Each one is tested on the Quest, reviewed, and recorded here with its numbers be
     - **Memory:** 2.35 GB PSS and 0.94 GB of graphics with the table full of cards ([`VISUALS.md`](VISUALS.md#5-results)).
     - Not measured: the heaviest map. Milestone 4f does that.
 - **Seated:** the lord's chair stands at the near edge. Tabletop mode moves the player there (`main.gd _seat`: turned and moved along the floor only, so the real floor stays the floor) and back on leaving. The game screen moves before the chair while seated, so dialogs and battles stay in front. A recenter while seated places the room from the real head, then seats again. The lightmap is baked again for the chair.
-- **Left in 4e:** hero flags on moving heroes, boats' flags, teleports, embarking and fades, and the look review in the headset.
+- **Hero flags on moving heroes (2026-11-12, read in the code, not seen on the headset):** a hero's flag is a sprite with its hero's object id (`VcmiData.cpp` `spritesOf`), and `animate_move` slides every sprite of the moving object's id. So a flag moves with its hero, an enemy's too. The trace of milestone 3c was taken before `animate_move`. Still to see: an enemy hero walking in view.
+- **Left in 4e:** boats' flags, teleports, embarking and fades (they need a map with boats and a bridge change for the boat's flag), and the look review in the headset.
 
 ### 4f. Exit pass
 
