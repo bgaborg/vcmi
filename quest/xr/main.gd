@@ -15,6 +15,9 @@ const SETTINGS_PATH := "user://screen.cfg"
 const SURFACE_SIZE := Vector2i(2560, 1440) ## pixels of the game window
 const TableMath := preload("res://table_math.gd")
 const TablePanel := preload("res://table_panel.gd")
+## the view switch's place in tabletop mode, from the map's middle: over the resource bar on the shelf, where the
+## seated player looks (the table's near corners are outside the headset's view)
+const SWITCH_AT := Vector3(0.0, TablePanel.SHELF + 0.16, TablePanel.FAR_EDGE)
 const END_TURN_KEY := 33 ## KEYCODE_E, as the wrist panel's "End turn (E)"
 ## a tile on the table in tabletop mode (quest/PHASE4.md decision D3). shortcut: check 3 (ray jitter against tile size)
 ## needs a person holding a controller; 2.5 cm on the table-sized map (quest/VISUALS.md) is a safe guess until it is
@@ -80,6 +83,9 @@ var scale_zoom := 0.0 ## the zoom at which sprite_scale was last halved
 var sprites_pending := false ## the atlas loads them; update_sprites when it is done
 ## the map is played on the war table (quest/PHASE4.md milestone 4a); the screen shows dialogs only
 var tabletop := false
+## a plaque the ray clicks to change between the 2D screen and the table: under the screen, or over the table's shelf
+var view_switch := Label3D.new()
+var switch_pressed := false
 var seated := false ## in tabletop mode, the player's place moved to the lord's chair (_seat)
 var standing_screen := Transform3D() ## the screen's place before seating: the seat puts the screen before the chair
 var table_tile := TableMath.NO_TILE ## the tile under the active ray on the table, sent to the game as a hover
@@ -155,6 +161,11 @@ func _ready() -> void:
 	table_panel = TablePanel.new()
 	table_panel.visible = false
 	room.add_table_panel(table_panel)
+	view_switch.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	view_switch.font_size = 64
+	view_switch.outline_size = 16
+	view_switch.visible = false
+	add_child(view_switch)
 	# Godot's hole punch does not write depth, so the room behind the screen would draw over the game.
 	# Multiplying by 0 clears colour and alpha whatever the opaque room drew there; its depth keeps what is behind it
 	# out later.
@@ -470,6 +481,15 @@ func _process(delta: float) -> void:
 		pointer_dot.visible = false
 		table_panel.set_hover(-1)
 		return
+	var on_switch := _switch_hit(active_hand)
+	view_switch.modulate = Color(1.0, 0.8, 0.3) if on_switch != Vector3.INF else Color.WHITE
+	if on_switch != Vector3.INF:
+		var ray := _aim_ray(active_hand)
+		_show_ray(active_hand, ray[0], ray[1].normalized(), ray[0].distance_to(on_switch))
+		pointer_dot.visible = true
+		pointer_dot.global_position = on_switch
+		table_panel.set_hover(-1)
+		return
 	if tabletop and not layer.visible:
 		_table_pointer()
 		return
@@ -525,6 +545,14 @@ func _update_table(changed: int) -> void:
 				room.view_reach))
 	followed_move = move.w
 	table_panel.visible = tabletop and changed & 4 != 0
+	view_switch.visible = changed & 4 != 0
+	view_switch.text = "2D screen" if tabletop else "Table view"
+	view_switch.pixel_size = 0.0011 if tabletop else 0.0016 # about 1.4 m and 2 m away
+	if tabletop:
+		view_switch.global_position = table_panel.global_transform * SWITCH_AT
+	else:
+		var height := layer.radius * layer.central_angle / layer.aspect_ratio
+		view_switch.global_position = screen_world * Vector3(0.0, -height / 2.0 - 0.1, -layer.radius)
 	if table_panel.visible:
 		_update_table_panel()
 	if tabletop:
@@ -850,6 +878,13 @@ func _press(button: int, hand: int, pressed: bool) -> void:
 			await get_tree().create_timer(0.1).timeout
 			bridge.key(keycode, false)
 		return
+	if button == BUTTON_LEFT and (switch_pressed if not pressed else _switch_hit(hand) != Vector3.INF):
+		switch_pressed = pressed # its release goes neither to the game nor to the table
+		if pressed:
+			active_hand = hand
+			_set_tabletop(not tabletop)
+			_pulse(hand, 0.25)
+		return
 	if tabletop and (not layer.visible or (button == BUTTON_RIGHT and not pressed and grabs.has(hand))):
 		_table_press(button, hand, pressed)
 		return
@@ -861,6 +896,19 @@ func _press(button: int, hand: int, pressed: bool) -> void:
 		_move_pointer(hit)
 		_pulse(hand, 0.5)
 	bridge.pointerButton(button, pressed)
+
+
+## Where the ray of `hand` passes the view switch, or Vector3.INF. The pick widens with the distance, as the ray's
+## shake does
+func _switch_hit(hand: int) -> Vector3:
+	var ray := _aim_ray(hand)
+	if ray.is_empty() or not view_switch.visible or _pointer_hit(hand) != NO_HIT: # the screen goes first
+		return Vector3.INF
+	var unit: Vector3 = ray[1].normalized()
+	var along: float = (view_switch.global_position - ray[0]).dot(unit)
+	var closest: Vector3 = ray[0] + unit * along
+	var near: bool = closest.distance_to(view_switch.global_position) <= 0.015 + 0.04 * along
+	return closest if along > 0.0 and near else Vector3.INF
 
 
 ## Trigger and grip on the table: the trigger clicks the tile under the ray; a grip grabs the table (_update_grabs)

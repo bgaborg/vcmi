@@ -32,6 +32,8 @@ the cards stand on it.
   edge to the near one (`main.gd` `TABLE_FOCUS`), about 65 cm from the chair. For this the view may pass the map's
   near edge (`view_reach`); blank page shows there.
 - **The game screen** (dialogs, town screens) is raised 0.9 m while the player sits at the table, above the shelf.
+- **Changing the view:** a plaque the ray clicks: "Table view" under the 2D screen, "2D screen" over the resource bar
+  at the table (`main.gd` `view_switch`). The right stick click and the wrist panel's button do the same.
 - **Fog:** no fog tiles and no black. Terrain and flat objects fade into the page over about a third of a tile, with an
   uneven edge (`table_shaders.gd` `painted`). The cards stand only where the tile is seen, as before.
 - **Paper:** one colour under the fog, outside the map and in the margin, with a grain. It darkens away from the
