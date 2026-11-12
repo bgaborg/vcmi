@@ -31,6 +31,11 @@
 		android:required="false" />
 
 	<application>
+		<!-- Horizon OS shows assets/vr_splash.png from the immersive launch until the Godot host's first frame; without it
+			 the headset is black for seconds after Play in the launcher -->
+		<meta-data
+			android:name="com.oculus.ossplash"
+			android:value="true" />
 		<meta-data
 			android:name="com.oculus.supportedDevices"
 			android:value="quest3|quest3s"

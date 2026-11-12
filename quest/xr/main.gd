@@ -18,6 +18,8 @@ const TablePanel := preload("res://table_panel.gd")
 ## the view switch's place in tabletop mode, from the map's middle: over the resource bar on the shelf, where the
 ## seated player looks (the table's near corners are outside the headset's view)
 const SWITCH_AT := Vector3(0.0, TablePanel.SHELF + 0.16, TablePanel.FAR_EDGE)
+const TABLE_DROP := Vector2(0.3, 1.1) ## metres from the eyes down to the map: the limits of the left stick
+const TABLE_DROP_SPEED := 0.25 ## metres per second at full stick
 const END_TURN_KEY := 33 ## KEYCODE_E, as the wrist panel's "End turn (E)"
 ## a tile on the table in tabletop mode (quest/PHASE4.md decision D3). shortcut: check 3 (ray jitter against tile size)
 ## needs a person holding a controller; 2.5 cm on the table-sized map (quest/VISUALS.md) is a safe guess until it is
@@ -86,6 +88,8 @@ var tabletop := false
 ## a plaque the ray clicks to change between the 2D screen and the table: under the screen, or over the table's shelf
 var view_switch := Label3D.new()
 var switch_pressed := false
+## metres from the seated player's eyes down to the map; the left stick changes it at the table (saved)
+var table_drop := 0.6
 var seated := false ## in tabletop mode, the player's place moved to the lord's chair (_seat)
 var standing_screen := Transform3D() ## the screen's place before seating: the seat puts the screen before the chair
 var table_tile := TableMath.NO_TILE ## the tile under the active ray on the table, sent to the game as a hover
@@ -221,6 +225,9 @@ void fragment() {
 		_size_screen(settings.get_value("screen", "distance", screen_distance), settings.get_value("screen", "width",
 				screen_width))
 		_set_environment(settings.get_value("screen", "environment", ENVIRONMENTS[0]))
+		var drop: Variant = settings.get_value("table", "drop", table_drop)
+		if typeof(drop) in [TYPE_FLOAT, TYPE_INT]:
+			table_drop = clampf(drop, TABLE_DROP.x, TABLE_DROP.y)
 	else:
 		_size_screen(screen_distance, screen_width)
 	layer.aspect_ratio = float(SURFACE_SIZE.x) / SURFACE_SIZE.y # width / height, as in XrCompositionLayerCylinderKHR
@@ -430,7 +437,12 @@ func _process(delta: float) -> void:
 					* SEATED_SCREEN_UP)
 		else:
 			screen_world = standing_screen
-	if screen_stick != Vector2.ZERO:
+	if screen_stick != Vector2.ZERO and seated and not layer.visible and test_head == null:
+		# at the table the left stick raises and lowers it: up brings the map up to the eyes
+		var drop := clampf(table_drop - screen_stick.y * TABLE_DROP_SPEED * delta, TABLE_DROP.x, TABLE_DROP.y)
+		origin.position.y += drop - table_drop
+		table_drop = drop
+	elif screen_stick != Vector2.ZERO:
 		var width := screen_width
 		if screen_stick.x != 0.0:
 			# widening stops at the arc limit; the width is kept when only the distance changes
@@ -605,7 +617,10 @@ func _seat(tracked: Transform3D) -> Transform3D:
 	var yaw := func(basis: Basis) -> float: return atan2(basis.z.x, basis.z.z) # of the forward axis, -z
 	var turn := Basis(Vector3.UP, yaw.call(seat.basis) - yaw.call(tracked.basis))
 	var at := seat.origin - turn * tracked.origin
-	return Transform3D(turn, Vector3(at.x, 0.0, at.z))
+	# the map lies table_drop under the eyes, wherever the head is: a player sitting on a real chair looks down on it
+	# as one standing does (the virtual floor is then not the real one)
+	var eyes_over_map: float = room.SEAT.y - room.TABLE_TOP - room.MAP_LIFT
+	return Transform3D(turn, Vector3(at.x, at.y + table_drop - eyes_over_map, at.z))
 
 
 func _head_moved(from: Transform3D, to: Transform3D) -> bool:
@@ -856,6 +871,7 @@ func _save_screen() -> void:
 	settings.set_value("screen", "distance", screen_distance)
 	settings.set_value("screen", "width", screen_width)
 	settings.set_value("screen", "environment", environment_name)
+	settings.set_value("table", "drop", table_drop)
 	settings.save(SETTINGS_PATH)
 	print("VCMI XR: screen distance ", screen_distance, " width ", screen_width, " environment ", environment_name)
 
