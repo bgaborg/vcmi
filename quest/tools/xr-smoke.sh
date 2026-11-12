@@ -31,6 +31,10 @@ mark="$("$Q" mark-log)"
 MARK="$mark" "$Q" wait-log "VCMI XR: screen placed" 60 >/dev/null
 MARK="$mark" "$Q" wait-log "Initialization of VCMI \(together\)" 60 >/dev/null
 
+# the host answers once the system gives it the focus: up to a minute after the launch
+for _ in 1 2 3 4 5 6; do
+	"$Q" test probe >/dev/null 2>&1 && break
+done
 # a standing head looking ahead, screen recentred in front of it
 "$Q" test head 0 0 1.6 >/dev/null
 "$Q" test recenter >/dev/null

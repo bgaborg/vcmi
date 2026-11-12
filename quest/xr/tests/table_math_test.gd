@@ -29,9 +29,27 @@ func _initialize() -> void:
 	_expect("centre at the top edge", TableMath.on_level(Vector2(0.2, 0.0), 4.0, 0, 2), Vector2(0.2, 0.125))
 	_expect("zoom 2 on two levels", TableMath.on_level(Vector2(0.3, 0.5), 2.0, 0, 2), Vector2(0.25, 0.5))
 
+	# a map half as tall as the table's shape (aspect 2): at zoom 4 the view is 0.5 of the map's height
+	_expect("aspect 2: centre at the top edge", TableMath.on_level(Vector2(0.2, 0.0), 4.0, 0, 2, 2.0), Vector2(0.2,
+			0.25))
+	_expect("aspect 2: a view taller than the map", TableMath.on_level(Vector2(0.3, 0.9), 2.0, 0, 2, 2.0),
+			Vector2(0.25, 0.5))
+	_expect("aspect 2: drag down", TableMath.drag(Vector2(0.3, 0.5), Vector2(0.5, 0.5), Vector2(0.5, 0.75), 4.0, 2.0),
+			Vector2(0.3, 0.375))
+
 	var view := Rect2(0.1, 0.1, 0.2, 0.2)
 	_expect("hero in the middle: view stays", TableMath.follow(view, Vector2(0.2, 0.22), 0.6), Vector2(0.2, 0.2))
 	_expect("hero near the edge: view moves", TableMath.follow(view, Vector2(0.28, 0.2), 0.6), Vector2(0.28, 0.2))
+
+	# the focus two thirds of the way to the player: a hero in the far part moves the view so that it lands there
+	_expect("hero far from the focus: view moves", TableMath.follow(view, Vector2(0.2, 0.12), 0.6, Vector2(0.5, 0.75)),
+			Vector2(0.2, 0.07))
+	_expect("hero near the focus: view stays", TableMath.follow(view, Vector2(0.2, 0.25), 0.6, Vector2(0.5, 0.75)),
+			Vector2(0.2, 0.2))
+
+	# with a reach of 0.25 of the panel the view may go past the map's top: the first row comes near the player
+	_expect("reach: centre past the top edge", TableMath.on_level(Vector2(0.2, -0.5), 4.0, 0, 2, 2.0, 0.25),
+			Vector2(0.2, -0.125))
 
 	# a grab: the hand moves a quarter of the table right at zoom 4: the view moves a sixteenth of the map left
 	_expect("drag right", TableMath.drag(Vector2(0.3, 0.5), Vector2(0.5, 0.5), Vector2(0.75, 0.5), 4.0), Vector2(0.2375,

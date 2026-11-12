@@ -17,13 +17,17 @@ const TableMath := preload("res://table_math.gd")
 const TablePanel := preload("res://table_panel.gd")
 const END_TURN_KEY := 33 ## KEYCODE_E, as the wrist panel's "End turn (E)"
 ## a tile on the table in tabletop mode (quest/PHASE4.md decision D3). shortcut: check 3 (ray jitter against tile size)
-## needs a person holding a controller; 1.5 cm is a safe guess until it is measured
-const TABLE_TILE_METRES := 0.015
+## needs a person holding a controller; 2.5 cm on the table-sized map (quest/VISUALS.md) is a safe guess until it is
+## measured
+const TABLE_TILE_METRES := 0.025
 const PATH_CHANGED := 16
-const TABLE_MAX_TILE_METRES := 0.06 ## the closest zoom: a tile 6 cm wide
+const TABLE_MAX_TILE_METRES := 0.08 ## the closest zoom: a tile 8 cm wide
 const GRAB_MOVE_METRES := 0.015 ## a grip moved this far drags the map; held still...
 const GRAB_POPUP_MS := 350 ## ...this long it shows the tile's popup instead
-const TABLE_KEEP := 0.6 ## the view follows the selected hero once it leaves the middle 60 % of the table
+## where on the table the view puts the selected hero (panel UV): two thirds of the way to the player, within reach
+const TABLE_FOCUS := Vector2(0.5, 0.68)
+const SEATED_SCREEN_UP := 0.9 ## metres from the seated eyes to the middle of the game screen
+const TABLE_KEEP := 0.6 ## the view follows the selected hero once it leaves 60 % of the table around TABLE_FOCUS
 const BUTTON_LEFT := 1 ## MotionEvent.BUTTON_PRIMARY
 const BUTTON_RIGHT := 2 ## MotionEvent.BUTTON_SECONDARY
 const NO_HIT := Vector2(-1.0, -1.0)
@@ -183,6 +187,7 @@ void fragment() {
 	layer.use_android_surface = true
 	layer.android_surface_size = SURFACE_SIZE
 	bridge.connect("test_command", _on_test_command)
+	room.view_reach = TABLE_FOCUS.y - 0.5
 	var cards: Variant = JSON.parse_string(FileAccess.get_file_as_string("res://cards.json"))
 	if not cards is Dictionary:
 		push_error("VCMI XR: res://cards.json is missing or not valid JSON; every object stands as a card")
@@ -409,7 +414,9 @@ func _process(delta: float) -> void:
 			var seat: Transform3D = room.seat()
 			var ahead := -seat.basis.z
 			ahead.y = 0.0
-			screen_world = Transform3D(Basis.looking_at(ahead.normalized(), Vector3.UP), seat.origin)
+			# raised over the shelf's panels at the table's far edge
+			screen_world = Transform3D(Basis.looking_at(ahead.normalized(), Vector3.UP), seat.origin + Vector3.UP
+					* SEATED_SCREEN_UP)
 		else:
 			screen_world = standing_screen
 	if screen_stick != Vector2.ZERO:
@@ -445,7 +452,7 @@ func _process(delta: float) -> void:
 		room.set_minimap(vcmi_data.terrain_image() if changed & 1 else null,
 				vcmi_data.fog_image() if changed & 2 else null, changed & 4 != 0)
 		if changed & (1 | 8): # the markers are placed by the map size, so new tiles move them too
-			vcmi_data.update_markers(room.marker_multimesh(), room.minimap_size(), room.MARKER_METRES)
+			vcmi_data.update_markers(room.marker_multimesh(), room.map_metres(), room.MARKER_METRES)
 		if changed & 1:
 			map_size = vcmi_data.stats().get("map", Vector3i.ZERO)
 			too_far_zoom = 0.0
@@ -504,15 +511,18 @@ func _update_table(changed: int) -> void:
 	if changed & PATH_CHANGED or selected != shown_selection:
 		room.set_path(vcmi_data.path_nodes(), selected, map_size)
 	if tabletop and selected.x >= 0 and selected != shown_selection:
-		var centre := TableMath.follow(room.visible_uv(), TableMath.tile_uv(selected, map_size), TABLE_KEEP)
-		room.set_zoom(room.zoom, TableMath.on_level(centre, room.zoom, selected.z, map_size.z))
+		var centre := TableMath.follow(room.visible_uv(), TableMath.tile_uv(selected, map_size), TABLE_KEEP,
+				TABLE_FOCUS)
+		room.set_zoom(room.zoom, TableMath.on_level(centre, room.zoom, selected.z, map_size.z, room.view_aspect,
+				room.view_reach))
 	shown_selection = selected
 	# the hero steps the table shows, enemies' too: the view follows them as the 2D map does, not while a hand holds it
 	var move: Vector4i = vcmi_data.move_target()
 	if tabletop and move.w != followed_move and grabs.is_empty():
 		var target := TableMath.tile_uv(Vector3i(move.x, move.y, move.z), map_size)
-		var centre := TableMath.follow(room.visible_uv(), target, TABLE_KEEP)
-		room.set_zoom(room.zoom, TableMath.on_level(centre, room.zoom, move.z, map_size.z))
+		var centre := TableMath.follow(room.visible_uv(), target, TABLE_KEEP, TABLE_FOCUS)
+		room.set_zoom(room.zoom, TableMath.on_level(centre, room.zoom, move.z, map_size.z, room.view_aspect,
+				room.view_reach))
 	followed_move = move.w
 	table_panel.visible = tabletop and changed & 4 != 0
 	if table_panel.visible:
@@ -963,17 +973,21 @@ func _update_grabs() -> void:
 	if table_popup:
 		return
 	var middle: Vector2 = points[0] if points.size() == 1 else (points[0] + points[1]) / 2.0
-	var spread: float = 0.0 if points.size() == 1 else (points[0] as Vector2).distance_to(points[1])
+	# in metres: the panel is not square, so a distance in its UV would change as the hands turn
+	var spread: float = 0.0 if points.size() == 1 else ((points[0] - points[1]) * room.minimap_size()).length()
 	if grab_view.is_empty() or grab_view["hands"] != points.size():
 		grab_view = {"centre": room.zoom_centre, "zoom": room.zoom, "at": middle, "spread": spread, "hands": points.size()}
 	var zoom: float = grab_view["zoom"]
 	if points.size() == 2 and grab_view["spread"] > 0.01:
 		var closest := TableMath.zoom_for(TABLE_MAX_TILE_METRES, room.minimap_size().x, map_size)
-		zoom = clampf(zoom * spread / grab_view["spread"], float(map_size.z), closest)
-	var centre := TableMath.zoom_about(grab_view["centre"], grab_view["zoom"], zoom, grab_view["at"])
-	centre = TableMath.drag(centre, grab_view["at"], middle, zoom)
+		# the furthest: the whole map. shortcut: with two levels one level's width, so a tall map's rows are cut;
+		# upgrade when a level mask lets the view leave the level
+		var furthest := float(map_size.z) if map_size.z > 1 else minf(1.0, room.view_aspect)
+		zoom = clampf(zoom * spread / grab_view["spread"], furthest, closest)
+	var centre := TableMath.zoom_about(grab_view["centre"], grab_view["zoom"], zoom, grab_view["at"], room.view_aspect)
+	centre = TableMath.drag(centre, grab_view["at"], middle, zoom, room.view_aspect)
 	var level := clampi(int(room.zoom_centre.x * map_size.z), 0, map_size.z - 1)
-	room.set_zoom(zoom, TableMath.on_level(centre, zoom, level, map_size.z))
+	room.set_zoom(zoom, TableMath.on_level(centre, zoom, level, map_size.z, room.view_aspect, room.view_reach))
 
 
 ## A short click on the controller of `hand`; the game's own hapticFeedback() is called for touch input only
@@ -1003,15 +1017,16 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 						[]).is_empty() else false, ", ", decoded.get("bridge_us", 0), " us")
 		return
 	match command:
-		# table_view: above the minimap, looking down at it; a the height above the table (default 0.45 m)
+		# table_view: above the minimap, looking down at it; a the height above the table (default 0.45 m), b the
+		# distance towards the chair (default 0.15 m; 0.82 is the seat)
 		"head", "table_view":
 			if command == "head":
 				test_head = Transform3D(Basis.from_euler(Vector3(deg_to_rad(b), deg_to_rad(a), 0.0)), Vector3(0.0,
 						c if c > 0.0 else 1.6, 0.0))
 			else:
 				var minimap: Transform3D = room.global_transform * room._table * Transform3D(Basis(), Vector3(0.0,
-						room.TABLE_TOP, 0.0))
-				var eye := minimap * Vector3(0.0, a if a > 0.0 else 0.45, 0.15)
+						room.TABLE_TOP + room.MAP_LIFT, 0.0))
+				var eye := minimap * Vector3(0.0, a if a > 0.0 else 0.45, b if b > 0.0 else 0.15)
 				test_head = Transform3D(Basis(), eye).looking_at(minimap.origin, Vector3.UP)
 			test_head_start = null
 			# the real controllers lie next to the real headset; moved with a simulated head they can end up in front of
@@ -1243,7 +1258,8 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 		"table_pan":
 			var level := clampi(int(room.zoom_centre.x * map_size.z), 0, maxi(map_size.z - 1, 0))
 			var panned := TableMath.drag(room.zoom_centre, Vector2.ZERO, -Vector2(a, b) * room.zoom, room.zoom)
-			room.set_zoom(room.zoom, TableMath.on_level(panned, room.zoom, level, maxi(map_size.z, 1)))
+			room.set_zoom(room.zoom, TableMath.on_level(panned, room.zoom, level, maxi(map_size.z, 1),
+					room.view_aspect, room.view_reach))
 		# the minimap shows 1 / a of the map around b, c (minimap UV, both levels side by side; 0: the centre)
 		"table_zoom":
 			room.set_zoom(a if a > 0.0 else 1.0, Vector2(b if b > 0.0 else 0.5, c if c > 0.0 else 0.5))

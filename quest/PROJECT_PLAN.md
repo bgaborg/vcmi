@@ -15,7 +15,7 @@ Goal: the most immersive way to play Heroes 3 on Quest 3, with no motion sicknes
 
 ## 0. Status and next steps
 
-As of 2026-11-07.
+As of 2026-11-12.
 
 ### Done
 
@@ -31,6 +31,8 @@ As of 2026-11-07.
 | Data bridge milestone 1 | skeleton: the Godot extension finds the game's table; lifecycle survives new game, load, restart, replay, quit | [`DATA_BRIDGE.md`](DATA_BRIDGE.md#milestone-1-results-2026-11-07) |
 | Data bridge milestone 2 | the game's minimap on the war table: tile snapshot and fog, within budget on the heaviest map | [`DATA_BRIDGE.md`](DATA_BRIDGE.md#milestone-2-results-2026-11-07) |
 | Data bridge milestone 3a | the object list: one full list per map (6 ms on the heaviest map), then the changed records (0.1 µs an object); markers on the minimap; `object-bench.sh` measures it on the headset without the game | [`DATA_BRIDGE.md`](DATA_BRIDGE.md#milestone-3a-results-2026-11-07-the-object-list) |
+| Phase 4, milestones 4a to 4c | the map played on the war table with a simulated ray: clicks and paths, grab to pan and zoom, terrain, rivers, roads | [`PHASE4.md`](PHASE4.md#4-milestones-in-order) |
+| Phase 4, visual pass | the map fills the table as a book's page; the fog is blank page; the panels stand on a shelf; nothing pokes through | [`VISUALS.md`](VISUALS.md) |
 | xBRZ default `none` | `VcmiBridge` writes `video.upscalingFilter: none` before the game starts when the player has not chosen a filter; no upstream change | [`DATA_BRIDGE.md`](DATA_BRIDGE.md#memory) |
 
 Not closed yet:
@@ -39,8 +41,12 @@ Not closed yet:
 
 ### Next, in order
 
-1. **Phase 4, tabletop adventure map:** planned in [`PHASE4.md`](PHASE4.md); milestones 4a (play on the table: clicks, path, the screen for dialogs only), 4b (grab to pan and zoom, the view follows heroes, atlas eviction and refills, 72 fps panning the heaviest map) and 4c (terrain, rivers, roads and the 2D fog through the atlas) are built and played with a simulated ray; 4d (the side panel on the table) is built and tested on the PC, its headset test waits; next is 4e, paper cards. Also read: [`DATA_BRIDGE.md`](DATA_BRIDGE.md) Milestone 3c results (the tabletop window, `setTabletop`, the hero steps the game waits for, and what the game screen shows meanwhile).
-2. **Milestone 4, battle**, then **phase 5, battle diorama**.
+1. **Phase 4, tabletop adventure map** ([`PHASE4.md`](PHASE4.md); look and layout: [`VISUALS.md`](VISUALS.md)):
+   1. **4d, the side panel:** built. Its headset test is next: hover, select, open, end turn, and a whole turn without the 2D side panel.
+   2. **4e, the rest:** the time and memory of the HD sprites on the headset; the flags of moving heroes; boats' flags, teleports, embarking and fades.
+   3. **4f, exit pass:** the first scenario played on the table, then the heaviest map for the budgets.
+   4. **Needs a person in the headset:** the look review, the comfort check, and ray jitter against the tile size (check 3).
+2. **Milestone 4, battle**, then **phase 5, battle diorama**. The diorama uses the map's book, paper and cards ([`VISUALS.md`](VISUALS.md#6-the-battle-diorama-phase-5)).
 
 Each milestone records its numbers in `DATA_BRIDGE.md` and is optimised before the next one starts.
 
@@ -230,7 +236,7 @@ python3 serve_https.py 8443   # Quest Browser: https://<lan-ip>:8443, ?mode=scre
 - A Godot scene in `quest/xr/`, fed by the data bridge.
 - Terrain, rivers and roads as a texture per map level; objects as instanced paper cards (pop-up animation); fog as a cloud layer; the path as discs.
 - Picking: the ray hits the table, then a tile; the tile goes to the game (hover / click).
-- Panels (section 5): resource bar at the table edge, hero / town lists on the left wrist, minimap as a small tablet, dialogs in front of the table.
+- Panels (section 5, [`VISUALS.md`](VISUALS.md)): the map fills the table; the resource bar, the hero and town board and the minimap tablet stand on a shelf at its far edge; dialogs on the game screen in front of the table.
 - Controls: grab-drag the map, two-hand zoom; army gestures (grab / drop / split stacks). Seated / standing mode sets the table height.
 - Card metadata (height, anchor, fold style) from JSON, so mods can tune it; HotA objects included.
 - HD: 4x object cards, 3x-4x terrain; mipmaps; XR graphics presets (section 3).

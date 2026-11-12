@@ -4,6 +4,7 @@ extends Node3D
 ## As in the headset, the game is a layer behind the eye buffer: the room is rendered with a transparent background
 ## and the screen occluder of main.gd, then laid over the game picture by its alpha.
 
+const TableMath := preload("res://table_math.gd")
 const OUT := "res://../out/room-preview" ## quest/out/room-preview
 ## stand-in for the game layer: a headset screenshot cropped inside the (curved) game screen, so no wall shows;
 ## quest/out is not in git, so without it the screen is flat dark grey
@@ -36,6 +37,9 @@ void fragment() {
 """
 
 var zoom_tile := Vector2(19.0, 13.0) ## the tile the view `sprites-zoom` looks at; `-- sprites zoom=x,y` sets it
+var play_zoom := 1.0 ## the table's zoom and centre in the views named "play" (_load_sprites)
+var play_centre := Vector2(0.5, 0.5)
+var table_zoom := [1.0, Vector2(0.5, 0.5)] ## in the other views; `-- table_zoom=factor,u,v` sets it
 ## name: [camera position, point looked at]
 var views := {
 	"head": [HEAD, HEAD + Vector3.FORWARD],
@@ -68,7 +72,7 @@ func _ready() -> void:
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("table_zoom="): # table_zoom=factor,u,v: the minimap's own zoom (room.set_zoom)
 			var v := arg.get_slice("=", 1).split(",")
-			room.set_zoom(float(v[0]), Vector2(float(v[1]), float(v[2])))
+			table_zoom = [float(v[0]), Vector2(float(v[1]), float(v[2]))]
 		if arg.begins_with("zoom="):
 			zoom_tile = Vector2(float(arg.get_slice("=", 1).get_slice(",", 0)), float(arg.get_slice("=",
 					1).get_slice(",", 1)))
@@ -89,6 +93,10 @@ func _ready() -> void:
 
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(OUT))
 	for view: String in views:
+		if "play" in view:
+			room.set_zoom(play_zoom, play_centre)
+		else:
+			room.set_zoom(table_zoom[0], table_zoom[1])
 		for camera in [eye_camera, layer_camera]:
 			camera.look_at_from_position(views[view][0], views[view][1])
 			camera.fov = views[view][2] if views[view].size() > 2 else 100.0 # a view may narrow it, as a zoom lens
@@ -126,11 +134,13 @@ func _add_table_panel(room: Node3D) -> void:
 	# from the lord's chair, as main.gd seats the player in tabletop mode
 	var seat: Transform3D = room.seat()
 	views["sprites-panel"] = [seat.origin, seat.origin - seat.basis.z]
-	_minimap_view(room, "sprites-board", Vector3(-0.22, 0.3, 0.4), Vector3(-0.58, 0.22, -0.17))
+	_minimap_view(room, "sprites-board", Vector3(-0.45, 0.4, 0.1), Vector3(-0.75, 0.2, -0.6))
+	# the whole desk from the side: what rests on what
+	_minimap_view(room, "sprites-desk", Vector3(-1.4, 0.6, 1.2), Vector3(0.0, 0.0, 0.0))
 
 
 func _minimap_view(room: Node3D, view: String, eye: Vector3, target: Vector3) -> void:
-	var minimap: Transform3D = room._table * Transform3D(Basis(), Vector3(0.0, room.TABLE_TOP, 0.0))
+	var minimap: Transform3D = room._table * Transform3D(Basis(), Vector3(0.0, room.TABLE_TOP + room.MAP_LIFT, 0.0))
 	views[view] = [minimap * eye, minimap * target]
 
 
@@ -158,7 +168,10 @@ func _load_sprites(room: Node3D) -> void:
 		var mipmaps: bool = entry[4] if entry.size() > 4 else entry[3].size() > Image.create_empty(entry[0], entry[1],
 				false, entry[2]).get_data().size()
 		return Image.create_from_data(entry[0], entry[1], mipmaps, entry[2], entry[3])
-	room.set_minimap(image.call(data.terrain), image.call(data.fog), true)
+	var fog: Image = image.call(data.fog)
+	if "seen" in OS.get_cmdline_user_args(): # the whole map explored
+		fog.fill(Color8(1, 1, 1))
+	room.set_minimap(image.call(data.terrain), fog, true)
 	var layers := []
 	for key in ["pages", "masks"]:
 		var images: Array[Image] = []
@@ -175,7 +188,7 @@ func _load_sprites(room: Node3D) -> void:
 	multimesh.buffer = _flat_cards(data.buffer, names, room)
 	room.set_sprites(layers, image.call(data.table), data.get("scale", 1), true)
 	room.show_sprites(true, false)
-	var minimap: Transform3D = room._table * Transform3D(Basis(), Vector3(0.0, room.TABLE_TOP, 0.0))
+	var minimap: Transform3D = room._table * Transform3D(Basis(), Vector3(0.0, room.TABLE_TOP + room.MAP_LIFT, 0.0))
 	views["sprites"] = [minimap * Vector3(0.0, 0.45, 0.15), minimap.origin]
 	views["sprites-close"] = [minimap * Vector3(0.0, 0.25, 0.08), minimap.origin]
 	# close over one area of level 0, for a look next to the game's own view of it (the first scenario's start)
@@ -189,11 +202,22 @@ func _load_sprites(room: Node3D) -> void:
 	# the cards view through a 25 degree lens, four times larger: the sprites' own resolution shows
 	views["sprites-macro"] = [minimap * (at + Vector3(0.0, 0.07, 0.16)), minimap * (at + Vector3(-0.012, 0.0, -0.03)),
 			25.0]
+	# what the player sees in tabletop mode (main.gd _set_tabletop): a tile 2.5 cm wide, around the zoom tile; from the
+	# chair, and low over the cards. The views named "play" render at this zoom
+	var levels := maxi(roundi(map_size.x / map_size.y), 1) # square maps
+	var map := Vector3i(int(map_size.x) / levels, int(map_size.y), levels)
+	play_zoom = TableMath.zoom_for(0.025, panel.x, map)
+	play_centre = TableMath.on_level(zoom_tile / map_size, play_zoom, 0, levels, room.view_aspect)
+	var seat: Transform3D = room.seat()
+	views["sprites-play"] = [seat.origin, seat.origin - seat.basis.z]
+	views["sprites-play-map"] = [seat.origin, seat.origin - seat.basis.z, 45.0]
+	views["sprites-play-low"] = [minimap * Vector3(0.05, 0.16, 0.6), minimap * Vector3(0.0, 0.0, 0.0), 60.0]
 	print("room preview: sprites ", data.count, " instances, ", layers[0].get_layers(), " pages")
 	# with `-- sprites <name part>`: the frames the table gives the first instance of that animation, cut from the pages
 	var args := OS.get_cmdline_user_args()
 	var after := args.find("sprites") + 1
-	var named := after > 0 and args.size() > after and not args[after].begins_with("zoom=") and args[after] != "hd"
+	var named := (after > 0 and args.size() > after and not args[after].begins_with("zoom=")
+			and args[after] not in ["hd", "seen"])
 	var wanted := args[after] if named else ""
 	if wanted == "near": # frame 0 of every instance near the zoom tile
 		var table: Image = image.call(data.table)

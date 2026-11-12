@@ -27,6 +27,18 @@ func _initialize() -> void:
 	_expect("zoom 4, panel 0.75, 0.25", ray_at.call(Vector2(0.75, 0.25)), Vector2(0.3125, 0.4375))
 
 	# a centre near the edge is clamped, so the view stays on the map
+	# a map half as tall as the table's shape: the panel shows twice the height of the map's UV
+	room.view_aspect = 2.0
+	room.set_zoom(4.0, Vector2(0.5, 0.5))
+	_expect("aspect 2, panel 0.75, 0.25", ray_at.call(Vector2(0.75, 0.25)), Vector2(0.5625, 0.375))
+	room.set_zoom(1.0, Vector2(0.5, 0.2))
+	_expect("aspect 2, a view taller than the map stays in the middle", ray_at.call(Vector2(0.5, 0.5)), Vector2(0.5,
+			0.5))
+	# a map twice as tall as the table's shape: zoom 1 would cut it, so the least zoom shows all of it
+	room.view_aspect = 0.5
+	room.set_zoom(0.0, Vector2(0.5, 0.5))
+	_expect("aspect 0.5, the whole height shows", ray_at.call(Vector2(0.5, 0.25)), Vector2(0.5, 0.25))
+	room.view_aspect = 1.0
 	room.set_zoom(4.0, Vector2(0.0, 0.0))
 	_expect("zoom 4, clamped centre", ray_at.call(Vector2(0.5, 0.5)), Vector2(0.125, 0.125))
 

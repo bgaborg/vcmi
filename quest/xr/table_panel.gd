@@ -1,18 +1,29 @@
 ## The war table's side panel (quest/PHASE4.md 4d), laid out as the phase 0 concept
 ## (quest/concept/screenshots/table.png), as real things in the war room: the resources and the date on a wooden bar
-## along the map's near edge, the heroes (movement and mana bars) and the towns on a board in a brass rim standing left
-## of the map, and the end turn hourglass right of it, which flips when the turn ends.
+## and the heroes (movement and mana bars) and the towns on a board in a brass rim. The map fills the table, so both
+## stand in a row along its far edge, on struts, facing the chair; the end turn hourglass stands at the near right
+## corner and flips when the turn ends. All of them rest on the desk mat (quest/VISUALS.md).
 ## Data from VcmiData.panel. The node sits at the map's centre (room.add_table_panel): x right, y up, z towards the
 ## player. The board lies in its own plane: x right, y up, metres from its centre, facing +z. item_at and ray_item find
 ## the entry under a point; main.gd acts on it (select_object, the end turn key).
 extends Node3D
 
 const BAR_SIZE := Vector2(0.72, 0.06)
-const BAR_POSE := Transform3D(Basis(Vector3.RIGHT, deg_to_rad(-50.0)), Vector3(0.0, 0.025, 0.33))
+const DESK := -0.035 ## the desk mat's top from the map: room.gd MAT_TOP - MAP_LIFT
+const FAR_EDGE := -0.6 ## behind the book, where the bar, the board and room.gd's tablet stand
+const SHELF := DESK + 0.12 ## on a shelf (room.gd SHELF_SIZE), over the cards at the map's far edge
+const BAR_TILT := deg_to_rad(20.0) ## back from upright
+const BAR_SCALE := 1.5 ## 1.4 m from the chair: larger than its layout's metres
+## behind the map's far edge, its lower edge on the desk
+const BAR_POSE := Transform3D(Basis(Vector3.RIGHT, -BAR_TILT), Vector3(0.0, SHELF
+		+ 0.006 * BAR_SCALE + BAR_SIZE.y / 2.0 * BAR_SCALE * cos(BAR_TILT), FAR_EDGE))
 const BOARD_SIZE := Vector2(0.27, 0.50)
-## left of the map, between the corner figures, turned towards the chair and leaning back a little
-const BOARD_POSE := Transform3D(Basis(Vector3.UP, 0.65) * Basis(Vector3.RIGHT, -0.2), Vector3(-0.58, 0.235, -0.17))
-const HOURGLASS_AT := Vector3(0.6, -0.015, 0.22) ## its foot, on the table (15 mm under the map)
+const BOARD_TILT := deg_to_rad(15.0) ## back from upright
+const BOARD_YAW := 0.3 ## towards the chair
+## left of the bar, its lower edge on the desk
+const BOARD_POSE := Transform3D(Basis(Vector3.UP, BOARD_YAW) * Basis(Vector3.RIGHT, -BOARD_TILT), Vector3(-0.75, SHELF
+		+ 0.006 + BOARD_SIZE.y / 2.0 * cos(BOARD_TILT), FAR_EDGE))
+const HOURGLASS_AT := Vector3(0.86, DESK, 0.42) ## its foot, on the desk
 const DECOR := 8 ## room.gd DECOR: the render layer the room's reflections and lights reach, not the controller light
 const HOURGLASS_PICK := 0.06 ## metres from its middle that a ray picks it
 ## heroes, and towns, the board shows; shortcut: no paging past 6 (2D scrolls); add it when a map needs it
@@ -63,11 +74,15 @@ var _brass := _metal(Color(0.8, 0.6, 0.3))
 func _init() -> void:
 	_font.font_names = PackedStringArray(["Georgia", "Noto Serif", "serif"])
 	_font.multichannel_signed_distance_field = true # sharp at any distance and size, no rasterised font sizes
-	_bar = _framed(BAR_SIZE, BAR_POSE)
+	_bar = _framed(BAR_SIZE, BAR_POSE.scaled_local(Vector3.ONE * BAR_SCALE))
 	_board = _framed(BOARD_SIZE, BOARD_POSE)
 	_hourglass = _make_hourglass()
 	_hourglass.position = HOURGLASS_AT
 	add_child(_hourglass)
+	# what it darkens on the desk under it, so it rests there
+	var under_glass := contact_shadow(Vector2(0.16, 0.16))
+	under_glass.position = HOURGLASS_AT + Vector3(0.0, 0.0008, 0.0)
+	add_child(under_glass)
 
 
 ## New panel data (VcmiData.panel): laid out again when the heroes, towns or the numbers' widths changed, else the
@@ -303,10 +318,10 @@ func _framed(size: Vector2, pose: Transform3D) -> Node3D:
 		_box(node, Vector3(0.006, size.y, 0.018), Vector3(side * (size.x + 0.006) / 2.0, 0.0, -0.006), _brass)
 	# the strut: from behind the board's top third down to the table
 	var top := Vector3(0.0, size.y * 0.2, -0.016)
-	# on the table (the map's height, 15 mm above it), behind the board
+	# on the shelf, behind the board
 	var behind := -pose.basis.z
 	behind.y = 0.0
-	var foot := Vector3(pose.origin.x, -0.015, pose.origin.z) + behind.normalized() * 0.12
+	var foot := Vector3(pose.origin.x, SHELF, pose.origin.z) + behind.normalized() * minf(0.05 + size.y * 0.25, 0.09)
 	var back: Vector3 = pose.affine_inverse() * foot
 	var along := back - top
 	var strut := _box(node, Vector3(0.024, along.length(), 0.012), (top + back) / 2.0, _wood)
@@ -348,6 +363,29 @@ func _make_hourglass() -> Node3D:
 	_part(turning, _cylinder(0.0, 0.02, 0.03), Vector3(0.0, 0.03, 0.0), sand).rotation.x = PI # the top's sand, running
 	_part(turning, _cylinder(0.0, 0.024, 0.025), Vector3(0.0, -0.057, 0.0), sand)
 	return root
+
+
+## A soft dark patch `size` metres wide and deep, to lie on the desk under a thing (also room.gd, under the book)
+static func contact_shadow(size: Vector2) -> MeshInstance3D:
+	var fade := Gradient.new()
+	fade.colors = PackedColorArray([Color(0.0, 0.0, 0.0, 0.75), Color(0.0, 0.0, 0.0, 0.6), Color(0.0, 0.0, 0.0, 0.0)])
+	fade.offsets = PackedFloat32Array([0.0, 0.6, 1.0])
+	var texture := GradientTexture2D.new()
+	texture.gradient = fade
+	texture.fill = GradientTexture2D.FILL_RADIAL
+	texture.fill_from = Vector2(0.5, 0.5)
+	texture.fill_to = Vector2(1.0, 0.5)
+	var material := StandardMaterial3D.new()
+	material.albedo_texture = texture
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	var shadow := MeshInstance3D.new()
+	shadow.mesh = PlaneMesh.new()
+	(shadow.mesh as PlaneMesh).size = size
+	shadow.material_override = material
+	shadow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	shadow.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
+	return shadow
 
 
 func _box(parent: Node3D, size: Vector3, at: Vector3, material: Material) -> MeshInstance3D:

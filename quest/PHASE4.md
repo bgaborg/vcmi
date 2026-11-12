@@ -1,6 +1,6 @@
 # Phase 4: the tabletop adventure map (plan)
 
-Status: 2026-11-09, required checks done except check 3, which waits for a person in the headset (section 3a); milestones 4a, 4b and 4c built and played on the Quest with a simulated ray (sections 4a, 4b and 4c results; a battle, spells and the real buttons not yet checked); 4d built and tested on the PC, its headset test waits; 4e paper cards built and tested on the PC (2026-11-11). Next: the rest of milestone 4e.
+Status: 2026-11-12: the visual pass of [`VISUALS.md`](VISUALS.md) changed the table's look and layout (the map fills the table; the fog is blank page; the panels stand on a shelf at the far edge), so where this file and `VISUALS.md` differ on the look, `VISUALS.md` is right. Before it, 2026-11-09: required checks done except check 3, which waits for a person in the headset (section 3a); milestones 4a, 4b and 4c built and played on the Quest with a simulated ray (sections 4a, 4b and 4c results; a battle, spells and the real buttons not yet checked); 4d built and tested on the PC, its headset test waits; 4e paper cards built and tested on the PC (2026-11-11). Next: the rest of milestone 4e.
 
 Goal (from [`PROJECT_PLAN.md`](PROJECT_PLAN.md#phase-4---tabletop-adventure-map-after-data-bridge-milestones-2-and-3)): the adventure map is fully playable on the war table, and one button goes back to the 2D screen.
 
@@ -293,7 +293,7 @@ Each one is tested on the Quest, reviewed, and recorded here with its numbers be
 
 #### 4e results so far (2026-11-11, the paper cards; built and tested on the PC)
 
-- **Cards:** an object whose anchor or visitable tile is seen turns up about its anchor tile's bottom edge. It leans back `lean_degrees` (70) from the table, in `SPRITE_SHADER` (`xr/room.gd`).
+- **Cards:** an object whose anchor or visitable tile is seen turns up about its anchor tile's bottom edge. It leans back `lean_degrees` (70) from the table, in `SPRITE` (`xr/table_shaders.gd`).
   - Objects in the fog stay flat under it, as in 2D.
   - The hero's flag stands with its hero.
   - The 2D shadows fade as a card rises.
