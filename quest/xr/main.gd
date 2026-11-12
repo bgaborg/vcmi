@@ -20,6 +20,9 @@ const TablePanel := preload("res://table_panel.gd")
 const SWITCH_AT := Vector3(0.0, TablePanel.SHELF + 0.16, TablePanel.FAR_EDGE)
 const TABLE_DROP := Vector2(0.3, 1.1) ## metres from the eyes down to the map: the limits of the left stick
 const TABLE_DROP_SPEED := 0.25 ## metres per second at full stick
+## degrees the map can be raised at its far edge, as a lectern: more and the shelf hides the game screen
+const TABLE_TILT_MAX := 20.0
+const CARD_LEAN := Vector2(30.0, 90.0) ## degrees from the table the cards can stand at
 const END_TURN_KEY := 33 ## KEYCODE_E, as the wrist panel's "End turn (E)"
 ## a tile on the table in tabletop mode (quest/PHASE4.md decision D3). shortcut: check 3 (ray jitter against tile size)
 ## needs a person holding a controller; 2.5 cm on the table-sized map (quest/VISUALS.md) is a safe guess until it is
@@ -59,6 +62,10 @@ const HOTKEYS := [
 	["Sleep (Z)", 54], ["Dig (D)", 32],
 	["Quick save (F8)", 138], ["Quick load (F9)", 139],
 	["Table / screen", -1], ["Next hero (H)", 36], # -1: switches tabletop mode in Godot (also the right stick click)
+	# the table's settings (_wrist_setting), saved: its height under the eyes, its tilt to the player, the cards' angle
+	["Table lower", -2], ["Table higher", -3],
+	["Tilt less", -4], ["Tilt more", -5],
+	["Cards flatter", -6], ["Cards upright", -7],
 ]
 const HOTKEY_SIZE := Vector2(0.08, 0.025) ## metres per button
 ## above the back of the left controller, tilted towards the eyes like a watch face
@@ -91,7 +98,9 @@ var tabletop := false
 var view_switch := Label3D.new()
 var switch_pressed := false
 ## metres from the seated player's eyes down to the map; the left stick changes it at the table (saved)
-var table_drop := 0.6
+var table_drop := 0.45
+var table_tilt := 0.0 ## degrees (room.gd set_tilt); the wrist panel changes it (saved)
+var card_lean := 82.0 ## degrees from the table; cards.json's, then the wrist panel's (saved)
 var seated := false ## in tabletop mode, the player's place moved to the lord's chair (_seat)
 var standing_screen := Transform3D() ## the screen's place before seating: the seat puts the screen before the chair
 var table_tile := TableMath.NO_TILE ## the tile under the active ray on the table, sent to the game as a hover
@@ -156,6 +165,28 @@ func _ready() -> void:
 	xr.session_visible.connect(func():
 		_on_stick("primary", Vector2.ZERO, 0)
 		menu_pressed_at = -1)
+	# The room takes seconds to build, and the headset is black until the first frame. So a loading text before the
+	# eyes first, and frames until the session shows it; _process waits for the rest of _ready
+	set_process(false)
+	origin = XROrigin3D.new()
+	add_child(origin)
+	var camera := XRCamera3D.new()
+	origin.add_child(camera)
+	var loading := Label3D.new()
+	loading.text = "VCMI\nLoading..."
+	loading.font_size = 96
+	loading.outline_size = 0
+	loading.pixel_size = 0.002
+	loading.position = Vector3(0.0, 0.0, -2.0)
+	camera.add_child(loading)
+	var shown := [false]
+	xr.session_visible.connect(func(): shown[0] = true, CONNECT_ONE_SHOT)
+	for _frame in 400: # at most about 5 s: without a headset session the room still gets built
+		if shown[0]:
+			break
+		await get_tree().process_frame
+	for _frame in 3: # the text reaches the display
+		await get_tree().process_frame
 
 	# the controller models have lit glTF materials
 	var light := DirectionalLight3D.new()
@@ -195,10 +226,6 @@ void fragment() {
 	world.environment = room.environment
 	add_child(world)
 
-	origin = XROrigin3D.new()
-	add_child(origin)
-	origin.add_child(XRCamera3D.new())
-
 	layer = OpenXRCompositionLayerCylinder.new()
 	bridge = Engine.get_singleton("VcmiBridge")
 	layer.use_android_surface = true
@@ -209,7 +236,7 @@ void fragment() {
 	if not cards is Dictionary:
 		push_error("VCMI XR: res://cards.json is missing or not valid JSON; every object stands as a card")
 		cards = {}
-	room.set_card_lean(cards.get("lean_degrees", 70.0))
+	card_lean = cards.get("lean_degrees", 70.0)
 	# the extension (quest/xr/extension) finds the game's bridge once the game library has loaded, after Godot
 	if ClassDB.class_exists("VcmiData"):
 		vcmi_data = ClassDB.instantiate("VcmiData")
@@ -227,11 +254,19 @@ void fragment() {
 		_size_screen(settings.get_value("screen", "distance", screen_distance), settings.get_value("screen", "width",
 				screen_width))
 		_set_environment(settings.get_value("screen", "environment", ENVIRONMENTS[0]))
-		var drop: Variant = settings.get_value("table", "drop", table_drop)
+		var drop: Variant = settings.get_value("table", "eyes_over_map", table_drop)
 		if typeof(drop) in [TYPE_FLOAT, TYPE_INT]:
 			table_drop = clampf(drop, TABLE_DROP.x, TABLE_DROP.y)
+		var tilt: Variant = settings.get_value("table", "tilt", table_tilt)
+		if typeof(tilt) in [TYPE_FLOAT, TYPE_INT]:
+			table_tilt = clampf(tilt, 0.0, TABLE_TILT_MAX)
+		var lean: Variant = settings.get_value("table", "card_lean", card_lean)
+		if typeof(lean) in [TYPE_FLOAT, TYPE_INT]:
+			card_lean = clampf(lean, CARD_LEAN.x, CARD_LEAN.y)
 	else:
 		_size_screen(screen_distance, screen_width)
+	room.set_card_lean(card_lean)
+	room.set_tilt(table_tilt)
 	layer.aspect_ratio = float(SURFACE_SIZE.x) / SURFACE_SIZE.y # width / height, as in XrCompositionLayerCylinderKHR
 	# behind the Godot frame, so the controllers and the ray draw over the game
 	layer.sort_order = -1
@@ -292,6 +327,8 @@ void fragment() {
 		var dot := MeshInstance3D.new()
 		dot.mesh = sphere
 		pointer_dot.add_child(dot)
+	loading.queue_free()
+	set_process(true)
 
 
 ## the map tile (x, y, level) under the aim ray of `hand` on the table, or Vector3i(-1, -1, -1)
@@ -875,12 +912,32 @@ func _on_stick(input_name: String, value: Vector2, hand: int) -> void:
 	screen_stick = stick
 
 
+## A setting on the wrist panel (HOTKEYS -2 to -7): one step of the table's height, its tilt or the cards' angle
+func _wrist_setting(code: int) -> void:
+	match code:
+		-2, -3:
+			var drop := clampf(table_drop + (0.05 if code == -2 else -0.05), TABLE_DROP.x, TABLE_DROP.y)
+			if seated:
+				origin.position.y += drop - table_drop
+			table_drop = drop
+		-4, -5:
+			table_tilt = clampf(table_tilt + (5.0 if code == -5 else -5.0), 0.0, TABLE_TILT_MAX)
+			room.set_tilt(table_tilt)
+		_:
+			card_lean = clampf(card_lean + (5.0 if code == -7 else -5.0), CARD_LEAN.x, CARD_LEAN.y)
+			room.set_card_lean(card_lean)
+	print("VCMI XR: table drop ", table_drop, " tilt ", table_tilt, " card lean ", card_lean)
+	_save_screen()
+
+
 func _save_screen() -> void:
 	var settings := ConfigFile.new()
 	settings.set_value("screen", "distance", screen_distance)
 	settings.set_value("screen", "width", screen_width)
 	settings.set_value("screen", "environment", environment_name)
-	settings.set_value("table", "drop", table_drop)
+	settings.set_value("table", "eyes_over_map", table_drop)
+	settings.set_value("table", "tilt", table_tilt)
+	settings.set_value("table", "card_lean", card_lean)
 	settings.save(SETTINGS_PATH)
 	print("VCMI XR: screen distance ", screen_distance, " width ", screen_width, " environment ", environment_name)
 
@@ -895,7 +952,10 @@ func _press(button: int, hand: int, pressed: bool) -> void:
 			var keycode: int = HOTKEYS[hotkey_hover][1]
 			print("VCMI XR: hotkey ", HOTKEYS[hotkey_hover][0])
 			if keycode < 0:
-				_set_tabletop(not tabletop)
+				if keycode == -1:
+					_set_tabletop(not tabletop)
+				else:
+					_wrist_setting(keycode)
 				_pulse(hand, 0.25)
 				return
 			bridge.key(keycode, true)

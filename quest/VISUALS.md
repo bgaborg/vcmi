@@ -31,13 +31,19 @@ the cards stand on it.
 - **The hero stands near the player.** The view follows the selected hero to a point 0.68 of the way from the far
   edge to the near one (`main.gd` `TABLE_FOCUS`), about 65 cm from the chair. For this the view may pass the map's
   near edge (`view_reach`); blank page shows there.
-- **The table's height follows the player,** as in Demeo: seated at the table, the map lies 0.6 m under the eyes,
-  wherever the real head is (`main.gd` `table_drop`, `_seat`). The left stick raises and lowers it, 0.3 to 1.1 m, and
-  the value is saved. Before, the map stood 0.84 m over the real floor: too high from a real chair. The virtual floor
-  is then not the real one.
-- **Launch splash:** Horizon OS shows `vr_splash.png` (the quest source set's assets, `com.oculus.ossplash` in its
-  manifest) from Play in the launcher until the host's first frame. That gap was black for about 5 s, longer on a
-  cold start. Not confirmed: adb screenshots do not show it; a person must look.
+- **The table's height follows the player,** as in Demeo: seated at the table, the map lies 0.45 m under the eyes,
+  wherever the real head is (`main.gd` `table_drop`, `_seat`). Before, the map stood 0.84 m over the real floor: too
+  high from a real chair; 0.6 m under the eyes was too low. The virtual floor is then not the real one.
+- **The chair faces the room.** The table is turned so that the lord's chair stands on the wall's side and the shelf
+  with the panels on the room's side.
+- **Settings on the wrist panel,** saved: "Table lower / higher" (5 cm a press, 0.3 to 1.1 m under the eyes; the left
+  stick does the same at the table), "Tilt less / more" (the map with its book and shelf raised at the far edge as a
+  lectern, 5 degrees a press, up to 20), "Cards flatter / upright" (the cards' angle from the table, 30 to 90 degrees).
+  `shortcut:` the panel is on the left wrist only; add the side as a setting when someone asks.
+- **Loading:** the host shows "VCMI Loading..." before the eyes from its first frame and builds the room after it
+  (`main.gd` `_ready`). Horizon OS's own splash (`vr_splash.png`, `com.oculus.ossplash`) is loaded by the system but
+  did not show after Play in the launcher. Not seen yet on the headset: the first seconds before the host's first
+  frame can still be black.
 - **The game screen** (dialogs, town screens) is raised 0.9 m while the player sits at the table, above the shelf.
 - **Changing the view:** a plaque the ray clicks: "Table view" under the 2D screen, "2D screen" over the resource bar
   at the table (`main.gd` `view_switch`). The right stick click and the wrist panel's button do the same.

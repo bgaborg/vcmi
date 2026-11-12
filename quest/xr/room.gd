@@ -639,6 +639,14 @@ func marker_multimesh() -> MultiMesh:
 
 
 ## the cards' lean from the table (cards.json)
+## The map, with the book and the shelf, raised at its far edge by `degrees` about its near edge, as on a lectern
+func set_tilt(degrees: float) -> void:
+	var pivot := Vector3(0.0, 0.0, MINIMAP_AREA.y / 2.0 + PAGE_MARGIN)
+	_minimap.transform = _table * Transform3D(Basis(), Vector3(0.0, TABLE_TOP + MAP_LIFT, 0.0) + pivot) \
+			* Transform3D(Basis(Vector3.RIGHT, deg_to_rad(degrees)), Vector3.ZERO) * Transform3D(Basis(), -pivot)
+	set_zoom(zoom, zoom_centre) # the sprites' clip follows the moved minimap
+
+
 func set_card_lean(degrees: float) -> void:
 	for material in _sprite_materials():
 		material.set_shader_parameter("lean", deg_to_rad(degrees))
@@ -943,7 +951,8 @@ func _banner(cloth: SurfaceTool, top: Vector3, along: Vector3, normal: Vector3, 
 func _build_props() -> void:
 	# long side to the user, the nearest corner at 56 degrees: outside every screen size main.gd allows (preview.gd
 	# checks)
-	var table := Transform3D(Basis(Vector3.UP, -PI / 2.0), Vector3(2.6, 0.0, -0.3))
+	# the lord's chair stands on the wall's side: the seated player looks into the room
+	var table := Transform3D(Basis(Vector3.UP, PI / 2.0), Vector3(2.6, 0.0, -0.3))
 	_table = table
 	_clear_top(_prop("WarTable", "meshy/war_table.gltf", table.origin, table.basis))
 	_build_mat()
