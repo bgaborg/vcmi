@@ -389,13 +389,20 @@ func _update_sprite_view(head: Vector3) -> void:
 			vcmi_data.update_sprites(room.sprite_multimesh(), sprite_rect, sprite_level)
 			room.set_sprites(vcmi_data.atlas_textures(), vcmi_data.sprite_table(), _atlas_scale(), false)
 			sprites_pending = false
-			if vcmi_data.atlas_stats().get("view_overflowed", false) and _atlas_scale() > 1:
+			if vcmi_data.atlas_stats().get("view_overflowed", false) and not vcmi_data.atlas_stats().get("planned", true):
+				# the atlas now knows every animation's size: the same view again, the largest at a lower scale
+				vcmi_data.atlas_view(sprite_rect, sprite_level, _atlas_scale())
+				sprites_pending = true
+				print("VCMI XR: the atlas plans the view again at up to scale ", _atlas_scale(), ": ",
+						vcmi_data.atlas_stats())
+			elif vcmi_data.atlas_stats().get("view_overflowed", false) and _atlas_scale() > 1:
 				# some objects would have no sprite: the view again at half the scale, a quarter of the texels
 				sprite_scale = _atlas_scale() / 2
 				scale_zoom = room.zoom
 				vcmi_data.atlas_view(sprite_rect, sprite_level, mini(sprite_scale, fit))
 				sprites_pending = true
-				print("VCMI XR: the atlas cannot hold the view at zoom ", room.zoom, ": scale ", sprite_scale)
+				print("VCMI XR: the atlas cannot hold the view at zoom ", room.zoom, ": scale ", sprite_scale, " ",
+						vcmi_data.atlas_stats())
 			elif vcmi_data.atlas_stats().get("view_overflowed", false):
 				too_far_zoom = room.zoom # some objects would have no sprite even at 1x: markers until closer
 				print("VCMI XR: the atlas cannot hold the view at zoom ", room.zoom, ": markers")

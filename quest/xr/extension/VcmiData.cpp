@@ -822,7 +822,11 @@ public:
 		result["overflowed"] = s.overflowed;
 		result["evicted"] = s.evicted;
 		result["view_overflowed"] = s.viewOverflowed;
-		result["scale"] = atlas->scaleNow(); // texels per 2D map pixel of the frames in the pages
+		result["scale"] = atlas->scaleNow(); // texels per 2D map pixel of the frames in the pages, at most
+		result["planned"] = s.planned;
+		result["lowered"] = s.lowered;
+		result["plan_texels"] = s.planTexels;
+		result["plan_budget"] = s.planBudget;
 		result["decode_us"] = s.decodeMicros;
 		result["mipmap_us"] = s.mipmapMicros;
 		result["batch_ms"] = s.batchMillis;
@@ -1026,8 +1030,9 @@ public:
 	{
 		for(const auto & f : frames)
 		{
+			// the page and, in 64s, the frame's own scale (SpriteAtlas::plan): the shader splits them
 			const float values[8] = {
-				float(f.page),
+				float(f.page + 64 * f.scale),
 				float(f.x),
 				float(f.y),
 				float(f.width),

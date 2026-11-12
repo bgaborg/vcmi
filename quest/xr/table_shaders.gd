@@ -38,7 +38,7 @@ uniform vec4 view = vec4(0.0, 0.0, 1.0, 1.0); // the map UV the panel shows: pos
 uniform float stand = 1.0; // 0 flat, 1 standing: the pop-up animation (show_sprites)
 uniform float lean = 1.22; // radians from the table, cards.json
 uniform bool cards_pass = false; // the second pass: the standing cards only; the first: all else, and cards' shadows
-uniform float texel_scale = 1.0; // texels per 2D map pixel in the pages (SpriteAtlas scale: xBRZ HD)
+uniform float atlas_scale = 1.0; // texels per 2D map pixel in the pages, for a frame table without its own scales
 uniform float PAGE = 1024.0; // texels a page side (SpriteAtlas::PAGE), from the texture (set_sprites)
 varying vec2 panel_xz;
 varying flat float shadow_only;
@@ -60,7 +60,10 @@ void vertex() {
 	// as MapRendererAdventureContext::objectImageIndex: 180 ms a frame, the clock and the frame offset by the id
 	int t = int(TIME * 1000.0);
 	int frame = ((t + (id * 97) % 180) / 180 + id) % count;
-	vec4 a = texel(2 * (first + frame)); // page, x, y, width
+	vec4 a = texel(2 * (first + frame)); // page + 64 * the frame's texels per 2D map pixel, x, y, width
+	// a table without the scale (an older capture) has the atlas's one scale
+	float texel_scale = a.x >= 64.0 ? floor(a.x / 64.0) : atlas_scale;
+	a.x = mod(a.x, 64.0);
 	vec4 b = texel(2 * (first + frame) + 1); // height, left and top from the full frame's bottom right, full width
 	// the instance sits on the anchor tile's bottom right; mirrored, the frame's left edge is full width - left - width.
 	// The table is in texels; the geometry in 2D map pixels

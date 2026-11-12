@@ -664,7 +664,7 @@ func set_sprites(textures: Array, table: Image, texel_scale: int, precision_chec
 		material.set_shader_parameter("masks", textures[1])
 		material.set_shader_parameter("frames", frames)
 		material.set_shader_parameter("precision_check", precision_check)
-		material.set_shader_parameter("texel_scale", float(texel_scale))
+		material.set_shader_parameter("atlas_scale", float(texel_scale))
 		material.set_shader_parameter("PAGE", float((textures[0] as Texture2DArray).get_width()))
 
 

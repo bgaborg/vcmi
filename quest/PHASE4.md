@@ -349,9 +349,14 @@ Each one is tested on the Quest, reviewed, and recorded here with its numbers be
 - **The heaviest map for the budgets:** the G list's row 5 (252 x 252, two levels, 53 808 objects), revealed with `vcmieagles`, tabletop mode, seen from the chair (`quest/out/visuals/headset-heavy.sh`, not in git; `11-heavy-seat.jpg`, `11-heavy-seat.csv`):
   - 72 to 74 fps; app GPU time 9.5 to 10.6 ms, about 10.3 (budget 13.9 ms);
   - 2.60 GB PSS, 0.93 GB of graphics, 1.52 GB native heap; battery 41 degrees C;
-  - the atlas could not hold the view at 4x or 2x ("the atlas cannot hold the view at zoom 8.4: scale 1"), so the sprites are the game's 1x there.
+  - the atlas could not hold the view at 2x then, so the sprites were the game's 1x; see "HD on a full table" below.
 - **Seen, to fix or judge:**
-  - **HD is lost on a full table.** The first scenario revealed (60 x 38 tiles in view, 321 animations, 6087 frames) fills 12 of the 32 pages at 1x, so 2x would need 48: the view falls to 1x ("the atlas cannot hold the view at zoom 2.4: scale 1"). A tile covers about 46 of the headset's pixels from the chair, so 2x would show. The atlas loads whole animations; loading only the frames the view uses would bring 2x back. Not done.
+  - **HD on a full table (fixed 2026-11-12).** Before, a view that did not fit the 32 pages at a scale fell to half of it for every animation: the first scenario revealed (60 x 38 tiles, 323 animations) and the heaviest map were at 1x. Now each animation has its own scale (`SpriteAtlas::plan`): when the wanted scale does not fit, the animations with the most texels get half, then a quarter, and the ground and most objects stay sharp. The frame table carries each frame's scale beside its page, and the shader reads it.
+    - The first scenario revealed: 279 of 323 animations at 2x, 44 at 1x, 30 pages; 72 fps, GPU about 10 ms.
+    - The heaviest map: 414 of 538 at 2x, 124 at 1x; 72 to 73 fps, GPU about 10.4 ms, 2.60 GB PSS.
+    - The atlas learns the sizes from the first try, so a new kind of view is loaded twice (about 1 s more, once), and a third time when the plan's guess of the packing waste was too low.
+    - `shortcut:` 2x is what the headset's pixels ask for from the chair; 4x comes when leaning in, where the view is small. Not checked: how often a moving view plans again.
+  - Leaning in close, the edges of the ground tiles show as a faint grid (`14-heavy-hd-low.jpg`). Not new.
   - **The blur at the screenshots' right edge is not the map:** all 321 animations are loaded there (`sprites_check`), and it is at the picture's edge on both maps whatever lies there. Probably the headset's lower resolution at the edge of the eye's view. To confirm by a person.
   - Tall cards at the far edge stand over the shelf's front and can cover the resource bar's lower edge.
 - **One button back to 2D:** the view switch plaque, the right stick click and the wrist button ([`VISUALS.md`](VISUALS.md)).

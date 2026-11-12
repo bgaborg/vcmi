@@ -228,12 +228,17 @@ public:
 		int16_t left, top;
 		uint16_t fullWidth, fullHeight;
 		bool mask;
+		uint8_t scale = 1; // texels per pixel of the 2D map of this frame: its animation's own (plan)
 	};
 
 	struct Stats
 	{
 		int64_t wanted = 0, loaded = 0, frames = 0, pixels = 0, refills = 0, overflowed = 0, evicted = 0;
 		bool viewOverflowed = false; // the current view's animations do not all fit (VcmiData: markers then)
+		bool planned = false; // the last want() knew every animation's size and gave each its scale (plan)
+		int64_t lowered = 0; // animations the last plan gave less than the wanted scale
+		int64_t planTexels = 0; // what the last plan's animations need at their scales, and what it allowed
+		int64_t planBudget = 0;
 		int64_t decodeMicros = 0; // worker time of the bridge, baking, trimming and packing, summed
 		int64_t mipmapMicros = 0; // worker time building the page images
 		int64_t batchMillis = 0; // from the last want with new animations to all of them uploaded
@@ -272,8 +277,8 @@ public:
 			worker.join();
 	}
 
-	/// main thread: the animations the view needs, by name, at `wantedScale` (1 to MAX_SCALE: texels per pixel of the
-	/// 2D map). Loads those not in the pages; a full atlas makes room by clearing the page the view has not needed for
+	/// main thread: the animations the view needs, by name, at up to `wantedScale` (1 to MAX_SCALE: texels per pixel of
+	/// the 2D map; plan() gives the largest animations less when the pages cannot hold all at that). Loads those not in the pages; a full atlas makes room by clearing the page the view has not needed for
 	/// longest (evict). Starts all pages again with only these when no page can go (the view needs more than the
 	/// pages), when the pages would hold mostly other animations, or at another scale.
 	void want(const std::vector<std::string> & names, int wantedScale)
@@ -286,6 +291,8 @@ public:
 			scale = wantedScale;
 			refill();
 		}
+		if(rescaled || !viewOverflowed)
+			replans = 0;
 		stats.wanted = names.size();
 		wantSerial++;
 		wantedNow = std::unordered_set<std::string>(names.begin(), names.end());
@@ -305,6 +312,7 @@ public:
 			failed.erase(name);
 		overflowNames.clear();
 		viewOverflowed = false;
+		stats.planned = plan(names);
 		size_t missing = 0;
 		for(const std::string & name : names)
 			missing += !placed.count(name) && !failed.count(name);
@@ -313,7 +321,7 @@ public:
 		// shortcut: 64 animations stay cached when zooming in to a few; tune with the real views of phase 4
 		if(placed.size() > 2 * names.size() && placed.size() > 64)
 			refill();
-		else if(!rescaled) // a rescale's refill is a fresh batch: what does not fit then overflows the view
+		else if(!rescaled && !placed.empty()) // a refill (a rescale's, plan's) is a fresh batch: what does not fit then overflows the view
 			freshBatch = false;
 		queueWanted();
 		batchStart = std::chrono::steady_clock::now();
@@ -461,6 +469,124 @@ public:
 	}
 
 private:
+	/// what an animation's frames need at 1x: texels, the sum of their widths and heights (for the padding), frames
+	struct Size
+	{
+		int64_t area = 0, edges = 0, frames = 0, side = 0; // side: the longest of a frame
+		int64_t at(int s) const
+		{
+			return area * s * s + edges * s * PAD + frames * PAD * PAD;
+		}
+	};
+
+	/// lock held: each wanted animation's scale in planScale, `scale` or less. False while a size is not known yet (all
+	/// at `scale` then; the sizes are known once that batch is packed, and the caller asks again when it overflowed).
+	/// When all at `scale` need more than the pages hold, the animations with the most texels get half, then a quarter:
+	/// they are few (long animations of large objects), and the ground and most objects stay sharp. Tiles go last.
+	/// What is in the pages keeps its scale while the rest fits, so a moving view does not load everything again.
+	bool plan(const std::vector<std::string> & names)
+	{
+		planScale.clear();
+		const auto placedScale = [this](const std::string & name)
+		{
+			const auto it = placed.find(name);
+			return it == placed.end() || it->second.empty() ? 0 : int(it->second.front().scale);
+		};
+		// the wanted scale, or less for an animation with a frame longer than a page at that
+		const auto most = [this](const std::string & name)
+		{
+			const auto it = sizes.find(name);
+			int s = scale;
+			while(s > 1 && it != sizes.end() && it->second.side * s > PAGE)
+				s /= 2;
+			return s;
+		};
+		bool known = true;
+		for(const std::string & name : names)
+		{
+			const int now = placedScale(name);
+			planScale[name] = now ? now : most(name);
+			known &= sizes.count(name) || failed.count(name);
+		}
+		stats.lowered = 0;
+		if(!known)
+			return false;
+		const auto cost = [this](const std::string & name, int s)
+		{
+			const auto it = sizes.find(name);
+			return it == sizes.end() ? int64_t(0) : it->second.at(s);
+		};
+		// the shelves leave room unused: how much, measured on what is in the pages now (kept over a refill)
+		int64_t used = 0;
+		int64_t held = 0;
+		for(const Page & page : pages)
+			used += int64_t(page.shelfY + page.shelfHeight) * PAGE;
+		for(const auto & [name, frames] : placed)
+			if(!frames.empty())
+				held += cost(name, frames.front().scale);
+		if(held > 4 * int64_t(PAGE) * PAGE)
+			waste = std::clamp(double(used) / double(held), 1.0, 2.5);
+		const int64_t budget = int64_t(double(PAGES) * PAGE * PAGE / waste * 0.9);
+		const auto tile = [](const std::string & name)
+		{
+			return name.find('#') != std::string::npos || name == "TSHRE";
+		};
+		std::vector<std::string> order = names;
+		std::stable_sort(
+			order.begin(),
+			order.end(),
+			[&](const std::string & l, const std::string & r)
+			{
+				if(tile(l) != tile(r))
+					return tile(r);
+				return cost(l, 1) > cost(r, 1);
+			}
+		);
+		int64_t total = 0;
+		const auto lower = [&](bool newOnly)
+		{
+			for(int target = scale / 2; target >= 1 && total > budget; target /= 2)
+				for(const std::string & name : order)
+				{
+					if(total <= budget)
+						break;
+					if((newOnly && placedScale(name)) || planScale[name] <= target)
+						continue;
+					total -= cost(name, planScale[name]) - cost(name, target);
+					planScale[name] = target;
+				}
+		};
+		bool lowPlaced = false;
+		for(const std::string & name : names)
+		{
+			total += cost(name, planScale[name]);
+			lowPlaced |= placedScale(name) && planScale[name] < scale;
+		}
+		lower(true);
+		// the placed ones are in the way, or the view shrank and they could be sharper: all again
+		if(total > budget || (lowPlaced && total < budget / 2))
+		{
+			total = 0;
+			for(const std::string & name : names)
+			{
+				planScale[name] = most(name);
+				total += cost(name, planScale[name]);
+			}
+			lower(false);
+			for(const std::string & name : names)
+				if(placedScale(name) && placedScale(name) != planScale[name])
+				{
+					refill();
+					break;
+				}
+		}
+		for(const std::string & name : names)
+			stats.lowered += planScale[name] < scale;
+		stats.planTexels = total;
+		stats.planBudget = budget;
+		return true;
+	}
+
 	// lock held: all pages start again empty, for the animations of the last want() only. A frame that does not fit
 	// in such a fresh batch means the view needs more than the pages (viewOverflowed)
 	void refill()
@@ -529,7 +655,8 @@ private:
 				name = queue.front();
 				queue.pop_front();
 				gen = generation;
-				frameScale = scale;
+				const auto planned = planScale.find(name);
+				frameScale = planned == planScale.end() ? scale : planned->second;
 				busy++;
 			}
 			const auto from = std::chrono::steady_clock::now();
@@ -546,12 +673,15 @@ private:
 			}
 			std::unique_lock lock(mutex);
 			busy--;
-			if(gen == generation && !stopping && game.inGame)
+			// a want() since then planned another scale for it, or another worker placed it: that one counts
+			const auto now = planScale.find(name);
+			const bool stale = (now != planScale.end() && now->second != frameScale) || placed.count(name);
+			if(gen == generation && !stopping && game.inGame && !stale)
 			{
 				if(baked.empty())
 					failed.insert(name);
 				else
-					pack(name, baked);
+					pack(name, baked, frameScale);
 				stats.decodeMicros += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - from).count();
 			}
 			lock.unlock();
@@ -751,12 +881,26 @@ private:
 	}
 
 	// under the mutex: shelf packing in page order, frames in decode order (an animation's frames have one size mostly)
-	void pack(const std::string & name, const std::vector<BakedFrame> & baked)
+	void pack(const std::string & name, const std::vector<BakedFrame> & baked, int bakedScale)
 	{
+		// what it needs at 1x, for the next plan(): also when it does not fit now
+		Size size;
+		for(const BakedFrame & f : baked)
+			if(f.width && f.height)
+			{
+				const int64_t w = (f.width + bakedScale - 1) / bakedScale;
+				const int64_t h = (f.height + bakedScale - 1) / bakedScale;
+				size.area += w * h;
+				size.edges += w + h;
+				size.side = std::max({size.side, w, h});
+				size.frames++;
+			}
+		sizes[name] = size;
 		std::vector<Placed> out;
 		for(const BakedFrame & f : baked)
 		{
 			Placed p{f.group, f.frame, 0, 0, 0, f.width, f.height, f.left, f.top, f.fullWidth, f.fullHeight, !f.mask.empty()};
+			p.scale = uint8_t(bakedScale);
 			if(f.width && f.height)
 			{
 				if(f.width > PAGE || f.height > PAGE)
@@ -800,6 +944,13 @@ private:
 				{
 					// stays a marker until the view moves, so a view needing more than the pages does not refill forever
 					viewOverflowed = true;
+					// a planned view that does not fit after all: the caller asks again, and plan() measures the waste
+					// of this mix of frames. Twice at most
+					if(stats.planned && replans < 2)
+					{
+						replans++;
+						stats.planned = false;
+					}
 					stats.overflowed++;
 					failed.insert(name);
 					overflowNames.insert(name);
@@ -957,6 +1108,10 @@ private:
 	std::vector<Page> pages;
 	std::unordered_map<std::string, std::vector<Placed>> placed;
 	std::unordered_set<std::string> failed; // missing or JSON-only without files: markers stay
+	std::unordered_map<std::string, Size> sizes; // of every animation packed so far, kept over refills (plan)
+	std::unordered_map<std::string, int> planScale; // the last want()'s animations: the scale each is baked at
+	double waste = 1.35; // page texels used per texel the frames need (plan); a guess until measured
+	int replans = 0; // planned views in a row that overflowed and were planned again (pack)
 	bool viewOverflowed = false; // the last want() needs more than the pages hold, even after evicting
 	bool freshBatch = true; // the pages were refilled for the current view (an overflow then is real)
 	std::unordered_set<std::string> overflowNames; // failed for want of room: tried again by the next want()
