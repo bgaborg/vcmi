@@ -343,6 +343,17 @@ Each one is tested on the Quest, reviewed, and recorded here with its numbers be
 - A comfort check by a person wearing the headset.
 - Then the `PROJECT_PLAN.md` exit: fully playable on the table, one button back to 2D.
 
+#### 4f results so far (2026-11-12, on the headset)
+
+- **The first scenario, one turn on the table:** `quest/tools/xr-panel.sh` (4d). Not a whole scenario yet.
+- **The heaviest map for the budgets:** the G list's row 5 (252 x 252, two levels, 53 808 objects), revealed with `vcmieagles`, tabletop mode, seen from the chair (`quest/out/visuals/headset-heavy.sh`, not in git; `11-heavy-seat.jpg`, `11-heavy-seat.csv`):
+  - 72 to 74 fps; app GPU time 9.5 to 10.6 ms, about 10.3 (budget 13.9 ms);
+  - 2.60 GB PSS, 0.93 GB of graphics, 1.52 GB native heap; battery 41 degrees C;
+  - the atlas could not hold the view at 4x or 2x ("the atlas cannot hold the view at zoom 8.4: scale 1"), so the sprites are the game's 1x there.
+- **Seen, to fix or judge:** the terrain at the table's right edge is blurred on both maps (flat minimap colour: the sprites seem to end before the table does); cards at the far edge stand a little over the shelf's front.
+- **One button back to 2D:** the view switch plaque, the right stick click and the wrist button ([`VISUALS.md`](VISUALS.md)).
+- **Left:** a whole scenario played by a person, and the comfort check.
+
 ## 5. Budgets
 
 | | Budget |
