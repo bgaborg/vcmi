@@ -31,7 +31,9 @@ const GRAB_MOVE_METRES := 0.015 ## a grip moved this far drags the map; held sti
 const GRAB_POPUP_MS := 350 ## ...this long it shows the tile's popup instead
 ## where on the table the view puts the selected hero (panel UV): two thirds of the way to the player, within reach
 const TABLE_FOCUS := Vector2(0.5, 0.68)
-const SEATED_SCREEN_UP := 0.9 ## metres from the seated eyes to the middle of the game screen
+## metres from room.gd SEAT up to the middle of the game screen: over the shelf. The eyes are table_drop over the map,
+## so at the default 0.75 m under the screen's middle
+const SEATED_SCREEN_UP := 0.9
 const TABLE_KEEP := 0.6 ## the view follows the selected hero once it leaves 60 % of the table around TABLE_FOCUS
 const BUTTON_LEFT := 1 ## MotionEvent.BUTTON_PRIMARY
 const BUTTON_RIGHT := 2 ## MotionEvent.BUTTON_SECONDARY
