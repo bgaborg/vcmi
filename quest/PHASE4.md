@@ -350,7 +350,10 @@ Each one is tested on the Quest, reviewed, and recorded here with its numbers be
   - 72 to 74 fps; app GPU time 9.5 to 10.6 ms, about 10.3 (budget 13.9 ms);
   - 2.60 GB PSS, 0.93 GB of graphics, 1.52 GB native heap; battery 41 degrees C;
   - the atlas could not hold the view at 4x or 2x ("the atlas cannot hold the view at zoom 8.4: scale 1"), so the sprites are the game's 1x there.
-- **Seen, to fix or judge:** the terrain at the table's right edge is blurred on both maps (flat minimap colour: the sprites seem to end before the table does); cards at the far edge stand a little over the shelf's front.
+- **Seen, to fix or judge:**
+  - **HD is lost on a full table.** The first scenario revealed (60 x 38 tiles in view, 321 animations, 6087 frames) fills 12 of the 32 pages at 1x, so 2x would need 48: the view falls to 1x ("the atlas cannot hold the view at zoom 2.4: scale 1"). A tile covers about 46 of the headset's pixels from the chair, so 2x would show. The atlas loads whole animations; loading only the frames the view uses would bring 2x back. Not done.
+  - **The blur at the screenshots' right edge is not the map:** all 321 animations are loaded there (`sprites_check`), and it is at the picture's edge on both maps whatever lies there. Probably the headset's lower resolution at the edge of the eye's view. To confirm by a person.
+  - Tall cards at the far edge stand over the shelf's front and can cover the resource bar's lower edge.
 - **One button back to 2D:** the view switch plaque, the right stick click and the wrist button ([`VISUALS.md`](VISUALS.md)).
 - **Left:** a whole scenario played by a person, and the comfort check.
 

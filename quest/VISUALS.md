@@ -122,8 +122,7 @@ from about 9.9 ms to about 9.1 ms.
 - `shortcut:` the hero is brought near the player only along the table's depth. At the map's left or right edge the
   view stops at the edge, so the hero stands up to 0.75 m to the side. The levels lie side by side in the map image,
   so passing that edge would show the other level; upgrade with a level mask in the shaders if it hinders play.
-- In `07-quest-seat-revealed.jpg` the terrain at the table's right edge is blurred: probably the flat minimap colour where the
-  game's tile view ends. To check in 4e.
+- In `07-quest-seat-revealed.jpg` the right edge is blurred. It is not the map: see [`PHASE4.md`](PHASE4.md), 4f results.
 - The look review, the comfort check and the ray on small tiles need a person in the headset.
 - `shortcut:` the map's sprites and the paper are unshaded. They do not take the candle's colour; only the paper has a
   painted falloff.
