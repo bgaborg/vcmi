@@ -264,7 +264,7 @@ Each one is tested on the Quest, reviewed, and recorded here with its numbers be
 - Resources and the date at the table edge; the hero and town lists (movement, mana) with selection through the bridge; the end turn button as the hourglass.
 - **Exit:** the 2D side panel is not needed for a whole turn.
 
-#### 4d results (2026-11-11, built and tested on the PC; the headset test waits)
+#### 4d results (2026-11-11 on the PC, 2026-11-12 on the headset: done)
 
 - **Bridge (version 10):** `panel` publishes, each tick, what the 2D side panel shows:
   - the resources and the date, in `CResDataBar::buildDateString`'s words;
@@ -279,8 +279,19 @@ Each one is tested on the Quest, reviewed, and recorded here with its numbers be
 
   The ray hovers an entry. The trigger acts on it, and never reaches the map behind the panel.
 - **Checked on the PC:** the headless test `tests/table_panel_test.gd` covers the layout, the ray from the front and the back, and the selection kept over new data. `render-room.sh sprites` shows the panel on the table (`sprites-panel`). A corner flag that covered the button moved beside it. The APK builds.
+- **On the headset (2026-11-12, `quest/tools/xr-panel.sh`, the first scenario, a simulated ray from the chair):** a whole turn without the 2D side panel, which is the exit:
+  - the town's row selects the town, the hero's row the hero (`selected` in the bridge stats);
+  - a second click on the selected hero opens its window on the screen, and B closes it;
+  - two clicks on a tile walk the hero (`move_sequence` rises);
+  - the hourglass sends End turn; the game asks on the screen when a hero can still move; after Enter the next day starts and the bar shows "Day: 2".
+
+  Screenshots of the run: `quest/out/panel-20261112-123021`.
+- **Seen in that run, for the look review by a person:**
+  - Closing a town's window selects the hero again, as in 2D. A click on the hero's row then opens the hero, not selects it.
+  - The hero and town names on the board are small from the chair, 1.5 m away.
+  - The hourglass stands at the table's near right corner, about 65 degrees right of where the seated player looks. The head must turn to end the turn.
+  - Dialogs show on the screen above the shelf; the player looks up about 30 degrees.
 - **Not checked yet / left:**
-  - The headset test is still to do: hover, select, open, end turn, and a whole turn without the 2D side panel. That last one is the exit.
   - Heroes and towns show their names only. The portraits are BMP images in the game's archives, which the decoder cannot read yet.
   - `shortcut:` heroes and towns past the 8th are not shown. 2D scrolls its lists; add paging if a map needs more.
 
@@ -318,7 +329,10 @@ Each one is tested on the Quest, reviewed, and recorded here with its numbers be
   - **Memory, within the budget of `DATA_BRIDGE.md` (sprite atlases under 256 MB of textures):** 32 pages of 1024² RGBA8 plus R8 masks, with mipmaps: 213 MB on the GPU (was 107 MB), and the pages' CPU copies 160 MB (was 80 MB), about +190 MB in all. On the heaviest map the game peaked at 3.5 GB PSS (milestone 0); with this, about 3.7 GB, under half of the Quest 3's 8 GB, as the plan asks. xBRZ's buffered mode (a 64 MB table for the process's life) is not used: the unbuffered one, about 30 % slower, on the workers.
   - **Scale per view:** the atlas holds a fixed number of texels, so the scale follows the view: 4x, halved when the view does not fit (instead of markers), doubled again when zoomed in to a quarter of the view that overflowed. The first scenario's saved view needs 6 M texels at 1x, 24 M at 2x and 97 M at 4x of the 33 M: 2x there, 4x zoomed in to about a third of it.
   - **Checked on the PC:** the headset's saved atlas upscaled with the same filter (`render-room.sh sprites hd`, made by a scratch tool from `sprites.bin`): `out/room-preview/hd-compare-1x-2x-4x.png`, `hd-compare-macro.png`. The APK builds.
-  - **Not checked yet:** on the headset, the time to fill a view at 4x (xBRZ on three workers) and the real memory.
+  - **On the headset (2026-11-12, the first scenario, the map revealed):**
+    - **Time:** `atlas-view 0 0 60` (60 x 60 tiles at 4x, more than the table shows) filled all 32 pages in 2.3 s on the workers (5.3 s of decoding and xBRZ in all, 0.24 s of mipmaps); the largest upload in one frame took 3.4 ms. 109 of its 434 animations fit at 4x, so the table falls to 2x for such a view, as planned.
+    - **Memory:** 2.35 GB PSS and 0.94 GB of graphics with the table full of cards ([`VISUALS.md`](VISUALS.md#5-results)).
+    - Not measured: the heaviest map. Milestone 4f does that.
 - **Seated:** the lord's chair stands at the near edge. Tabletop mode moves the player there (`main.gd _seat`: turned and moved along the floor only, so the real floor stays the floor) and back on leaving. The game screen moves before the chair while seated, so dialogs and battles stay in front. A recenter while seated places the room from the real head, then seats again. The lightmap is baked again for the chair.
 - **Left in 4e:** hero flags on moving heroes, boats' flags, teleports, embarking and fades, and the look review in the headset.
 
