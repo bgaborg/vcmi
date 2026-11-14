@@ -19,13 +19,14 @@ const KEYS := [
 	["Quick save (F8)", 138], ["Quick load (F9)", 139],
 	["Table / screen", -1], ["Next hero (H)", 36],
 ]
-## the first page while a battle is on (set_battle): the battle's own keys
+## the first page while a battle is on (set_battle): the battle's own keys. V is the stack on the hex the ray last
+## pointed at on the table; a click on the table ends auto-combat
 const BATTLE_KEYS := [
 	["Wait (W)", 51], ["Defend (D)", 32],
 	["Spell book (C)", 31], ["Stack info (I)", 37],
-	["Auto-combat (A)", 29], ["End auto (Q)", 45],
+	["Auto-combat (A)", 29], ["End tactics (Enter)", 66],
 	["Retreat (R)", 46], ["Surrender (S)", 47],
-	["Table / screen", -1], ["Quick spells (T)", 48],
+	["Table / screen", -1], ["Pointed stack (V)", 50],
 ]
 ## label and the setting's name: its text comes in `values`, its buttons' action is [name, -1 or 1]
 const SETTINGS := [
