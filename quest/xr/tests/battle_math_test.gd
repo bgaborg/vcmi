@@ -46,6 +46,17 @@ func _initialize() -> void:
 	field.set_stacks([{"hex": hex, "side": 1, "count": 11}])
 	_expect("the cards follow the stacks", field._cards.get_child_count(), 1)
 
+	# the game's battle (VcmiData.battle): the living stacks' cards, the reach and the active stack's hex
+	var reach := PackedByteArray()
+	reach.resize(187)
+	reach[40] = 1
+	field.set_battle({"reach": reach, "stacks": [{"hex": 39, "alive": true, "active": true, "count": 5},
+			{"hex": 50, "alive": false, "count": 0}, {"hex": 60, "alive": true, "side": 1, "count": 9}]})
+	_expect("the living stacks have cards", field._cards.get_child_count(), 2)
+	_expect("reach", field.states[40], field.State.REACH)
+	_expect("the active stack's hex", field.states[39], field.State.ACTIVE)
+	_expect("other hexes are bare", field.states[41], field.State.NONE)
+
 	print("battle_math_test: ", "PASS" if failures == 0 else "FAIL (%d)" % failures)
 	quit(1 if failures else 0)
 

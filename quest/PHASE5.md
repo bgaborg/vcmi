@@ -2,7 +2,7 @@
 
 The battle played on the war table, as the adventure map is in [phase 4](PHASE4.md). Look and layout: [`VISUALS.md`, section 6](VISUALS.md#6-the-battle-diorama-phase-5). Data path: [`DATA_BRIDGE.md`](DATA_BRIDGE.md) (milestone 4, battle).
 
-As of 2026-11-14: milestone 5a is built and checked on the PC. Nothing of phase 5 has run on the headset.
+As of 2026-11-14: milestone 5a is built and checked on the PC; 5b is written and builds for Android. Nothing of phase 5 has run on the headset.
 
 ## 1. What exists
 
@@ -12,6 +12,14 @@ As of 2026-11-14: milestone 5a is built and checked on the PC. Nothing of phase 
   - `xr/battle_field.gd`: one quad over the whole page. Its shader draws the paper (or the battlefield's picture), the hexes as inked lines and each hex's state as a wash of colour (reachable, active, hovered, target) from a 17 x 11 texture: one draw call, no texture per hex. A marker card stands for each stack, in its side's colour with its count; a two-hex stack's card is twice as wide.
   - `main.gd`: the test command `battle 1` shows a sample battle on the table instead of the map; the ray lights the hex under it, and a trigger press logs it. `battle 0` brings the map back.
   - PC: `quest/tools/render-room.sh sprites battle` (`out/room-preview/sprites-battle*.png`), `xr/tests/battle_math_test.gd`.
+
+- **5b (written 2026-11-14, builds, never run):**
+  - Bridge (`VcmiBridgeApi.battle`, `hexInput`; version 12): each lifecycle tick (100 ms) publishes the battle the game shows: the stacks (unit id, hex, side, owner, count, two-hex, alive, active, creature animation name) and, in the local player's turn, the hexes the active stack can move to. Polled, not from events: the table shows what the 2D battle holds after its animations, up to a tick later.
+  - Hex input: the latest hover and the clicks run in the tick as `BattleActionsController::onHexHovered` and `onHexLeftClicked`, only while the battle window is the top window and its intro is over. A click ends auto-combat first, as in 2D.
+  - Godot: in tabletop mode the field replaces the map while a battle is shown (`main.gd`, `battle_field.set_battle`). The game screen stays before the chair with the 2D battle. A ray that misses the screen is the table's: it lights the hex and sends the hover; the trigger sends the click.
+  - **Known limit, `shortcut:`** a melee attack comes from a side the player did not choose. The 2D battle picks the hex to attack from as the legal one nearest the mouse (`BattleFieldController::selectNearestDirection`, `currentAttackOriginPoint`, private); the table sends no mouse position, so it is the one nearest where the ray last crossed the 2D screen. The attack itself is legal. To fix: move the game's mouse to the hex before the click (no upstream change), or a small public setter upstream.
+  - **To check first on the headset:** a move, a shot and a melee attack from the table.
+  - Not done in 5b: the dead (they leave the table), the battlefield's picture (an image, not an animation: the bridge decodes animations only), the map's markers and path under the field (to see on the headset), spell targeting from the table (cast from the 2D screen).
 
 ## 2. Facts from the code (read 2026-11-14; check again before 5b)
 

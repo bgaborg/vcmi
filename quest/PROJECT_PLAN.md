@@ -48,7 +48,7 @@ Not closed yet:
    4. **Needs a person in the headset:** the look review, the comfort check, and ray jitter against the tile size (check 3).
 2. **Milestone 4, battle**, and **phase 5, battle diorama** ([`PHASE5.md`](PHASE5.md)). The diorama uses the map's book, paper and cards ([`VISUALS.md`](VISUALS.md#6-the-battle-diorama-phase-5)).
    1. **5a, the field on the table:** done on the PC (hexes, states, marker cards, picking; test command `battle 1`).
-   2. **5b, the battle's state and input** through the bridge: next.
+   2. **5b, the battle's state and input** through the bridge: written and built, never run. Next: its first run on the headset, then 5c.
 
 Each milestone records its numbers in `DATA_BRIDGE.md` and is optimised before the next one starts.
 

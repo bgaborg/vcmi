@@ -21,6 +21,10 @@
 #include "../../client/PlayerLocalState.h"
 #include "../../client/adventureMap/AdventureMapInterface.h"
 #include "../../client/adventureMap/AdventureMapShortcuts.h"
+#include "../../client/battle/BattleActionsController.h"
+#include "../../client/battle/BattleInterface.h"
+#include "../../client/battle/BattleStacksController.h"
+#include "../../client/battle/BattleWindow.h"
 #include "../../client/gui/CIntObject.h"
 #include "../../client/gui/CursorHandler.h"
 #include "../../client/gui/Shortcut.h"
@@ -29,7 +33,9 @@
 #include "../../client/mapView/mapHandler.h"
 #include "../../client/replay/GameplayReplayer.h"
 #include "../../lib/CConfigHandler.h"
+#include "../../lib/CCreatureHandler.h"
 #include "../../lib/CPlayerState.h"
+#include "../../lib/CStack.h"
 #include "../../lib/CThreadHelper.h"
 #include "../../lib/GameLibrary.h"
 #include "../../lib/IGameSettings.h"
@@ -38,6 +44,7 @@
 #include "../../lib/StartInfo.h"
 #include "../../lib/TerrainHandler.h"
 #include "../../lib/UnlockGuard.h"
+#include "../../lib/battle/CPlayerBattleCallback.h"
 #include "../../lib/callback/CCallback.h"
 #include "../../lib/entities/faction/CTown.h"
 #include "../../lib/int3.h"
@@ -423,6 +430,80 @@ void publishPanel()
 	}
 }
 
+std::mutex battleMutex;
+VcmiBattle publishedBattle{};
+std::mutex hexMutex;
+std::optional<uint16_t> pendingHexHover;
+std::vector<uint16_t> pendingHexClicks;
+
+// game thread, interfaceMutex held, each tick: the battle the game shows, for the table (quest/PHASE5.md 5b), and the
+// hex inputs from the table, run as BattleFieldController::mouseMoved and activateHoveredHex run the mouse's
+void publishBattle()
+{
+	std::optional<uint16_t> hover;
+	std::vector<uint16_t> clicks;
+	{
+		std::lock_guard lock(hexMutex);
+		hover.swap(pendingHexHover);
+		clicks.swap(pendingHexClicks);
+	}
+	VcmiBattle next{};
+	const std::shared_ptr<BattleInterface> battle = CPlayerInterface::battleInt;
+	if(battle && battle->getBattle() && battle->stacksController && battle->actionsController)
+	{
+		// input only while the battle window is the top one: not under its result, a spell book or a question
+		if(battle->windowObject && ENGINE->windows().isTopWindow(battle->windowObject) && !battle->openingPlaying() && battle->curInt)
+		{
+			if(hover && *hover < VCMI_BATTLE_HEXES)
+				battle->actionsController->onHexHovered(BattleHex(*hover));
+			for(const uint16_t hex : clicks)
+			{
+				// the click before may have opened a window (a stack's info) in this same tick
+				if(hex >= VCMI_BATTLE_HEXES || !ENGINE->windows().isTopWindow(battle->windowObject))
+					continue;
+				// a click on the battlefield ends auto-combat first, as in 2D
+				if(battle->curInt->isAutoFightOn)
+					battle->curInt->isAutoFightOn = false;
+				else
+					battle->actionsController->onHexLeftClicked(BattleHex(hex));
+			}
+		}
+		next.shown = 1;
+		next.myTurn = battle->makingTurn() ? 1 : 0;
+		const CStack * active = battle->stacksController->getActiveStack();
+		for(const CStack * stack : battle->getBattle()->battleGetAllStacks(false))
+		{
+			if(next.stackCount == VCMI_BATTLE_STACKS)
+				break;
+			if(!stack || stack->isGhost() || !stack->getPosition().isValid())
+				continue;
+			VcmiBattleStack & out = next.stacks[next.stackCount++];
+			out.id = stack->unitId();
+			out.count = static_cast<uint32_t>(std::max(stack->getCount(), 0));
+			out.hex = static_cast<uint16_t>(stack->getPosition().toInt());
+			out.side = stack->unitSide() == BattleSide::DEFENDER ? 1 : 0;
+			out.owner = static_cast<uint8_t>(stack->unitOwner().getNum());
+			out.flags = (stack->doubleWide() ? VCMI_STACK_WIDE : 0) | (stack->alive() ? VCMI_STACK_ALIVE : 0) | (stack == active ? VCMI_STACK_ACTIVE : 0);
+			if(const CCreature * type = stack->unitType())
+			{
+				const std::string name = type->animDefName.getOriginalName();
+				std::memcpy(out.animation, name.data(), std::min(name.size(), sizeof(out.animation) - 1));
+			}
+		}
+		if(active && next.myTurn)
+			for(const BattleHex & hex : battle->getBattle()->battleGetAvailableHexes(active, true))
+				if(hex.isValid() && hex.toInt() < VCMI_BATTLE_HEXES)
+					next.reach[hex.toInt() / 8] |= static_cast<uint8_t>(1 << (hex.toInt() % 8));
+	}
+	std::lock_guard lock(battleMutex);
+	next.generation = publishedBattle.generation;
+	if(std::memcmp(&next, &publishedBattle, sizeof(next)) != 0 || next.generation == 0)
+	{
+		next.generation = publishedBattle.generation + 1 == 0 ? 1 : publishedBattle.generation + 1;
+		publishedBattle = next;
+	}
+}
+
 std::atomic<uint8_t> windowsAbove{0};
 std::atomic<uint32_t> inputsRun{0};
 std::atomic<uint32_t> inputsDropped{0};
@@ -718,6 +799,16 @@ void tick()
 			std::lock_guard panelLock(panelMutex);
 			publishedPanel = {};
 		}
+		{
+			// no battle outside a game; the generation goes on, so the table sees the change
+			std::lock_guard battleLock(battleMutex);
+			if(publishedBattle.shown)
+			{
+				const uint32_t generation = publishedBattle.generation + 1 == 0 ? 1 : publishedBattle.generation + 1;
+				publishedBattle = {};
+				publishedBattle.generation = generation;
+			}
+		}
 		std::lock_guard lock(pathMutex);
 		if(!publishedPath.empty())
 		{
@@ -731,6 +822,7 @@ void tick()
 	runTileInputs();
 	publishSelection();
 	publishPanel();
+	publishBattle();
 	const int3 size = GAME->interface() && GAME->interface()->cb ? GAME->interface()->cb->getMapSize() : int3();
 	mapSize = static_cast<uint32_t>(size.x) | static_cast<uint32_t>(size.y) << 12 | static_cast<uint32_t>(size.z) << 24;
 	bool listTaken = false;
@@ -887,6 +979,28 @@ void copyPanel(VcmiPanel * out)
 		return;
 	}
 	*out = publishedPanel;
+}
+
+void copyBattle(VcmiBattle * out)
+{
+	std::unique_lock lock(battleMutex, std::try_to_lock);
+	if(!out)
+		return;
+	if(!lock)
+	{
+		out->generation = 0;
+		return;
+	}
+	*out = publishedBattle;
+}
+
+void hexInput(uint16_t hex, uint8_t kind)
+{
+	std::lock_guard lock(hexMutex);
+	if(kind == VCMI_TILE_HOVER)
+		pendingHexHover = hex;
+	else if(kind == VCMI_TILE_CLICK && pendingHexClicks.size() < 16)
+		pendingHexClicks.push_back(hex);
 }
 
 void selectObject(uint32_t id, uint8_t open)
@@ -1084,26 +1198,12 @@ uint32_t decodeFrames(const char * name, VcmiAnimationData * out)
 static_assert(sizeof(VcmiFrame) == 36, "VcmiFrame is part of the bridge ABI");
 static_assert(sizeof(VcmiMove) == 20, "VcmiMove is part of the bridge ABI");
 static_assert(sizeof(VcmiObject) == 20, "VcmiObject is part of the bridge ABI");
+static_assert(sizeof(VcmiBattleStack) == 48, "VcmiBattleStack is part of the bridge ABI");
 static_assert(sizeof(VcmiPathNode) == 8, "VcmiPathNode is part of the bridge ABI");
 static_assert(sizeof(VcmiPanelHero) == 64, "VcmiPanelHero is part of the bridge ABI");
 static_assert(sizeof(VcmiPanelTown) == 56, "VcmiPanelTown is part of the bridge ABI");
 
 extern "C" __attribute__((visibility("default"))) const VcmiBridgeApi vcmi_bridge_api = {
-	VCMI_BRIDGE_VERSION,
-	start,
-	stats,
-	copyTiles,
-	copyFog,
-	copyObjects,
-	copyObjectChanges,
-	copyAnimation,
-	decodeFrames,
-	setTabletop,
-	copyMove,
-	confirmMove,
-	tileInput,
-	copyPath,
-	tileAnimation,
-	copyPanel,
-	selectObject,
+	VCMI_BRIDGE_VERSION, start,     stats,    copyTiles,     copyFog,   copyObjects,  copyObjectChanges, copyAnimation, decodeFrames, setTabletop, copyMove,
+	confirmMove,         tileInput, copyPath, tileAnimation, copyPanel, selectObject, copyBattle,        hexInput,
 };

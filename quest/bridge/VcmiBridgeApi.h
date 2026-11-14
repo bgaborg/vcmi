@@ -10,7 +10,7 @@
 #include <stdint.h>
 
 // raise on any change to the structs below; the extension refuses a table with another version
-#define VCMI_BRIDGE_VERSION 11
+#define VCMI_BRIDGE_VERSION 12
 
 typedef struct VcmiBridgeStats
 {
@@ -88,6 +88,36 @@ typedef struct VcmiPanel
 	VcmiPanelHero heroes[VCMI_PANEL_HEROES];
 	VcmiPanelTown towns[VCMI_PANEL_TOWNS];
 } VcmiPanel;
+
+// one stack of the battle the game shows (quest/PHASE5.md 5b), as the 2D battle has it after its animations
+typedef struct VcmiBattleStack
+{
+	uint32_t id; // unit id
+	uint32_t count; // creatures in it
+	uint16_t hex; // of its front half: column + 17 * row, as BattleHex
+	uint8_t side; // 0 attacker, 1 defender
+	uint8_t owner; // player 0-7, 255 neutral
+	uint8_t flags; // VCMI_STACK_*
+	uint8_t pad[3];
+	char animation[32]; // the creature's battle animation (an AnimationPath), cut to fit
+} VcmiBattleStack; // 48 bytes
+#define VCMI_STACK_WIDE 1 // two hexes: the other one is behind it, towards its side's edge
+#define VCMI_STACK_ALIVE 2
+#define VCMI_STACK_ACTIVE 4 // the stack whose turn it is
+
+#define VCMI_BATTLE_STACKS 64
+#define VCMI_BATTLE_HEXES 187
+
+typedef struct VcmiBattle
+{
+	uint32_t generation; // raised when anything below changes; 0: the game is writing, try next frame
+	uint8_t shown; // 1 while the game shows a battle
+	uint8_t myTurn; // the local player chooses the active stack's action
+	uint8_t stackCount;
+	uint8_t pad;
+	uint8_t reach[24]; // bit `hex`: the active stack can move there (the local player's turn only)
+	VcmiBattleStack stacks[VCMI_BATTLE_STACKS];
+} VcmiBattle;
 
 // a hero step the tabletop shows: the game waits until Godot confirms it (confirmMove) or durationMs + 200 ms pass. The
 // object's record already holds the destination. Positions are anchor tiles, as VcmiObject's
@@ -242,4 +272,10 @@ typedef struct VcmiBridgeApi
 	// its hero or town window instead. Run by the next lifecycle tick, dropped while a window is over the tabletop.
 	// Any thread
 	void (*selectObject)(uint32_t id, uint8_t open);
+	// copies the battle the game shows (VcmiBattle); never waits (generation 0 while the game writes). Any thread
+	void (*battle)(VcmiBattle * out);
+	// input on a battlefield hex from the tabletop (VCMI_TILE_HOVER or VCMI_TILE_CLICK), run by the next lifecycle
+	// tick as the 2D battlefield's own hover and click; only the latest hover is kept. Dropped outside a battle or
+	// while a window is over the battle. Any thread
+	void (*hexInput)(uint16_t hex, uint8_t kind);
 } VcmiBridgeApi;

@@ -96,8 +96,10 @@ var grab_view := {} ## the view when the current drag or two-hand zoom began: ce
 var followed_move := 0 ## the sequence of the last hero step the view followed
 ## the side panel at the table's near edge (quest/PHASE4.md 4d): resources, date, heroes, towns, end turn
 var table_panel: Node3D
-## the battle on the table (quest/PHASE5.md); so far only the test command `battle` shows it, with sample armies
+## the battle on the table (quest/PHASE5.md): shown in tabletop mode instead of the map while the game shows a battle
 var battle_field: Node3D = BattleField.new()
+var battle_shown := false ## the game shows a battle (VcmiData.battle)
+var battle_sample := false ## the test command `battle`: sample armies on the table
 var table_icons_tried := false ## SMALRES decoded once, found or not
 var pop_cards := true ## the next sprites shown pop their cards up (room.show_sprites): the table came near
 var shown_selection := Vector3i(-2, -2, -2) ## the selected hero's tile the table last followed and marked
@@ -520,6 +522,13 @@ func _process(delta: float) -> void:
 		if changed & 4 and tracked != null and not sprites_held:
 			_update_sprite_view((origin.transform * (tracked as Transform3D)).origin)
 		_update_table(changed)
+		var battle: Dictionary = vcmi_data.battle()
+		if not battle.is_empty():
+			battle_shown = battle.get("shown", false)
+			if battle_shown:
+				battle_field.set_card_lean(card_lean)
+				battle_field.set_battle(battle)
+		battle_field.visible = tabletop and (battle_shown or battle_sample)
 		if changed & 4 == 0 and not layer.visible: # out of the game (main menu, loading): always the screen
 			layer.visible = true
 
@@ -539,7 +548,8 @@ func _process(delta: float) -> void:
 		pointer_dot.global_position = on_switch
 		table_panel.set_hover(-1)
 		return
-	if tabletop and not layer.visible:
+	# a battle is also on the game screen, over the table: the ray is the table's where it misses the screen
+	if tabletop and (not layer.visible or (battle_field.visible and _pointer_hit(active_hand) == NO_HIT)):
 		_table_pointer()
 		return
 	table_panel.set_hover(-1)
@@ -627,6 +637,8 @@ func _table_pointer() -> void:
 	var hit: Vector3 = room.table_hit(ray[0], ray[1]) if not ray.is_empty() else Vector3.INF
 	if battle_field.visible: # the battlefield covers the map: the hex under the ray lights up
 		var hex: int = battle_field.ray_hex(ray[0], ray[1]) if hit != Vector3.INF else -1
+		if battle_shown and hex >= 0 and hex != battle_field.hover:
+			vcmi_data.hex_input(hex, false)
 		battle_field.set_hover(hex)
 		pointer_dot.visible = hex >= 0
 		if hex >= 0:
@@ -947,7 +959,9 @@ func _press(button: int, hand: int, pressed: bool) -> void:
 			_set_tabletop(not tabletop)
 			_pulse(hand, 0.25)
 		return
-	if tabletop and (not layer.visible or (button == BUTTON_RIGHT and not pressed and grabs.has(hand))):
+	var on_battle := (pressed and button == BUTTON_LEFT and battle_field.visible and layer.visible
+			and _pointer_hit(hand) == NO_HIT) # as _process: the trigger is the table's where the ray misses the screen
+	if tabletop and (not layer.visible or on_battle or (button == BUTTON_RIGHT and not pressed and grabs.has(hand))):
 		_table_press(button, hand, pressed)
 		return
 	if pressed:
@@ -991,8 +1005,14 @@ func _table_press(button: int, hand: int, pressed: bool) -> void:
 	active_hand = hand
 	if await _table_panel_press(hand):
 		return
-	if battle_field.visible: # no battle input yet (quest/PHASE5.md 5b): the hex is only logged
-		print("VCMI XR: battle hex ", battle_field.hover)
+	if battle_field.visible:
+		var ray := _aim_ray(hand)
+		var hex: int = battle_field.ray_hex(ray[0], ray[1]) if not ray.is_empty() else -1
+		print("VCMI XR: battle hex ", hex)
+		if battle_shown and hex >= 0:
+			vcmi_data.hex_input(hex, false) # the game hovers before it clicks, as in 2D
+			vcmi_data.hex_input(hex, true)
+			_pulse(hand, 0.5)
 		return
 	var tile := _table_tile(hand)
 	if tile.x < 0:
@@ -1322,8 +1342,8 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 			_set_tabletop(a > 0.0)
 		# 1: a sample battle on the table instead of the map (battle_field.gd), for its look and the hexes' picking
 		"battle":
-			battle_field.visible = a > 0.0
-			if battle_field.visible:
+			battle_sample = a > 0.0
+			if battle_sample:
 				battle_field.set_card_lean(card_lean)
 				battle_field.show_sample()
 		# a, b the tile of level 0, c the kind (0 hover, 1 click, 2 popup, 3 popup end): through the bridge (PHASE4.md)

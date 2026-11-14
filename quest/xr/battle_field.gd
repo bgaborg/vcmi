@@ -120,6 +120,24 @@ func set_hover(hex: int) -> void:
 		set_states(states)
 
 
+## The game's battle (VcmiData.battle): a card for each living stack, the active stack's hex and the hexes it reaches
+func set_battle(data: Dictionary) -> void:
+	var shown := PackedByteArray(data.get("reach", PackedByteArray()))
+	shown.resize(BattleMath.COLUMNS * BattleMath.ROWS)
+	for hex in shown.size():
+		shown[hex] = State.REACH if shown[hex] else State.NONE
+	var living := []
+	for stack: Dictionary in data.get("stacks", []):
+		if not stack.get("alive", false): # shortcut: the dead leave the table; they lie flat with the creatures (5c)
+			continue
+		living.append(stack)
+		var hex: int = stack.get("hex", -1)
+		if stack.get("active", false) and hex >= 0 and hex < shown.size():
+			shown[hex] = State.ACTIVE
+	set_stacks(living)
+	set_states(shown)
+
+
 ## Two armies, the active stack and the hexes it reaches: for the PC preview and the test command `battle`
 func show_sample() -> void:
 	var stacks := []

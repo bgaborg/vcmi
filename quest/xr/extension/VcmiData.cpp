@@ -91,6 +91,8 @@ protected:
 		ClassDB::bind_method(D_METHOD("move_target"), &VcmiData::move_target);
 		ClassDB::bind_method(D_METHOD("panel"), &VcmiData::panel);
 		ClassDB::bind_method(D_METHOD("select_object", "id", "open"), &VcmiData::select_object);
+		ClassDB::bind_method(D_METHOD("battle"), &VcmiData::battle);
+		ClassDB::bind_method(D_METHOD("hex_input", "hex", "click"), &VcmiData::hex_input);
 	}
 
 	uint32_t seenTiles = 0;
@@ -165,6 +167,7 @@ protected:
 	int bucketColumns = 0, bucketRows = 0;
 	VcmiBridgeStats latest{}; // of the last update
 	uint32_t seenPanel = 0; // generation of the panel data panel() last returned
+	uint32_t seenBattle = 0; // and of battle()
 	uint32_t seenPath = 0;
 	std::vector<VcmiPathNode> path; // the selected hero's, from its first step to the end
 	VcmiMove move{}; // the last hero step the game asked the tabletop to show
@@ -1331,6 +1334,54 @@ public:
 		}
 		result["towns"] = towns;
 		return result;
+	}
+
+	/// the battle the game shows (VcmiBridgeApi.battle), when it changed since the last call, else an empty
+	/// Dictionary: {shown, my_turn, reach: PackedByteArray (1 for each hex the active stack can move to),
+	/// stacks: [{id, hex, side (0 attacker), owner, count, wide, alive, active, animation}]}
+	Dictionary battle()
+	{
+		Dictionary result;
+		if(!api)
+			return result;
+		// 3.1 kB: copied whole each call, which is once a frame
+		auto data = std::make_unique<VcmiBattle>();
+		api->battle(data.get());
+		if(data->generation == 0 || data->generation == seenBattle)
+			return result;
+		seenBattle = data->generation;
+		result["shown"] = data->shown != 0;
+		result["my_turn"] = data->myTurn != 0;
+		PackedByteArray reach;
+		reach.resize(VCMI_BATTLE_HEXES);
+		for(int hex = 0; hex < VCMI_BATTLE_HEXES; hex++)
+			reach[hex] = (data->reach[hex / 8] >> (hex % 8)) & 1;
+		result["reach"] = reach;
+		Array stacks;
+		for(int i = 0; i < std::min<int>(data->stackCount, VCMI_BATTLE_STACKS); i++)
+		{
+			const VcmiBattleStack & s = data->stacks[i];
+			Dictionary stack;
+			stack["id"] = s.id;
+			stack["hex"] = s.hex;
+			stack["side"] = s.side;
+			stack["owner"] = s.owner;
+			stack["count"] = s.count;
+			stack["wide"] = (s.flags & VCMI_STACK_WIDE) != 0;
+			stack["alive"] = (s.flags & VCMI_STACK_ALIVE) != 0;
+			stack["active"] = (s.flags & VCMI_STACK_ACTIVE) != 0;
+			stack["animation"] = String::utf8(s.animation, strnlen(s.animation, sizeof(s.animation)));
+			stacks.push_back(stack);
+		}
+		result["stacks"] = stacks;
+		return result;
+	}
+
+	/// the table's ray on battlefield hex `hex`: a hover, or with `click` a click, as the 2D battlefield's
+	void hex_input(int64_t hex, bool click)
+	{
+		if(api && hex >= 0 && hex < VCMI_BATTLE_HEXES)
+			api->hexInput(uint16_t(hex), click ? VCMI_TILE_CLICK : VCMI_TILE_HOVER);
 	}
 
 	/// selects the local player's hero or town `id` as the 2D lists do; `open`: its hero or town window instead
