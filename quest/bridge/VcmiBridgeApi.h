@@ -10,7 +10,7 @@
 #include <stdint.h>
 
 // raise on any change to the structs below; the extension refuses a table with another version
-#define VCMI_BRIDGE_VERSION 15
+#define VCMI_BRIDGE_VERSION 16
 
 typedef struct VcmiBridgeStats
 {
@@ -106,6 +106,10 @@ typedef struct VcmiBattleStack
 #define VCMI_STACK_ACTIVE 4 // the stack the local player chooses an action for
 #define VCMI_STACK_TURN 8 // the stack whose turn it is, any player's (battleActiveUnit)
 
+#define VCMI_ACTION_ATTACK 1
+#define VCMI_ACTION_SHOT 2
+#define VCMI_ACTION_SPELL 3
+
 #define VCMI_BATTLE_STACKS 64
 #define VCMI_BATTLE_HEXES 187
 
@@ -119,6 +123,13 @@ typedef struct VcmiBattle
 	uint8_t reach[24]; // bit `hex`: the active stack can move there (the local player's turn only)
 	uint8_t blocked[24]; // bit `hex`: an obstacle, a wall or the gate, or not part of this battlefield
 	char picture[48]; // the battlefield's background, a name for imageFile; empty when unknown
+	// the last attack or spell of this battle, from the game's battle events; actionSequence 0: none yet
+	uint32_t actionSequence; // raised on each
+	uint32_t actionStack; // the attacking or casting stack's unit id; VCMI_NONE when a hero cast the spell
+	uint32_t actionTarget; // the first hurt or affected stack's unit id, VCMI_NONE when none
+	uint16_t actionHex; // a spell's target hex, VCMI_BATTLE_HEXES and more when it has none
+	uint8_t actionKind; // VCMI_ACTION_*
+	uint8_t pad2;
 	VcmiBattleStack stacks[VCMI_BATTLE_STACKS];
 } VcmiBattle;
 

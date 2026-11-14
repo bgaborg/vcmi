@@ -69,7 +69,9 @@ void fragment() {
 
 var states := PackedByteArray() ## BattleMath.COLUMNS * ROWS of State
 var hover := BattleMath.NO_HEX ## the hex under the player's ray (set_hover): shown as State.HOVER over its own state
+var flashes := {} ## hex: seconds left of a spell's flash (State.TARGET over its own state)
 var cards: Node3D = BattleCards.new() ## the stacks
+var _spell := 0 ## the sequence of the last spell event flashed
 var _field := MeshInstance3D.new()
 var _states := ImageTexture.new()
 
@@ -137,6 +139,9 @@ func set_states(new_states: PackedByteArray) -> void:
 	states = new_states.duplicate()
 	states.resize(BattleMath.COLUMNS * BattleMath.ROWS)
 	var shown := states.duplicate()
+	for hex: int in flashes:
+		if hex >= 0 and hex < shown.size():
+			shown[hex] = State.TARGET
 	if hover >= 0 and hover < shown.size():
 		shown[hover] = State.HOVER
 	var image := Image.create_from_data(BattleMath.COLUMNS, BattleMath.ROWS, false, Image.FORMAT_R8, shown)
@@ -165,8 +170,34 @@ func set_battle(data: Dictionary) -> void:
 		var hex: int = stack.get("hex", -1)
 		if stack.get("active", false) and hex >= 0 and hex < shown.size():
 			shown[hex] = State.ACTIVE
+	cards.set_action(data) # first: with an event, set_stacks guesses no attack
 	cards.set_stacks(data.get("stacks", []))
+	# a spell: its target hex and the first stack it touched flash
+	if data.get("action_kind", 0) == 3 and data.get("action", 0) != _spell:
+		_spell = data.get("action", 0)
+		flashes[data.get("action_hex", -1)] = 0.7
+		for stack: Dictionary in data.get("stacks", []):
+			if stack.get("id", -2) == data.get("action_target", -1):
+				flashes[stack.get("hex", -1)] = 0.7
 	set_states(shown)
+
+
+## The battle is over: nothing of it is kept for the next one, whose stacks and events count from 0 again
+func clear() -> void:
+	cards.clear()
+	flashes.clear()
+	_spell = 0
+
+
+func _process(delta: float) -> void:
+	if flashes.is_empty():
+		return
+	for hex: int in flashes.keys():
+		flashes[hex] -= delta
+		if flashes[hex] <= 0.0:
+			flashes.erase(hex)
+	if flashes.is_empty():
+		set_states(states)
 
 
 ## Two armies, the active stack and the hexes it reaches: for the PC preview and the test command `battle`

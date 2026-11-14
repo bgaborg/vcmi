@@ -16,6 +16,8 @@
 #include "SpriteDecode.cpp"
 
 #include "../../client/CPlayerInterface.h"
+#include "../../client/CServerHandler.h"
+#include "../../client/Client.h"
 #include "../../client/GameEngine.h"
 #include "../../client/GameInstance.h"
 #include "../../client/PlayerLocalState.h"
@@ -51,6 +53,7 @@
 #include "../../lib/battle/AccessibilityInfo.h"
 #include "../../lib/battle/CPlayerBattleCallback.h"
 #include "../../lib/callback/CCallback.h"
+#include "../../lib/callback/IBattleEventsReceiver.h"
 #include "../../lib/entities/faction/CTown.h"
 #include "../../lib/int3.h"
 #include "../../lib/mapObjects/CGHeroInstance.h"
@@ -58,6 +61,7 @@
 #include "../../lib/mapObjects/MiscObjects.h"
 #include "../../lib/mapping/CMap.h"
 #include "../../lib/mapping/TerrainTile.h"
+#include "../../lib/networkPacks/PacksForClientBattle.h"
 #include "../../lib/pathfinder/CGPathNode.h"
 #include "../../lib/texts/CGeneralTextHandler.h"
 #include "../../lib/texts/MetaString.h"
@@ -437,6 +441,69 @@ void publishPanel()
 
 std::mutex battleMutex;
 VcmiBattle publishedBattle{};
+
+// the last attack or spell, for the table's animations (quest/PHASE5.md): written by the network thread
+struct BattleAction
+{
+	uint32_t sequence = 0;
+	uint32_t stack = VCMI_NONE;
+	uint32_t target = VCMI_NONE;
+	uint16_t hex = 0xffff;
+	uint8_t kind = 0;
+};
+std::mutex actionMutex;
+BattleAction lastAction;
+
+// The game gives battle events to extra receivers after the 2D battle interface (NetPacksClient.cpp
+// callOnlyThatBattleInterface). Only what the published state cannot tell is kept: who struck whom, and spells.
+class BattleEvents final : public IBattleEventsReceiver
+{
+public:
+	// battleStart itself goes to the 2D interface only (CClient::battleStarted)
+	void battleStartBefore(const BattleID &, const CCreatureSet *, const CCreatureSet *, int3, const CGHeroInstance *, const CGHeroInstance *) override
+	{
+		std::lock_guard lock(actionMutex);
+		lastAction = {};
+	}
+	void battleAttack(const BattleID &, const BattleAttack * attack) override
+	{
+		if(!attack)
+			return;
+		std::lock_guard lock(actionMutex);
+		lastAction.sequence++;
+		lastAction.kind = attack->shot() ? VCMI_ACTION_SHOT : VCMI_ACTION_ATTACK;
+		lastAction.stack = attack->stackAttacking;
+		lastAction.target = attack->bsa.empty() ? VCMI_NONE : attack->bsa.front().stackAttacked;
+		lastAction.hex = 0xffff;
+	}
+	void battleSpellCast(const BattleID &, const BattleSpellCast * cast) override
+	{
+		if(!cast)
+			return;
+		std::lock_guard lock(actionMutex);
+		lastAction.sequence++;
+		lastAction.kind = VCMI_ACTION_SPELL;
+		lastAction.stack = cast->casterStack >= 0 ? static_cast<uint32_t>(cast->casterStack) : VCMI_NONE;
+		lastAction.target = cast->affectedCres.empty() ? VCMI_NONE : cast->affectedCres.front();
+		lastAction.hex = cast->tile.isValid() ? static_cast<uint16_t>(cast->tile.toInt()) : 0xffff;
+	}
+};
+
+// game thread, each tick: the receiver is registered once for each client (a new one per game), for the local player.
+// shortcut: one colour; in hot-seat the other human's battles show without attack events (the table guesses then).
+// The client's list is read by the network thread without a lock: registered at a game's start, before any battle.
+const CClient * battleEventsClient = nullptr; // forgotten between games: the next client may get the same address
+
+void registerBattleEvents()
+{
+	const CClient *& registered = battleEventsClient;
+	static const std::shared_ptr<BattleEvents> events = std::make_shared<BattleEvents>();
+	CClient * client = GAME->server().client.get();
+	if(!client || client == registered || !GAME->interface())
+		return;
+	client->registerBattleInterface(events, GAME->interface()->playerID);
+	registered = client;
+}
 std::mutex hexMutex;
 std::optional<uint16_t> pendingHexHover;
 std::vector<uint16_t> pendingHexClicks;
@@ -549,6 +616,15 @@ void publishBattle()
 			for(const BattleHex & hex : state->battleGetAvailableHexes(active, true))
 				if(hex.isValid() && hex.toInt() < VCMI_BATTLE_HEXES)
 					next.reach[hex.toInt() / 8] |= static_cast<uint8_t>(1 << (hex.toInt() % 8));
+	}
+	if(next.shown)
+	{
+		std::lock_guard actionLock(actionMutex);
+		next.actionSequence = lastAction.sequence;
+		next.actionStack = lastAction.stack;
+		next.actionTarget = lastAction.target;
+		next.actionHex = lastAction.hex;
+		next.actionKind = lastAction.kind;
 	}
 	std::lock_guard lock(battleMutex);
 	next.generation = publishedBattle.generation;
@@ -848,6 +924,7 @@ void tick()
 		inGame = false;
 		mapSize = 0;
 		tabletopShown = false;
+		battleEventsClient = nullptr;
 		selected = VCMI_NONE;
 		windowsAbove = 0;
 		{
@@ -877,6 +954,7 @@ void tick()
 	runTileInputs();
 	publishSelection();
 	publishPanel();
+	registerBattleEvents();
 	publishBattle();
 	const int3 size = GAME->interface() && GAME->interface()->cb ? GAME->interface()->cb->getMapSize() : int3();
 	mapSize = static_cast<uint32_t>(size.x) | static_cast<uint32_t>(size.y) << 12 | static_cast<uint32_t>(size.z) << 24;

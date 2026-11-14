@@ -206,6 +206,7 @@ var _ribbon: MeshInstance3D
 var _book_shadow: MeshInstance3D ## the desk darkened around the book
 var _grain_texture: NoiseTexture2D ## made by _grain on first use
 var _tablet: MeshInstance3D ## the whole map beside the table
+var _shell_hidden: Array[Node3D] = [] ## what show_table_only hid
 
 
 ## Test command `gfx <feature> <0|1>` (main.gd): switches one costly part off or on, to measure its GPU time on the
@@ -459,6 +460,19 @@ func visible_uv() -> Rect2:
 ## minimap
 func add_table_panel(panel: Node3D) -> void:
 	_minimap.add_child(panel)
+
+
+## With `only`: of the room just the book with the map, its panels and the battle (all the minimap's children), for
+## the table in passthrough, where it lies on the player's real table, and in the black room. Else the whole room again
+func show_table_only(only: bool) -> void:
+	for node in _shell_hidden:
+		node.visible = true
+	_shell_hidden.clear()
+	if only:
+		for child in get_children():
+			if child != _minimap and child is Node3D and child.visible:
+				child.visible = false
+				_shell_hidden.append(child)
 
 
 ## Where the player's eyes are when seated in the lord's chair (main.gd, tabletop mode): world, looking at the map

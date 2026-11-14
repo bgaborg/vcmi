@@ -64,6 +64,11 @@ func _initialize() -> void:
 	_expect("zoom keeps the point under the hands", zoomed + (pivot - Vector2(0.5, 0.5)) / 8.0,
 			Vector2(0.3, 0.4) + (pivot - Vector2(0.5, 0.5)) / 4.0)
 
+	var turned := [TableMath.turned_over(Vector3.UP, Vector3.UP.rotated(Vector3.FORWARD, deg_to_rad(90.0))),
+			TableMath.turned_over(Vector3.UP, Vector3.UP.rotated(Vector3.FORWARD, deg_to_rad(150.0)))]
+	if turned != [false, true]:
+		failures += 1
+		print("table_math_test: FAIL a hand turned a quarter and nearly over: got ", turned)
 	print("table_math_test: ", "PASS" if failures == 0 else "FAIL (%d)" % failures)
 	quit(1 if failures else 0)
 

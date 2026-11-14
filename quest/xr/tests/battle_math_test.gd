@@ -67,7 +67,12 @@ func _initialize() -> void:
 		for i in 3:
 			frames.append({"group": group, "frame": i, "left": 180, "top": 200, "image": Image.create(40, 60, false,
 					Image.FORMAT_RGBA8)})
+	# an upscaled frame is as large on the card as its 1x one
+	frames.append({"group": cards.Group.MOVING, "frame": 3, "left": 360, "top": 400, "scale": 2, "image":
+			Image.create(80, 120, false, Image.FORMAT_RGBA8)})
 	cards.set_creature("TEST", {"frames": frames})
+	_expect("a 2x frame's place is in the frame's own pixels", cards.creatures["TEST"][cards.Group.MOVING][3]["rect"],
+			Rect2(180, 200, 40, 60))
 	_expect("loaded", cards.missing_creatures(), PackedStringArray())
 	cards._process(0.01)
 	var first: Dictionary = cards.card(1)
@@ -114,6 +119,22 @@ func _initialize() -> void:
 			is_equal_approx(first["node"].rotation.x, -PI / 2.0)], [cards.Group.DEATH, true, false])
 	cards.set_stacks([stacks[2]])
 	_expect("gone stacks lose their cards", cards.card_count(), 1)
+	# the game's battle events: who shoots whom, and a spell's flash
+	stacks[0] = stacks[0].merged({"alive": true, "count": 4}, true)
+	cards.set_stacks(stacks)
+	field.set_battle({"stacks": stacks, "action": 1, "action_kind": 2, "action_stack": 3, "action_target": 1})
+	_expect("an event: the stack shoots, a dart is on its way", [cards.card(3)["group"], cards._shots.size()],
+			[cards.Group.SHOOT, 1])
+	stacks[0] = stacks[0].merged({"count": 3}, true)
+	field.set_battle({"stacks": stacks, "action": 1, "action_kind": 2, "action_stack": 3, "action_target": 1})
+	_expect("with events nothing is guessed, and an event shows once", cards._shots.size(), 1)
+	cards._process(1.0)
+	_expect("the dart has landed", cards._shots.size(), 0)
+	field.set_battle({"stacks": stacks, "action": 2, "action_kind": 3, "action_stack": -1, "action_target": 3,
+			"action_hex": 77})
+	_expect("a spell flashes its hex and its target's", [field.flashes.has(77), field.flashes.has(50)], [true, true])
+	field._process(1.0)
+	_expect("and the flash ends", field.flashes.size(), 0)
 	cards.clear()
 	_expect("after the battle nothing is kept", [cards.card_count(), cards.creatures.size()], [0, 0])
 

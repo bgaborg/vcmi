@@ -74,6 +74,12 @@ func _ready() -> void:
 		if arg.begins_with("table_zoom="): # table_zoom=factor,u,v: the minimap's own zoom (room.set_zoom)
 			var v := arg.get_slice("=", 1).split(",")
 			table_zoom = [float(v[0]), Vector2(float(v[1]), float(v[2]))]
+		if arg == "tableonly": # as main.gd outside the war room: only the book and its panels, in main.gd's light
+			room.show_table_only(true)
+			world.environment = Environment.new()
+			world.environment.background_mode = Environment.BG_COLOR
+			world.environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+			world.environment.ambient_light_color = Color(0.8, 0.8, 0.8)
 		if arg.begins_with("tilt="): # tilt=degrees: the map raised at its far edge (room.set_tilt)
 			room.set_tilt(float(arg.get_slice("=", 1)))
 		if arg.begins_with("zoom="):

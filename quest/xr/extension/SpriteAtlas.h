@@ -742,6 +742,14 @@ private:
 		f.height = uint16_t(h);
 	}
 
+public:
+	/// a frame that is no tile `factor` times larger (upscale), for frames drawn outside the atlas (the battle's cards)
+	static void upscaleFrame(BakedFrame & f, int factor)
+	{
+		upscale(f, factor, false);
+	}
+
+private:
 	// the frame `factor` times larger with VCMI's xBRZ, as the 2D game's own upscaling (SDLImageScaler, XBRZ_ALPHA or
 	// XBRZ_OPAQUE), on straight (not premultiplied) colour; the owner mask through the same filter as an alpha, so the
 	// flag's edge follows the body's. Its place in the full frame scales with it. The unbuffered colour distance: the

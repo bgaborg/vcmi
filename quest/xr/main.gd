@@ -92,6 +92,8 @@ var table_tile := TableMath.NO_TILE ## the tile under the active ray on the tabl
 var table_popup := false ## a still grip opened a tile's popup from the table: its release closes it
 ## grips held on the table by hand: {start: hand position, ms: press time, drag: moving the map}
 var grabs := {}
+## a grip held with the ray on the hourglass: {hand, up (the grip's up then)}; turned over, it ends the turn
+var hourglass_grab := {}
 var grab_view := {} ## the view when the current drag or two-hand zoom began: centre, zoom, at, spread
 var followed_move := 0 ## the sequence of the last hero step the view followed
 ## the side panel at the table's near edge (quest/PHASE4.md 4d): resources, date, heroes, towns, end turn
@@ -215,7 +217,7 @@ void fragment() {
 	environment.background_mode = Environment.BG_COLOR
 	environment.background_color = Color.BLACK
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	environment.ambient_light_color = Color(0.5, 0.5, 0.5)
+	environment.ambient_light_color = Color(0.8, 0.8, 0.8) # also the table's only light outside the war room
 	world = WorldEnvironment.new()
 	world.environment = room.environment
 	add_child(world)
@@ -546,7 +548,7 @@ func _process(delta: float) -> void:
 							_set_battle_picture.call_deferred(picture, image)))
 			else:
 				# the next battle's stacks have the same ids: no card, no frame and no turn is left of this one
-				battle_field.cards.clear()
+				battle_field.clear()
 				creatures_asked.clear()
 				battle_picture = ""
 				battle_field.set_picture(null)
@@ -560,7 +562,9 @@ func _process(delta: float) -> void:
 				if not creatures_asked.has(creature):
 					creatures_asked[creature] = true
 					battle_tasks.append(WorkerThreadPool.add_task(func():
-						var decoded: Dictionary = vcmi_data.decode_animation(creature)
+						# standing and moving, which show most of the time, at twice the game's pixels; the rest at 1x:
+						# all at 2x would be about 15 MB a creature
+						var decoded: Dictionary = vcmi_data.decode_animation_hd(creature, 2, PackedInt32Array([0, 2]))
 						battle_field.cards.set_creature.call_deferred(creature, decoded)))
 		if changed & 4 == 0 and not layer.visible: # out of the game (main menu, loading): always the screen
 			layer.visible = true
@@ -609,6 +613,7 @@ func _set_tabletop(on: bool) -> void:
 	shown_selection = Vector3i(-2, -2, -2) # zoom in, follow and mark the selected hero again (_update_table)
 	if not on:
 		layer.visible = true
+	_show_room()
 	print("VCMI XR: tabletop ", on)
 
 
@@ -755,10 +760,18 @@ func _set_environment(choice: Variant) -> void:
 	# the clear colour shows where nothing is drawn: transparent lets the passthrough through
 	get_viewport().transparent_bg = passthrough
 	environment.background_mode = Environment.BG_CLEAR_COLOR if passthrough else Environment.BG_COLOR
-	room.visible = choice == "war room"
-	world.environment = room.environment if room.visible else environment
 	environment_name = choice
+	_show_room()
 	print("VCMI XR: environment ", choice)
+
+
+## The war room, or outside it (passthrough, black) only the table's book and panels while the tabletop is on: in
+## passthrough the map then lies on the player's own table (its height: the wrist panel's "Table")
+func _show_room() -> void:
+	var war_room := environment_name == "war room"
+	room.visible = war_room or tabletop
+	room.show_table_only(not war_room)
+	world.environment = room.environment if war_room else environment
 
 
 ## Shows the panel when its controller turns it to the head, and finds the button under the other hand's ray
@@ -1029,7 +1042,16 @@ func _switch_hit(hand: int) -> Vector3:
 ## Trigger and grip on the table: the trigger clicks the tile under the ray; a grip grabs the table (_update_grabs)
 func _table_press(button: int, hand: int, pressed: bool) -> void:
 	if button == BUTTON_RIGHT:
-		if pressed:
+		if hourglass_grab.get("hand", -1) == hand and not pressed:
+			hourglass_grab = {}
+			return
+		var ray := _aim_ray(hand) if pressed else []
+		var on_panel: Array = table_panel.ray_item(ray[0], ray[1]) if not ray.is_empty() else []
+		if not on_panel.is_empty() and on_panel[0] >= 0 and table_panel.items[on_panel[0]]["kind"] == "end_turn":
+			# the hourglass is taken from afar: turning the hand over flips it (_update_grabs)
+			hourglass_grab = {"hand": hand, "up": grips[hand].global_basis.y}
+			_pulse(hand, 0.25)
+		elif pressed:
 			grabs[hand] = {"start": grips[hand].global_position, "ms": Time.get_ticks_msec(), "drag": false}
 			grab_view = {}
 		else:
@@ -1107,18 +1129,29 @@ func _table_panel_press(hand: int) -> bool:
 	print("VCMI XR: table panel ", item["kind"], " ", item["id"])
 	_pulse(hand, 0.25)
 	if item["kind"] == "end_turn":
-		table_panel.flip_hourglass()
-		bridge.key(END_TURN_KEY, true)
-		await get_tree().create_timer(0.1).timeout
-		bridge.key(END_TURN_KEY, false)
+		_end_turn()
 	else:
 		vcmi_data.select_object(item["id"], int(item["id"]) == table_panel.selected)
 	return true
 
 
+## The hourglass turns over and the game gets its end turn key
+func _end_turn() -> void:
+	table_panel.flip_hourglass()
+	bridge.key(END_TURN_KEY, true)
+	await get_tree().create_timer(0.1).timeout
+	bridge.key(END_TURN_KEY, false)
+
+
 ## Each frame in tabletop mode, the grips held on the table: one moving hand drags the map with it, two hands zoom
 ## about their middle (and drag it), a still hand shows the tile's popup under its ray after GRAB_POPUP_MS
 func _update_grabs() -> void:
+	if not hourglass_grab.is_empty():
+		var holder: int = hourglass_grab["hand"]
+		if TableMath.turned_over(hourglass_grab["up"], grips[holder].global_basis.y):
+			hourglass_grab = {}
+			_pulse(holder, 0.5)
+			_end_turn()
 	if grabs.is_empty() or map_size.x == 0:
 		return
 	var hands: Array = grabs.keys()
@@ -1383,7 +1416,7 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 		"battle":
 			battle_sample = a > 0.0
 			if not battle_sample and not battle_shown:
-				battle_field.cards.clear()
+				battle_field.clear()
 				creatures_asked.clear()
 			if battle_sample:
 				battle_field.cards.set_card_lean(card_lean)

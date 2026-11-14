@@ -15,6 +15,12 @@ static func uv_to_tile(uv: Vector2, map: Vector3i) -> Vector3i:
 	return Vector3i(column % map.x, mini(int(uv.y * map.y), map.y - 1), column / map.x)
 
 
+## A hand that held something upright with `up_before` has turned it over (the hourglass's flip, main.gd): its up now
+## points more than 115 degrees away
+static func turned_over(up_before: Vector3, up_now: Vector3) -> bool:
+	return up_before.angle_to(up_now) > deg_to_rad(115.0)
+
+
 ## the map UV of a tile's centre
 static func tile_uv(tile: Vector3i, map: Vector3i) -> Vector2:
 	return Vector2((tile.z * map.x + tile.x + 0.5) / float(map.x * map.z), (tile.y + 0.5) / float(map.y))

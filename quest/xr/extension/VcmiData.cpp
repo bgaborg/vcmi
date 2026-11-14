@@ -59,6 +59,7 @@ protected:
 		ClassDB::bind_method(D_METHOD("object_count"), &VcmiData::object_count);
 		ClassDB::bind_method(D_METHOD("update_markers", "multimesh", "panel_size", "metres"), &VcmiData::update_markers);
 		ClassDB::bind_method(D_METHOD("decode_animation", "name"), &VcmiData::decode_animation);
+		ClassDB::bind_method(D_METHOD("decode_animation_hd", "name", "scale", "groups"), &VcmiData::decode_animation_hd);
 		ClassDB::bind_method(D_METHOD("tile_animation", "layer", "id"), &VcmiData::tile_animation);
 		ClassDB::bind_method(D_METHOD("atlas_view", "tiles", "level", "scale"), &VcmiData::atlas_view, DEFVAL(1));
 		ClassDB::bind_method(D_METHOD("atlas_busy"), &VcmiData::atlas_busy);
@@ -530,6 +531,13 @@ public:
 	/// test, or from a worker thread
 	Dictionary decode_animation(const String & name) const
 	{
+		return decode_animation_hd(name, 1, PackedInt32Array());
+	}
+
+	/// decode_animation with the frames of `groups` upscaled `scale` times (2 to 4, xBRZ, as the atlas's): each frame
+	/// has `scale`, and its left, top and image are in pixels that many times smaller than the frame's own
+	Dictionary decode_animation_hd(const String & name, int scale, const PackedInt32Array & groups) const
+	{
 		Dictionary result;
 		Array frames;
 		result["frames"] = frames;
@@ -540,8 +548,10 @@ public:
 		const std::vector<BakedFrame> baked = decodeBaked(api, name.utf8().get_data());
 		result["bridge_us"] = int64_t(std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - from).count());
 		from = Clock::now();
-		for(const BakedFrame & b : baked)
+		for(BakedFrame b : baked)
 		{
+			const int factor = groups.has(b.group) ? std::clamp(scale, 1, int(SpriteAtlas::MAX_SCALE)) : 1;
+			SpriteAtlas::upscaleFrame(b, factor);
 			PackedByteArray px;
 			px.resize(b.rgba.size());
 			std::memcpy(px.ptrw(), b.rgba.data(), b.rgba.size());
@@ -562,6 +572,7 @@ public:
 			frame["image"] = Image::create_from_data(b.width, b.height, false, Image::FORMAT_RGBA8, px);
 			frame["mask"] = mask;
 			frame["png"] = b.png;
+			frame["scale"] = factor;
 			frames.push_back(frame);
 		}
 		result["bake_us"] = int64_t(std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - from).count());
@@ -1356,6 +1367,13 @@ public:
 		result["shown"] = data->shown != 0;
 		result["my_turn"] = data->myTurn != 0;
 		result["picture"] = String::utf8(data->picture, strnlen(data->picture, sizeof(data->picture)));
+		// the last attack (kind 1), shot (2) or spell (3): its sequence (0: none yet), the acting stack's and the first
+		// hurt stack's id (-1: a hero, none), a spell's target hex (-1: none)
+		result["action"] = int64_t(data->actionSequence);
+		result["action_kind"] = data->actionKind;
+		result["action_stack"] = data->actionStack == VCMI_NONE ? int64_t(-1) : int64_t(data->actionStack);
+		result["action_target"] = data->actionTarget == VCMI_NONE ? int64_t(-1) : int64_t(data->actionTarget);
+		result["action_hex"] = data->actionHex < VCMI_BATTLE_HEXES ? int64_t(data->actionHex) : int64_t(-1);
 		PackedByteArray reach;
 		PackedByteArray blocked;
 		reach.resize(VCMI_BATTLE_HEXES);
