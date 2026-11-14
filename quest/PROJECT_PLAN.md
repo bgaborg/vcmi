@@ -50,8 +50,10 @@ Not closed yet:
    1. **5a, the field on the table:** done on the PC (hexes, states, marker cards, picking; test command `battle 1`).
    2. **5b, the battle's state and input** through the bridge: written and built, never run.
    3. **5c to 5f:** the creatures as cards, the actions, the battle's keys, the battlefield's picture: written, tested on the PC with the game's own art (`quest/tools/h3-extract.py`), built, never run ([`PHASE5.md`](PHASE5.md)).
-   4. **Left in phase 5, after the first headset run:** a siege's walls, towers and moat as pictures; the heroes at the field's ends; projectiles and spell effects; battle events from the bridge instead of the guessed attack; HD (xBRZ) creature art.
-3. **Everything written since 2026-11-12 is untested on the headset.** [`HEADSET_CHECKLIST.md`](HEADSET_CHECKLIST.md) lists what to check, in order, before the release.
+   4. **Also written:** battle events from the game (attacks, shots as darts, spell flashes), a siege's walls, towers and moat, the heroes at the field's ends, 2x creature art for the standing and moving frames.
+   5. **Left in phase 5:** the creatures' own missiles and the spells' own effects, the towers' shooters, hero animations.
+3. **Phase 6 parts done on the PC:** in passthrough the map and its panels show without the room, on the player's real table at the wrist panel's height; a grip on the hourglass turned over ends the turn. Left: spatial audio (the game's sound goes to the system mixer, not to Godot), table snapping to a scanned surface, the town screen as a diorama, shared anchors.
+4. **Everything written since 2026-11-12 is untested on the headset.** [`HEADSET_CHECKLIST.md`](HEADSET_CHECKLIST.md) lists what to check, in order, before the release.
 
 Each milestone records its numbers in `DATA_BRIDGE.md` and is optimised before the next one starts.
 

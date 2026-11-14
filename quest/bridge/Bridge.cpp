@@ -55,6 +55,8 @@
 #include "../../lib/callback/CCallback.h"
 #include "../../lib/callback/IBattleEventsReceiver.h"
 #include "../../lib/entities/faction/CTown.h"
+#include "../../lib/entities/hero/CHero.h"
+#include "../../lib/entities/hero/CHeroClass.h"
 #include "../../lib/int3.h"
 #include "../../lib/mapObjects/CGHeroInstance.h"
 #include "../../lib/mapObjects/CGTownInstance.h"
@@ -533,7 +535,7 @@ void wallPieces(const BattleSiegeController & siege, const CPlayerBattleCallback
 	};
 	const auto tower = [&](EWallPart part)
 	{
-		return health(part) > 0 ? "1" : "2";
+		return health(part) != 0 ? "1" : "2"; // a tower the town has not built (no state) is drawn whole, as in 2D
 	};
 	const auto wall = [&](EWallPart part)
 	{
@@ -546,13 +548,8 @@ void wallPieces(const BattleSiegeController & siege, const CPlayerBattleCallback
 	}
 	const FactionID faction = town->getFactionID();
 	const bool low = faction == ETownType::RAMPART || faction == ETownType::NECROPOLIS || faction == ETownType::DUNGEON || faction == ETownType::STRONGHOLD;
+	// in the 2D battle's drawing order: by the row of the hex each piece is bound to (getWallPiecePosition), back to front
 	add(EWallVisual::BACKGROUND_WALL, low ? "TPW1" : "TPWL");
-	add(EWallVisual::KEEP, std::string("MAN") + tower(EWallPart::KEEP));
-	add(EWallVisual::BOTTOM_TOWER, std::string("TW1") + tower(EWallPart::BOTTOM_TOWER));
-	add(EWallVisual::BOTTOM_WALL, std::string("WA1") + wall(EWallPart::BOTTOM_WALL));
-	add(EWallVisual::WALL_BELLOW_GATE, std::string("WA3") + wall(EWallPart::BELOW_GATE));
-	add(EWallVisual::WALL_OVER_GATE, std::string("WA4") + wall(EWallPart::OVER_GATE));
-	add(EWallVisual::UPPER_WALL, std::string("WA6") + wall(EWallPart::UPPER_WALL));
 	add(EWallVisual::UPPER_TOWER, std::string("TW2") + tower(EWallPart::UPPER_TOWER));
 	// the closed gate is part of the static wall; lowered and destroyed it has its own pictures
 	const EGateState gate = state.battleGetGateState();
@@ -560,15 +557,21 @@ void wallPieces(const BattleSiegeController & siege, const CPlayerBattleCallback
 		add(EWallVisual::GATE, "DRW2");
 	else if(gate == EGateState::DESTROYED)
 		add(EWallVisual::GATE, "DRW3");
-	add(EWallVisual::GATE_ARCH, "ARCH");
-	add(EWallVisual::BOTTOM_STATIC_WALL, "WA2");
-	add(EWallVisual::UPPER_STATIC_WALL, "WA5");
-	if(fort.citadelHealth > 0 && health(EWallPart::KEEP) > 0)
-		add(EWallVisual::KEEP_BATTLEMENT, "MANC");
-	if(fort.lowerTowerHealth > 0 && health(EWallPart::BOTTOM_TOWER) > 0)
-		add(EWallVisual::BOTTOM_BATTLEMENT, "TW1C");
 	if(fort.upperTowerHealth > 0 && health(EWallPart::UPPER_TOWER) > 0)
 		add(EWallVisual::UPPER_BATTLEMENT, "TW2C");
+	add(EWallVisual::UPPER_WALL, std::string("WA6") + wall(EWallPart::UPPER_WALL));
+	add(EWallVisual::UPPER_STATIC_WALL, "WA5");
+	add(EWallVisual::WALL_OVER_GATE, std::string("WA4") + wall(EWallPart::OVER_GATE));
+	add(EWallVisual::GATE_ARCH, "ARCH");
+	add(EWallVisual::WALL_BELLOW_GATE, std::string("WA3") + wall(EWallPart::BELOW_GATE));
+	add(EWallVisual::KEEP, std::string("MAN") + tower(EWallPart::KEEP));
+	if(fort.citadelHealth > 0 && health(EWallPart::KEEP) > 0)
+		add(EWallVisual::KEEP_BATTLEMENT, "MANC");
+	add(EWallVisual::BOTTOM_STATIC_WALL, "WA2");
+	add(EWallVisual::BOTTOM_WALL, std::string("WA1") + wall(EWallPart::BOTTOM_WALL));
+	add(EWallVisual::BOTTOM_TOWER, std::string("TW1") + tower(EWallPart::BOTTOM_TOWER));
+	if(fort.lowerTowerHealth > 0 && health(EWallPart::BOTTOM_TOWER) > 0)
+		add(EWallVisual::BOTTOM_BATTLEMENT, "TW1C");
 }
 
 // game thread, interfaceMutex held, each tick: the battle the game shows, for the table (quest/PHASE5.md 5b), and the
@@ -670,6 +673,19 @@ void publishBattle()
 			picture = state->battleGetBattlefieldType().getInfo()->graphics;
 		const std::string pictureName = picture.getName();
 		std::memcpy(next.picture, pictureName.data(), std::min(pictureName.size(), sizeof(next.picture) - 1));
+		// as BattleHero chooses its animation
+		const CGHeroInstance * commanders[2] = {battle->attackingHeroInstance, battle->defendingHeroInstance};
+		for(int side = 0; side < 2; side++)
+		{
+			const CGHeroInstance * hero = commanders[side];
+			if(!hero || !hero->getHeroType() || !hero->getHeroClass())
+				continue;
+			const AnimationPath & image = !hero->getHeroType()->battleImage.empty() ? hero->getHeroType()->battleImage
+										: hero->gender == EHeroGender::FEMALE       ? hero->getHeroClass()->imageBattleFemale
+																					: hero->getHeroClass()->imageBattleMale;
+			const std::string heroName = image.getOriginalName();
+			std::memcpy(next.heroes[side], heroName.data(), std::min(heroName.size(), sizeof(next.heroes[side]) - 1));
+		}
 		const AccessibilityInfo accessibility = state->getAccessibility();
 		for(int hex = 0; hex < VCMI_BATTLE_HEXES; hex++)
 		{

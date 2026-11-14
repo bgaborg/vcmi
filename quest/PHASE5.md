@@ -2,7 +2,7 @@
 
 The battle played on the war table, as the adventure map is in [phase 4](PHASE4.md). Look and layout: [`VISUALS.md`, section 6](VISUALS.md#6-the-battle-diorama-phase-5). Data path: [`DATA_BRIDGE.md`](DATA_BRIDGE.md) (milestone 4, battle).
 
-As of 2026-11-14: milestones 5a to 5f are written, tested on the PC and build for Android. Nothing of phase 5 has run on the headset: [`HEADSET_CHECKLIST.md`](HEADSET_CHECKLIST.md), section 3.
+As of 2026-11-14: milestones 5a to 5f and the points left after them (events, sieges, heroes, sharper art) are written, tested on the PC and build for Android. Nothing of phase 5 has run on the headset: [`HEADSET_CHECKLIST.md`](HEADSET_CHECKLIST.md), section 3.
 
 ## 1. What exists
 
@@ -28,6 +28,13 @@ As of 2026-11-14: milestones 5a to 5f are written, tested on the PC and build fo
   - **Keys (5e):** the wrist panel's first page is "Battle" while a battle is on (`wrist_panel.gd` `BATTLE_KEYS`).
   - **Picture (5f):** the bridge publishes the background's name and hands its file's bytes over (`imageFile`); `battle_field.gd` `decode_picture` reads a PNG, a BMP or a Heroes 3 PCX on a worker. Sieges: the walls are dark hexes only.
   - **On the PC:** `quest/tools/h3-extract.py` takes animations and pictures from the Heroes 3 data on the PC into `quest/out/h3/` (not in git); `render-room.sh sprites battle` then draws the sample battle with them (`sprites battle bare`: markers on paper). `tests/battle_math_test.gd` covers the placement, the groups and the PCX reader.
+
+- **After the first pass (2026-11-14, tested on the PC, build for Android, never run):**
+  - **Battle events:** the bridge registers an `IBattleEventsReceiver` with the client for the local player (`registerBattleEvents`) and publishes the last attack, shot or spell (`action*` in `VcmiBattle`). The table plays the attacker's group, flies a dart from a shooter to its target, and flashes a spell's hex and first target. The guessed attack is only used while no event has come.
+  - **Sharper creatures:** `decode_animation_hd` upscales the standing and moving groups 2x with the atlas's xBRZ; a frame's texture is made when it first shows.
+  - **Sieges:** `wallPieces` in the bridge lists each wall piece's current picture and place (a copy of `BattleSiegeController`'s private rules: check it after a rebase); a worker decodes them with their colour key and lays them over the background, again when the list changes.
+  - **Heroes:** each side's hero stands at its end of the field in its battle animation's first group.
+  - **Loading** lives in `battle_field.gd` (`poll`, `load_creatures`), not in `main.gd`.
 
 ## 2. Facts from the code (read 2026-11-14; check again before 5b)
 

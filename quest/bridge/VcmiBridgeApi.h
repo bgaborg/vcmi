@@ -10,7 +10,7 @@
 #include <stdint.h>
 
 // raise on any change to the structs below; the extension refuses a table with another version
-#define VCMI_BRIDGE_VERSION 17
+#define VCMI_BRIDGE_VERSION 18
 
 typedef struct VcmiBridgeStats
 {
@@ -139,6 +139,7 @@ typedef struct VcmiBattle
 	uint16_t actionHex; // a spell's target hex, VCMI_BATTLE_HEXES and more when it has none
 	uint8_t actionKind; // VCMI_ACTION_*
 	uint8_t wallCount; // a siege's wall pieces, in drawing order; 0 in the field
+	char heroes[2][32]; // the attacker's and the defender's hero: its battle animation, empty without a hero
 	VcmiWallPiece walls[VCMI_WALL_PIECES];
 	VcmiBattleStack stacks[VCMI_BATTLE_STACKS];
 } VcmiBattle;

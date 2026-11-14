@@ -26,16 +26,17 @@ uniform float regular = 0.9072647;
 
 void fragment() {
 	vec2 at = (UV - 0.5) * page + field / 2.0;
-	// the nearest two hex centres, valid or not: a regular hex is the cell of its centre
+	// The nearest two hex centres, valid or not: a regular hex is the cell of its centre. They are among the two
+	// centres either side of the pixel in the row above it and in the row below: four distances a pixel
 	float nearest = 1e9;
 	float second = 1e9;
 	ivec2 hex = ivec2(-1);
 	bool second_valid = false;
-	int guess = int(round((at.y - first.y) / pitch.y));
-	for (int row = guess - 1; row <= guess + 1; row++) {
+	int above = int(floor((at.y - first.y) / pitch.y));
+	for (int row = above; row <= above + 1; row++) {
 		float shift = (row & 1) == 0 ? pitch.x / 2.0 : 0.0;
-		int middle = int(round((at.x - first.x - shift) / pitch.x));
-		for (int column = middle - 1; column <= middle + 1; column++) {
+		int left = int(floor((at.x - first.x - shift) / pitch.x));
+		for (int column = left; column <= left + 1; column++) {
 			vec2 offset = at - first - vec2(pitch.x * float(column) + shift, pitch.y * float(row));
 			float distance_ = length(vec2(offset.x, offset.y * regular));
 			bool valid = row >= 0 && row < 11 && column >= 0 && column < 17;
@@ -198,7 +199,7 @@ func set_battle(data: Dictionary) -> void:
 		if stack.get("active", false) and hex >= 0 and hex < shown.size():
 			shown[hex] = State.ACTIVE
 	cards.set_action(data) # first: with an event, set_stacks guesses no attack
-	cards.set_stacks(data.get("stacks", []))
+	cards.set_stacks(cards.with_heroes(data.get("stacks", []), data.get("heroes", PackedStringArray())))
 	# a spell: its target hex and the first stack it touched flash
 	if data.get("action_kind", 0) == 3 and data.get("action", 0) != _spell:
 		_spell = data.get("action", 0)
@@ -301,7 +302,7 @@ func show_sample() -> void:
 				"wide": i == 1, "animation": creatures[2 + int(i == 1)]})
 	stacks[4]["hex"] = 4 * 17 + 6 # the active stack, out in the field
 	stacks.append({"id": 20, "hex": 7 * 17 + 9, "side": 1, "count": 0, "alive": false, "animation": "CSKELE"})
-	cards.set_stacks(stacks)
+	cards.set_stacks(cards.with_heroes(stacks, PackedStringArray(["CH00", "CH05"]))) # a knight and a death knight
 	var sample := PackedByteArray()
 	sample.resize(BattleMath.COLUMNS * BattleMath.ROWS)
 	for hex in sample.size():

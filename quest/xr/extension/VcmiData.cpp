@@ -1380,6 +1380,11 @@ public:
 			walls.push_back(piece);
 		}
 		result["walls"] = walls;
+		// the attacker's and the defender's hero: its battle animation, empty without a hero
+		PackedStringArray heroes;
+		for(const auto & hero : data->heroes)
+			heroes.push_back(String::utf8(hero, strnlen(hero, sizeof(hero))));
+		result["heroes"] = heroes;
 		result["action"] = int64_t(data->actionSequence);
 		result["action_kind"] = data->actionKind;
 		result["action_stack"] = data->actionStack == VCMI_NONE ? int64_t(-1) : int64_t(data->actionStack);

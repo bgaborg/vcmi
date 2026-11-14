@@ -119,6 +119,20 @@ func _initialize() -> void:
 			is_equal_approx(first["node"].rotation.x, -PI / 2.0)], [cards.Group.DEATH, true, false])
 	cards.set_stacks([stacks[2]])
 	_expect("gone stacks lose their cards", cards.card_count(), 1)
+	# the heroes: a card each in its corner, without a count, its frame's middle 68 pixels over the field's top
+	cards.set_stacks(cards.with_heroes(stacks, PackedStringArray(["HERO", ""])))
+	cards.set_creature("HERO", {"frames": [{"group": 0, "frame": 0, "left": 42, "top": 35, "image": Image.create(66,
+			120, false, Image.FORMAT_RGBA8)}]})
+	cards._process(0.01)
+	var hero: Dictionary = cards.card(cards.HERO_ID)
+	_expect("one side has a hero", [cards.card_count(), cards.card(cards.HERO_ID - 1).is_empty()], [4, true])
+	_expect("the hero stands in its corner, without a count", [hero["count"].visible, hero["sprite"].visible,
+			hero["node"].position.is_equal_approx(Vector3((32.0 - 400.0) * cards.PIXEL, cards.LIFT, (136.0 - 278.0)
+			* cards.PIXEL))], [false, true, true])
+	_expect("its frame on the card", hero["sprite"].position.is_equal_approx(Vector3(0.0, 60.0 * cards.PIXEL, 0.0)),
+			true)
+	cards.set_stacks(stacks)
+
 	# the game's battle events: who shoots whom, and a spell's flash
 	stacks[0] = stacks[0].merged({"alive": true, "count": 4}, true)
 	cards.set_stacks(stacks)

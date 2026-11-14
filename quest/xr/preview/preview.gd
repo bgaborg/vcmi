@@ -179,10 +179,10 @@ func _add_battle(room: Node3D) -> void:
 		var raw := ProjectSettings.globalize_path(H3.path_join("raw"))
 		var background: Image = field.decode_picture(FileAccess.get_file_as_bytes(raw.path_join("SGCSBACK")))
 		var pieces := []
-		for piece in [["MOAT", 410, 90], ["MLIP", 403, 80], ["TPWL", 600, 49], ["MAN1", 720, 158], ["TW11", 602, 500],
-				["WA11", 528, 350], ["WA31", 469, 291], ["WA41", 470, 127], ["WA61", 524, 32], ["TW21", 569, 35],
-				["ARCH", 477, 238], ["WA2", 512, 347], ["WA5", 489, 79], ["MANC", 720, 158], ["TW1C", 602, 500],
-				["TW2C", 557, 24]]:
+		for piece in [["MOAT", 410, 90], ["MLIP", 403, 80], ["TPWL", 600, 49], ["TW21", 569, 35], ["TW2C", 557, 24],
+				["WA61", 524, 32], ["WA5", 489, 79], ["WA41", 470, 127], ["ARCH", 477, 238], ["WA31", 469, 291],
+				["MAN1", 720, 158], ["MANC", 720, 158], ["WA2", 512, 347], ["WA11", 528, 350], ["TW11", 602, 500],
+				["TW1C", 602, 500]]:
 			pieces.append({"at": Vector2i(piece[1], piece[2]), "image": field.decode_picture(
 					FileAccess.get_file_as_bytes(raw.path_join("SGCS" + piece[0])), true)})
 		if background != null:

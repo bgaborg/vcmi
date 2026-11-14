@@ -23,6 +23,11 @@ const SIDES := [Color(0.25, 0.4, 0.8), Color(0.75, 0.2, 0.15)] ## attacker, defe
 const ANCHOR := Vector2(196.0, 251.0)
 const FEET := 263.0
 const WIDE := 44.0 ## a two-hex stack's frame is this far back, towards its own side
+## A side's hero stands at its end of the field, as BattleHero places it: a 64 x 136 box in the field's corner, the
+## 150 x 175 frame's middle on the box's. The card stands on the box's lower edge
+const HERO_AT := Vector2(32.0, 136.0) ## field pixel of the attacker's hero's feet; the defender's is mirrored
+const HERO_ANCHOR := Vector2(75.0, 155.0) ## the frame's pixel there
+const HERO_ID := -10 ## the heroes' cards: HERO_ID - side
 const FPS := 10.0 ## frames a second, about the 2D battle's at its default speed
 const SLIDE := 0.45 ## seconds a stack takes to a new hex
 const FLIGHT := 0.35 ## seconds a shot flies
@@ -101,6 +106,16 @@ func missing_creatures() -> PackedStringArray:
 		if creature != "" and not creatures.has(creature) and not creature in missing:
 			missing.append(creature)
 	return missing
+
+
+## The stacks' list with a card for each side's hero: `heroes` are their battle animations (VcmiData.battle), empty
+## for a side without one. A hero is a stack of its own kind: it stands in its corner in its animation's first group
+static func with_heroes(stacks: Array, heroes: PackedStringArray) -> Array:
+	var all := stacks.duplicate()
+	for side in mini(heroes.size(), 2):
+		if heroes[side] != "":
+			all.append({"id": HERO_ID - side, "side": side, "hero": true, "animation": heroes[side]})
+	return all
 
 
 ## The battle's stacks. Each: id, hex (of its front half), side (0 attacker), count, wide (a two-hex creature), alive
@@ -245,6 +260,10 @@ func _new_card(stack: Dictionary) -> Dictionary:
 
 ## Where a stack's card stands: its hex's middle, at the feet's line
 func _place(stack: Dictionary) -> Vector3:
+	if stack.get("hero", false):
+		var corner := Vector2(HERO_AT.x if stack.get("side", 0) == 0 else BattleMath.FIELD.x - HERO_AT.x, HERO_AT.y)
+		var feet := BattleMath.field_to_page(corner, AREA)
+		return Vector3(feet.x, LIFT, feet.y)
 	var at := BattleMath.field_to_page(BattleMath.hex_centre(stack.get("hex", 0)), AREA)
 	return Vector3(at.x, LIFT, at.y + (FEET - ANCHOR.y) * PIXEL)
 
@@ -271,7 +290,7 @@ func _dress(card: Dictionary) -> void:
 	var has_art: bool = not creatures.get(stack.get("animation", ""), {}).is_empty()
 	(card["node"] as Node3D).rotation.x = _lean - PI / 2.0 if alive or has_art else -PI / 2.0
 	(card["count"] as Label3D).text = str(stack.get("count", 1))
-	(card["count"] as Label3D).visible = alive
+	(card["count"] as Label3D).visible = alive and not stack.get("hero", false)
 	# beside the feet, on the side the stack faces, as the 2D battle's count box
 	(card["count"] as Label3D).position.x = (1.0 if side == 0 else -1.0) * 0.6 * BattleMath.PITCH.x * PIXEL
 	if card["slide"] >= 1.0:
@@ -283,7 +302,8 @@ func _dress(card: Dictionary) -> void:
 func _show_frame(card: Dictionary) -> void:
 	var stack: Dictionary = card["stack"]
 	var groups: Dictionary = creatures.get(stack.get("animation", ""), {})
-	var frames: Array = groups.get(card["group"], [])
+	var hero: bool = stack.get("hero", false)
+	var frames: Array = groups.get(0 if hero else card["group"], []) # a hero's first group is its standing one
 	if frames.is_empty() and card["group"] != Group.DEATH: # a creature without this group stands
 		frames = groups.get(Group.HOLDING, [])
 	var sprite: MeshInstance3D = card["sprite"]
@@ -306,12 +326,16 @@ func _show_frame(card: Dictionary) -> void:
 			_show_frame(card)
 			return
 	var frame: Dictionary = frames[index]
+	if card.get("drawn") == frame: # the same frame as the last tick: 62 of 72 ticks a second
+		return
+	card["drawn"] = frame
 	var rect: Rect2 = frame["rect"]
 	var facing := 1.0 if clampi(stack.get("side", 0), 0, 1) == 0 else -1.0
-	var anchor := ANCHOR.x + (WIDE if stack.get("wide", false) else 0.0)
+	var anchor := HERO_ANCHOR.x if hero else ANCHOR.x + (WIDE if stack.get("wide", false) else 0.0)
+	var feet := HERO_ANCHOR.y if hero else FEET
 	if frame["texture"] == null: # the upload when the frame first shows: a creature's hundred frames never in one tick
 		frame["texture"] = ImageTexture.create_from_image(frame["image"])
 		frame.erase("image")
 	(sprite.material_override as StandardMaterial3D).albedo_texture = frame["texture"]
 	sprite.scale = Vector3(facing * rect.size.x * PIXEL, rect.size.y * PIXEL, 1.0)
-	sprite.position = Vector3(facing * (rect.get_center().x - anchor) * PIXEL, (FEET - rect.get_center().y) * PIXEL, 0.0)
+	sprite.position = Vector3(facing * (rect.get_center().x - anchor) * PIXEL, (feet - rect.get_center().y) * PIXEL, 0.0)
