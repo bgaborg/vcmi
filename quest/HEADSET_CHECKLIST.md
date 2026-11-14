@@ -36,7 +36,7 @@ Build and install: `quest/tools/make-apk.sh` (WSL), then `quest/tools/quest.sh i
 | 3.3 | Wait a second | the markers turn into the creatures, standing, the right way round, their feet on their hexes; the battlefield's picture is under the hexes | `battle_cards.gd` (`ANCHOR`, `FEET`, `WIDE`), `main.gd` (the worker), `Bridge.cpp` `imageFile` |
 | 3.4 | In your turn | the active stack's hex is gold, the hexes it reaches are green, obstacles are dark | `publishBattle` (`reach`, `blocked`) |
 | 3.5 | Point at a green hex and pull the trigger | the stack walks there, on the table (a slide) and in 2D | `hexInput`, `publishBattle` (the input part), `battle_cards.gd` `set_stacks` |
-| 3.6 | Shoot an enemy with a shooter | it plays its shot, a dart flies to the target, the target flinches or dies | `Bridge.cpp` `BattleEvents` (registered in `registerBattleEvents`), `battle_cards.gd` `set_action` |
+| 3.6 | Shoot an enemy with a shooter | it plays its shot, its own missile (an arrow, a bolt; a plain dart the first time, until it is read) flies to the target, the target flinches or dies | `Bridge.cpp` `BattleEvents` (registered in `registerBattleEvents`), `battle_cards.gd` `set_action` |
 | 3.6a | The enemy's turn | its stacks attack and shoot with their own animations, not only your stacks' hits | the same; without events the table guesses (`battle_cards.gd` `set_stacks`) |
 | 3.7 | Attack an enemy in melee | the stack attacks from its own side of the target | `publishBattle` `pointAt` |
 | 3.8 | Wrist panel during the battle | its first page is "Battle": wait, defend, spell book, auto-combat, retreat, surrender | `wrist_panel.gd` `set_battle` |
@@ -44,7 +44,7 @@ Build and install: `quest/tools/make-apk.sh` (WSL), then `quest/tools/quest.sh i
 | 3.9 | Cast a spell | open the book (wrist) and pick the spell on the screen; then try the target on the table (a hex click runs the 2D battle's own action for that hex, which should cast), else on the screen | `publishBattle` (the input part) |
 | 3.10 | A two-hex creature, on both sides | stands over its two hexes | `battle_cards.gd` `WIDE` |
 | 3.11 | The battle ends | the result window on the screen; after it the map is back on the table; no crash | `publishBattle` (the `try` around `getBattle`) |
-| 3.9a | A spell lands | its target hex and the first stack it touches flash red | `battle_field.gd` `flashes` |
+| 3.9a | A spell lands | the casting hero raises its hand; the spell's own animation plays on the first stack it touches (or on its hex), which also flashes red | `Bridge.cpp` `battleSpellCast` (`actionEffect`, `actionSide`), `battle_cards.gd` `play_effect`, `battle_field.gd` `flashes` |
 | 3.12 | A siege | the walls, towers and moat are drawn on the field; a wall the catapult breaks changes to its broken picture; the gate opens; wall hexes are dark | `Bridge.cpp` `wallPieces` (a copy of `BattleSiegeController`'s private rules), `battle_field.gd` `poll`, `compose_picture` |
 | 3.12a | The creatures up close | standing and walking frames are sharper (2x) than the attack frames | `VcmiData::decode_animation_hd`, `battle_field.gd` `load_creatures` |
 | 3.13 | Quick combat, and an enemy's battle against another enemy | nothing on the table, no crash | `battleInt` is null |
@@ -53,8 +53,8 @@ Build and install: `quest/tools/make-apk.sh` (WSL), then `quest/tools/quest.sh i
 ## 4. Known limits, not failures
 
 - Only the standing and moving frames of the creatures are upscaled; attacks and deaths are the game's 1x art.
-- The table follows the 2D battle by up to a tenth of a second. A shot is a plain dart, not the creature's own missile; a spell is a flash, not its effect.
-- The towers' shooters and the heroes do not animate; a hero does not raise its hand to cast.
+- The table follows the 2D battle by up to a tenth of a second. A spell's animation plays on its first target only (a mass spell too), and effects that fill the 2D screen (Armageddon) are not shown.
+- A shooter's ray (the mage's, the lich's cloud) is a plain dart. The towers' shooters are not shown.
 - Two attacks within a tenth of a second show as one.
 - A melee attack always comes from the attacker's side; another side cannot be chosen from the table.
 - The 2D battle's own hex highlight is off at the two side columns, and its status text can vanish when a new stack becomes active.

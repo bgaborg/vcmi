@@ -144,9 +144,22 @@ func _initialize() -> void:
 	_expect("with events nothing is guessed, and an event shows once", cards._shots.size(), 1)
 	cards._process(1.0)
 	_expect("the dart has landed", cards._shots.size(), 0)
-	field.set_battle({"stacks": stacks, "action": 2, "action_kind": 3, "action_stack": -1, "action_target": 3,
-			"action_hex": 77})
+	cards.set_stacks(cards.with_heroes(stacks, PackedStringArray(["HERO", ""])))
+	field.set_battle({"stacks": stacks, "heroes": PackedStringArray(["HERO", ""]), "action": 2, "action_kind": 3,
+			"action_stack": -1, "action_target": 3, "action_hex": 77, "action_side": 0, "action_effect": "BOLT"})
 	_expect("a spell flashes its hex and its target's", [field.flashes.has(77), field.flashes.has(50)], [true, true])
+	_expect("its hero casts, and its own animation is asked for", [cards.card(cards.HERO_ID)["group"],
+			cards._effects.size(), "BOLT" in cards.missing_creatures()], [cards.Group.ATTACK, 1, true])
+	cards.set_creature("BOLT", {"frames": [{"group": 0, "frame": 0, "left": 10, "top": 100, "full_size": Vector2i(54,
+			556), "image": Image.create(30, 456, false, Image.FORMAT_RGBA8)}]})
+	cards._process(0.01)
+	var bolt: MeshInstance3D = cards._effects[0]["node"]
+	# its middle is 228 pixels up the leaning card (half its 456), 2 left of the hex's middle
+	_expect("the effect stands on its target: its lower edge on the ground", [bolt.visible, is_equal_approx(
+			bolt.position.distance_to(cards._effects[0]["at"]), Vector3(-2.0 * cards.PIXEL, 228.0 * cards.PIXEL,
+			0.002).length())], [true, true])
+	cards._process(1.0)
+	_expect("and ends with its last frame", cards._effects.size(), 0)
 	field._process(1.0)
 	_expect("and the flash ends", field.flashes.size(), 0)
 	cards.clear()

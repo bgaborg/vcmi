@@ -3,8 +3,10 @@ extends Node3D
 ## creature's animation is loaded (set_creature) shows its frames, placed as the 2D battle places them
 ## (BattleStacksController::getStackPositionAtHex); until then, and without one, a marker in its side's colour.
 ## What a stack does is read from how it changed since the last set_stacks: it slides to a new hex, flinches when it
-## lost creatures, and dies. The game's battle events say who strikes or shoots whom (set_action); a shot flies as a
-## dart. Without events (another human's battle in hot-seat) the stack whose turn it was strikes when an enemy is hurt.
+## lost creatures, and dies. The game's battle events say who strikes or shoots whom (set_action); a shot flies as
+## the shooter's own missile (a dart until that is read), a spell plays its own animation on its target (play_effect)
+## and the casting hero raises its hand. Without events (another human's battle in hot-seat) the stack whose turn it
+## was strikes when an enemy is hurt.
 ## The node's space is the field's: x right, y up, z towards the player.
 
 ## animation groups, as the game's ECreatureAnimType
@@ -40,7 +42,8 @@ var _stacks := {} ## stack id: {node, sprite, marker, count, stack, group, loop,
 var _lean := deg_to_rad(82.0)
 var _turn := -1 ## the id of the stack whose turn it was at the last set_stacks
 var _action := 0 ## the sequence of the last battle event shown (set_action); 0: none came, attacks are guessed
-var _shots: Array[Dictionary] = [] ## flying: {node, from, to, time}
+var _shots: Array[Dictionary] = [] ## flying: {node, from, to, time, missile (its animation, or none for a dart)}
+var _effects: Array[Dictionary] = [] ## playing once: {node, name (the animation), at, time, waited}
 var _dart := BoxMesh.new()
 var _unit := QuadMesh.new()
 
@@ -70,8 +73,43 @@ func _process(delta: float) -> void:
 			var at: Vector3 = (shot["from"] as Vector3).lerp(shot["to"], along) + Vector3.UP * 0.06 * sin(along * PI)
 			var ahead: Vector3 = (shot["to"] as Vector3) - shot["from"] + Vector3.UP * 0.06 * PI * cos(along * PI)
 			node.position = at
-			if ahead.length_squared() > 0.000001 and not ahead.normalized().is_equal_approx(Vector3.UP):
+			if ahead.length_squared() < 0.000001 or ahead.normalized().is_equal_approx(Vector3.UP):
+				continue
+			# the shooter's own missile once its frames are read: its level frame (the middle one of those drawn from
+			# pointing up to pointing down), as a card along the flight. Until then a plain dart
+			var frames: Array = creatures.get(shot["missile"], {}).get(0, [])
+			if frames.is_empty():
 				node.basis = Basis.looking_at(ahead.normalized(), Vector3.UP)
+				continue
+			@warning_ignore("integer_division")
+			var frame: Dictionary = frames[frames.size() / 2]
+			var across := ahead.normalized()
+			var side := across.cross(Vector3.UP).normalized()
+			node.mesh = _unit
+			node.material_override = _art(frame)
+			node.basis = Basis(across * frame["rect"].size.x * PIXEL, side.cross(across) * frame["rect"].size.y * PIXEL,
+					side)
+	for effect in _effects.duplicate():
+		var frames: Array = creatures.get(effect["name"], {}).get(0, [])
+		var node: MeshInstance3D = effect["node"]
+		if frames.is_empty(): # not read yet: it waits two seconds for its frames, then is given up
+			effect["waited"] += delta
+		else:
+			effect["time"] += delta
+		var index := int(effect["time"] * FPS)
+		if index >= frames.size() and (not frames.is_empty() or effect["waited"] > 2.0):
+			node.queue_free()
+			_effects.erase(effect)
+		elif not frames.is_empty():
+			# as the 2D battle: the frame's middle over the hex's, its lower edge on the ground
+			var frame: Dictionary = frames[index]
+			var rect: Rect2 = frame["rect"]
+			var full: Vector2 = frame["full"]
+			node.visible = true
+			node.material_override = _art(frame)
+			node.scale = Vector3(rect.size.x * PIXEL, rect.size.y * PIXEL, 1.0)
+			node.position = (effect["at"] as Vector3) + node.basis.orthonormalized() * Vector3((rect.get_center().x
+					- full.x / 2.0) * PIXEL, (full.y - rect.get_center().y) * PIXEL, 0.002) # along the leaning card
 	for card: Dictionary in _stacks.values():
 		card["time"] += delta
 		if card["slide"] < 1.0:
@@ -94,15 +132,19 @@ func set_creature(name_: String, decoded: Dictionary) -> void:
 			groups[int(frame["group"])] = []
 		var zoom: float = frame.get("scale", 1)
 		groups[int(frame["group"])].append({"image": image, "texture": null, "rect": Rect2(frame["left"] / zoom,
-				frame["top"] / zoom, image.get_width() / zoom, image.get_height() / zoom)})
+				frame["top"] / zoom, image.get_width() / zoom, image.get_height() / zoom),
+				"full": Vector2(frame.get("full_size", Vector2i(450, 400))) / zoom})
 	creatures[name_] = groups
 
 
 ## The animations of the shown stacks that set_creature has not got yet
 func missing_creatures() -> PackedStringArray:
 	var missing := PackedStringArray()
+	var wanted: Array = _effects.map(func(effect): return effect["name"])
 	for card: Dictionary in _stacks.values():
-		var creature: String = card["stack"].get("animation", "")
+		wanted.append(card["stack"].get("animation", ""))
+		wanted.append(card["stack"].get("missile", ""))
+	for creature: String in wanted:
 		if creature != "" and not creatures.has(creature) and not creature in missing:
 			missing.append(creature)
 	return missing
@@ -176,6 +218,17 @@ func set_action(data: Dictionary) -> void:
 	_action = sequence
 	var id: int = data.get("action_stack", -1)
 	var kind: int = data.get("action_kind", 0)
+	if kind == 3 and sequence != 0:
+		# the casting hero raises its hand; the spell's own animation plays on its target stack, else on its hex
+		var caster: int = HERO_ID - int(data.get("action_side", -1))
+		if data.get("action_side", -1) >= 0 and _stacks.has(caster):
+			_play(_stacks[caster], Group.ATTACK, false)
+		var struck: int = data.get("action_target", -1)
+		var effect: String = data.get("action_effect", "")
+		if effect != "" and _stacks.has(struck):
+			play_effect(effect, _place(_stacks[struck]["stack"]))
+		elif effect != "" and data.get("action_hex", -1) >= 0:
+			play_effect(effect, _place({"hex": data["action_hex"]}))
 	if sequence == 0 or not _stacks.has(id):
 		return
 	attack(id, kind == 2)
@@ -187,7 +240,17 @@ func set_action(data: Dictionary) -> void:
 		add_child(dart)
 		var chest := Vector3(0.0, 0.05, 0.0)
 		_shots.append({"node": dart, "time": 0.0, "from": _stacks[id]["node"].position + chest,
-				"to": _stacks[target]["node"].position + chest})
+				"to": _stacks[target]["node"].position + chest, "missile": _stacks[id]["stack"].get("missile", "")})
+
+
+## Animation `effect` (a spell's own, read like a creature's) plays once, standing at `at` (as _place gives it)
+func play_effect(effect: String, at: Vector3) -> void:
+	var node := MeshInstance3D.new()
+	node.mesh = _unit
+	node.visible = false
+	node.rotation.x = _lean - PI / 2.0
+	add_child(node)
+	_effects.append({"node": node, "name": effect, "at": at, "time": 0.0, "waited": 0.0})
 
 
 ## The battle is over: no card and no creature's frames are kept for the next one
@@ -195,9 +258,10 @@ func clear() -> void:
 	set_stacks([])
 	_turn = -1
 	_action = 0
-	for shot in _shots:
-		shot["node"].queue_free()
+	for flying in _shots + _effects:
+		flying["node"].queue_free()
 	_shots.clear()
+	_effects.clear()
 	creatures.clear()
 
 
@@ -298,14 +362,36 @@ func _dress(card: Dictionary) -> void:
 				MARKER.y / 2.0 - (FEET - ANCHOR.y) * PIXEL))
 
 
+## A frame's texture, made (and uploaded) when the frame first shows: a creature's hundred frames never in one tick
+func _texture(frame: Dictionary) -> Texture2D:
+	if frame["texture"] == null:
+		frame["texture"] = ImageTexture.create_from_image(frame["image"])
+		frame.erase("image")
+	return frame["texture"]
+
+
+## A material of its own with a frame's texture, for a missile or an effect (few, short-lived)
+func _art(frame: Dictionary) -> StandardMaterial3D:
+	if not frame.has("material"):
+		var material := StandardMaterial3D.new()
+		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		material.cull_mode = BaseMaterial3D.CULL_DISABLED
+		material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		material.albedo_texture = _texture(frame)
+		frame["material"] = material
+	return frame["material"]
+
+
 ## The frame of the card's group at its time on the sprite; the marker instead while the creature has no frames
 func _show_frame(card: Dictionary) -> void:
 	var stack: Dictionary = card["stack"]
 	var groups: Dictionary = creatures.get(stack.get("animation", ""), {})
 	var hero: bool = stack.get("hero", false)
-	var frames: Array = groups.get(0 if hero else card["group"], []) # a hero's first group is its standing one
+	# a hero has its own groups: 0 standing, 4 casting (EHeroAnimType), which its card plays as its attack
+	var group: int = (4 if card["group"] == Group.ATTACK else 0) if hero else card["group"]
+	var frames: Array = groups.get(group, [])
 	if frames.is_empty() and card["group"] != Group.DEATH: # a creature without this group stands
-		frames = groups.get(Group.HOLDING, [])
+		frames = groups.get(0 if hero else Group.HOLDING, [])
 	var sprite: MeshInstance3D = card["sprite"]
 	if sprite.visible == frames.is_empty(): # the art came, or went
 		sprite.visible = not frames.is_empty()
@@ -333,9 +419,7 @@ func _show_frame(card: Dictionary) -> void:
 	var facing := 1.0 if clampi(stack.get("side", 0), 0, 1) == 0 else -1.0
 	var anchor := HERO_ANCHOR.x if hero else ANCHOR.x + (WIDE if stack.get("wide", false) else 0.0)
 	var feet := HERO_ANCHOR.y if hero else FEET
-	if frame["texture"] == null: # the upload when the frame first shows: a creature's hundred frames never in one tick
-		frame["texture"] = ImageTexture.create_from_image(frame["image"])
-		frame.erase("image")
+	_texture(frame)
 	(sprite.material_override as StandardMaterial3D).albedo_texture = frame["texture"]
 	sprite.scale = Vector3(facing * rect.size.x * PIXEL, rect.size.y * PIXEL, 1.0)
 	sprite.position = Vector3(facing * (rect.get_center().x - anchor) * PIXEL, (feet - rect.get_center().y) * PIXEL, 0.0)

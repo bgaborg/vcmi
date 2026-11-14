@@ -1387,6 +1387,9 @@ public:
 		result["heroes"] = heroes;
 		result["action"] = int64_t(data->actionSequence);
 		result["action_kind"] = data->actionKind;
+		// a spell: its own animation (empty: none) and, cast by a hero, the hero's side (else -1)
+		result["action_effect"] = String::utf8(data->actionEffect, strnlen(data->actionEffect, sizeof(data->actionEffect)));
+		result["action_side"] = data->actionSide < 2 ? int64_t(data->actionSide) : int64_t(-1);
 		result["action_stack"] = data->actionStack == VCMI_NONE ? int64_t(-1) : int64_t(data->actionStack);
 		result["action_target"] = data->actionTarget == VCMI_NONE ? int64_t(-1) : int64_t(data->actionTarget);
 		result["action_hex"] = data->actionHex < VCMI_BATTLE_HEXES ? int64_t(data->actionHex) : int64_t(-1);
@@ -1416,6 +1419,7 @@ public:
 			stack["active"] = (s.flags & VCMI_STACK_ACTIVE) != 0;
 			stack["turn"] = (s.flags & VCMI_STACK_TURN) != 0;
 			stack["animation"] = String::utf8(s.animation, strnlen(s.animation, sizeof(s.animation)));
+			stack["missile"] = String::utf8(s.missile, strnlen(s.missile, sizeof(s.missile)));
 			stacks.push_back(stack);
 		}
 		result["stacks"] = stacks;

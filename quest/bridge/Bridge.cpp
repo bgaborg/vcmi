@@ -65,6 +65,7 @@
 #include "../../lib/mapping/TerrainTile.h"
 #include "../../lib/networkPacks/PacksForClientBattle.h"
 #include "../../lib/pathfinder/CGPathNode.h"
+#include "../../lib/spells/CSpell.h"
 #include "../../lib/texts/CGeneralTextHandler.h"
 #include "../../lib/texts/MetaString.h"
 #include "render/IImage.h"
@@ -452,6 +453,8 @@ struct BattleAction
 	uint32_t target = VCMI_NONE;
 	uint16_t hex = 0xffff;
 	uint8_t kind = 0;
+	uint8_t side = 255;
+	std::string effect;
 };
 std::mutex actionMutex;
 BattleAction lastAction;
@@ -477,6 +480,8 @@ public:
 		lastAction.stack = attack->stackAttacking;
 		lastAction.target = attack->bsa.empty() ? VCMI_NONE : attack->bsa.front().stackAttacked;
 		lastAction.hex = 0xffff;
+		lastAction.side = 255;
+		lastAction.effect.clear();
 	}
 	void battleSpellCast(const BattleID &, const BattleSpellCast * cast) override
 	{
@@ -488,6 +493,14 @@ public:
 		lastAction.stack = cast->casterStack >= 0 ? static_cast<uint32_t>(cast->casterStack) : VCMI_NONE;
 		lastAction.target = cast->affectedCres.empty() ? VCMI_NONE : cast->affectedCres.front();
 		lastAction.hex = cast->tile.isValid() ? static_cast<uint16_t>(cast->tile.toInt()) : 0xffff;
+		lastAction.side = cast->castByHero && cast->casterStack < 0 ? (cast->side == BattleSide::DEFENDER ? 1 : 0) : 255;
+		// the first picture the 2D battle plays on what the spell affects, else on the hex it hits
+		lastAction.effect.clear();
+		if(const CSpell * spell = cast->spellID.toSpell())
+			for(const auto * queue : {&spell->animationInfo.affect, &spell->animationInfo.hit})
+				for(const auto & item : *queue)
+					if(lastAction.effect.empty() && !item.resourceName.empty())
+						lastAction.effect = item.resourceName.getOriginalName();
 	}
 };
 
@@ -660,6 +673,8 @@ void publishBattle()
 			{
 				const std::string name = type->animDefName.getOriginalName();
 				std::memcpy(out.animation, name.data(), std::min(name.size(), sizeof(out.animation) - 1));
+				const std::string missile = type->animation.projectileImageName.getOriginalName();
+				std::memcpy(out.missile, missile.data(), std::min(missile.size(), sizeof(out.missile) - 1));
 			}
 		}
 		// as BattleFieldController chooses its background
@@ -707,6 +722,8 @@ void publishBattle()
 		next.actionTarget = lastAction.target;
 		next.actionHex = lastAction.hex;
 		next.actionKind = lastAction.kind;
+		next.actionSide = lastAction.side;
+		std::memcpy(next.actionEffect, lastAction.effect.data(), std::min(lastAction.effect.size(), sizeof(next.actionEffect) - 1));
 	}
 	std::lock_guard lock(battleMutex);
 	next.generation = publishedBattle.generation;
@@ -1443,7 +1460,7 @@ uint32_t decodeFrames(const char * name, VcmiAnimationData * out)
 static_assert(sizeof(VcmiFrame) == 36, "VcmiFrame is part of the bridge ABI");
 static_assert(sizeof(VcmiMove) == 20, "VcmiMove is part of the bridge ABI");
 static_assert(sizeof(VcmiObject) == 20, "VcmiObject is part of the bridge ABI");
-static_assert(sizeof(VcmiBattleStack) == 48, "VcmiBattleStack is part of the bridge ABI");
+static_assert(sizeof(VcmiBattleStack) == 72, "VcmiBattleStack is part of the bridge ABI");
 static_assert(sizeof(VcmiPathNode) == 8, "VcmiPathNode is part of the bridge ABI");
 static_assert(sizeof(VcmiPanelHero) == 64, "VcmiPanelHero is part of the bridge ABI");
 static_assert(sizeof(VcmiPanelTown) == 56, "VcmiPanelTown is part of the bridge ABI");

@@ -33,7 +33,8 @@ As of 2026-11-14: milestones 5a to 5f and the points left after them (events, si
   - **Battle events:** the bridge registers an `IBattleEventsReceiver` with the client for the local player (`registerBattleEvents`) and publishes the last attack, shot or spell (`action*` in `VcmiBattle`). The table plays the attacker's group, flies a dart from a shooter to its target, and flashes a spell's hex and first target. The guessed attack is only used while no event has come.
   - **Sharper creatures:** `decode_animation_hd` upscales the standing and moving groups 2x with the atlas's xBRZ; a frame's texture is made when it first shows.
   - **Sieges:** `wallPieces` in the bridge lists each wall piece's current picture and place (a copy of `BattleSiegeController`'s private rules: check it after a rebase); a worker decodes them with their colour key and lays them over the background, again when the list changes.
-  - **Heroes:** each side's hero stands at its end of the field in its battle animation's first group.
+  - **Heroes:** each side's hero stands at its end of the field in its battle animation's first group, and plays its casting group when it casts.
+  - **Missiles and spells:** a shot flies as the shooter's own missile animation (`VcmiBattleStack.missile`), its level frame turned along the flight. A spell plays its own animation once on its first target (`actionEffect`: the first picture of the spell's `affect` queue, else of `hit`), standing on the hex with its lower edge on the ground. Both are read like a creature's frames, on first use.
   - **Loading** lives in `battle_field.gd` (`poll`, `load_creatures`), not in `main.gd`.
 
 ## 2. Facts from the code (read 2026-11-14; check again before 5b)

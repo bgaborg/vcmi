@@ -10,7 +10,7 @@
 #include <stdint.h>
 
 // raise on any change to the structs below; the extension refuses a table with another version
-#define VCMI_BRIDGE_VERSION 18
+#define VCMI_BRIDGE_VERSION 19
 
 typedef struct VcmiBridgeStats
 {
@@ -100,7 +100,8 @@ typedef struct VcmiBattleStack
 	uint8_t flags; // VCMI_STACK_*
 	uint8_t pad[3];
 	char animation[32]; // the creature's battle animation (an AnimationPath), cut to fit
-} VcmiBattleStack; // 48 bytes
+	char missile[24]; // a shooter's missile animation, empty for others
+} VcmiBattleStack; // 72 bytes
 #define VCMI_STACK_WIDE 1 // two hexes: the other one is behind it, towards its side's edge
 #define VCMI_STACK_ALIVE 2
 #define VCMI_STACK_ACTIVE 4 // the stack the local player chooses an action for
@@ -140,6 +141,9 @@ typedef struct VcmiBattle
 	uint8_t actionKind; // VCMI_ACTION_*
 	uint8_t wallCount; // a siege's wall pieces, in drawing order; 0 in the field
 	char heroes[2][32]; // the attacker's and the defender's hero: its battle animation, empty without a hero
+	char actionEffect[32]; // a spell's own animation, played on what it affects; empty when it has none
+	uint8_t actionSide; // a spell cast by a hero: its side (0 attacker, 1 defender); else 255
+	uint8_t pad2[3];
 	VcmiWallPiece walls[VCMI_WALL_PIECES];
 	VcmiBattleStack stacks[VCMI_BATTLE_STACKS];
 } VcmiBattle;
