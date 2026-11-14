@@ -10,7 +10,7 @@
 #include <stdint.h>
 
 // raise on any change to the structs below; the extension refuses a table with another version
-#define VCMI_BRIDGE_VERSION 10
+#define VCMI_BRIDGE_VERSION 11
 
 typedef struct VcmiBridgeStats
 {
@@ -112,7 +112,9 @@ typedef struct VcmiObject
 	uint8_t visit; // visitable tile = anchor - (visit >> 4, visit & 15)
 	uint16_t animation; // index into the animation names (VcmiBridgeApi.animation)
 	uint16_t flags; // VCMI_OBJECT_*
-} VcmiObject;
+	// a boat with a hero: its flag in the hero's colour and its waves, as index + 1 into the animation names; 0: none
+	uint16_t flagAnimation, overlayAnimation;
+} VcmiObject; // 20 bytes
 #define VCMI_OBJECT_HERO 1
 #define VCMI_OBJECT_BOAT 2
 #define VCMI_OBJECT_TOWN 4

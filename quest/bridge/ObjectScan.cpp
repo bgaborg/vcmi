@@ -81,7 +81,14 @@ VcmiObject ObjectScan::encode(const CGObjectInstance * obj)
 		out.group = idleGroups[std::min<size_t>(direction, 8)];
 		// a boat with a hero flies the hero's flag (MapRendererObjects::getFlagAnimation), and stands in for the hidden hero
 		if(captain)
+		{
 			out.owner = static_cast<uint8_t>(captain->getOwner().getNum());
+			// MapRendererObjects::getFlagAnimation, getOverlayAnimation
+			if(out.owner < boat->flagAnimations.size() && !boat->flagAnimations[out.owner].empty())
+				out.flagAnimation = nameIndex(boat->flagAnimations[out.owner].getOriginalName()) + 1;
+			if(!boat->overlayAnimation.empty())
+				out.overlayAnimation = nameIndex(boat->overlayAnimation.getOriginalName()) + 1;
+		}
 	}
 	else if(owner != PlayerColor::UNFLAGGABLE)
 		out.flags |= VCMI_OBJECT_FLAGGABLE;
@@ -99,10 +106,16 @@ uint16_t ObjectScan::animationOf(const CGObjectInstance * obj)
 		if(auto known = byTemplate.find(obj->appearance); known != byTemplate.end())
 			return known->second;
 	const std::string name = ownAnimation ? boat->actualAnimation.getOriginalName() : obj->appearance->animationFile.getOriginalName();
+	const uint16_t index = nameIndex(name);
+	if(!ownAnimation)
+		byTemplate[obj->appearance] = index;
+	return index;
+}
+
+uint16_t ObjectScan::nameIndex(const std::string & name)
+{
 	auto [entry, added] = byName.try_emplace(name, static_cast<uint16_t>(names.size()));
 	if(added)
 		names.push_back(name);
-	if(!ownAnimation)
-		byTemplate[obj->appearance] = entry->second;
 	return entry->second;
 }

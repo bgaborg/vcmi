@@ -35,6 +35,7 @@ public:
 private:
 	VcmiObject encode(const CGObjectInstance * obj);
 	uint16_t animationOf(const CGObjectInstance * obj);
+	uint16_t nameIndex(const std::string & name);
 
 	std::vector<VcmiObject> table;
 	std::vector<std::string> names;

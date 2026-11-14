@@ -15,7 +15,7 @@ Goal: the most immersive way to play Heroes 3 on Quest 3, with no motion sicknes
 
 ## 0. Status and next steps
 
-As of 2026-11-12.
+As of 2026-11-14.
 
 ### Done
 
@@ -43,7 +43,7 @@ Not closed yet:
 
 1. **Phase 4, tabletop adventure map** ([`PHASE4.md`](PHASE4.md); look and layout: [`VISUALS.md`](VISUALS.md)):
    1. **4d, the side panel:** done. A whole turn passes on the headset without the 2D side panel (`quest/tools/xr-panel.sh`).
-   2. **4e, the rest:** boats' flags, teleports, embarking and fades; an enemy hero's flag seen moving.
+   2. **4e, the rest:** boats' flags and waves are built (not yet seen on the headset); fades are left out (`shortcut:` in [`PHASE4.md`](PHASE4.md)). To see on the headset: boats, teleports, embarking, an enemy hero's flag moving.
    3. **4f, exit pass:** the first scenario played on the table, then the heaviest map for the budgets.
    4. **Needs a person in the headset:** the look review, the comfort check, and ray jitter against the tile size (check 3).
 2. **Milestone 4, battle**, then **phase 5, battle diorama**. The diorama uses the map's book, paper and cards ([`VISUALS.md`](VISUALS.md#6-the-battle-diorama-phase-5)).

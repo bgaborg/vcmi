@@ -106,14 +106,14 @@ Tiles and fog are small, so the bridge publishes their full state; objects are m
 ```
 struct VcmiTile   { uint8_t terrain, terrainView, river, riverDir, road, roadDir, flags, pad; };  // 8 bytes
 struct VcmiObject { uint32_t id; uint16_t x, y; uint8_t z, owner, group, visit;
-                    uint16_t animation, flags; };                                                   // 16 bytes
+                    uint16_t animation, flags, flagAnimation, overlayAnimation; };                  // 20 bytes
 struct VcmiMove   { uint32_t sequence, object; uint16_t fromX, fromY, toX, toY; uint8_t fromZ, toZ, type, pad;
                     uint32_t durationMs; };                                                         // 24 bytes, one in the object state
 ```
 
 - Tiles: 127 008 x 8 bytes = 1 MB, once per map.
 - Fog: up to 127 KB (1 byte per tile, as the game stores it), three buffers: 381 KB.
-- Objects: 64 743 x 16 bytes = 1 MB on the heaviest map (the bridge's table, its published copy and Godot's copy), plus a log of 4 096 changes. Frames advance in the shader from time, so the record has no frame; `visit` is the offset of the visitable tile.
+- Objects: 64 743 x 20 bytes = 1.3 MB on the heaviest map (the bridge's table, its published copy and Godot's copy), plus a log of 4 096 changes. Frames advance in the shader from time, so the record has no frame; `visit` is the offset of the visitable tile.
 - Animation names: a string table published with the object list (`animation` is its index; 1 875 names on the heaviest map).
 - Battle: under 4 KB.
 

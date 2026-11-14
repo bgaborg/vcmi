@@ -1083,6 +1083,7 @@ uint32_t decodeFrames(const char * name, VcmiAnimationData * out)
 
 static_assert(sizeof(VcmiFrame) == 36, "VcmiFrame is part of the bridge ABI");
 static_assert(sizeof(VcmiMove) == 20, "VcmiMove is part of the bridge ABI");
+static_assert(sizeof(VcmiObject) == 20, "VcmiObject is part of the bridge ABI");
 static_assert(sizeof(VcmiPathNode) == 8, "VcmiPathNode is part of the bridge ABI");
 static_assert(sizeof(VcmiPanelHero) == 64, "VcmiPanelHero is part of the bridge ABI");
 static_assert(sizeof(VcmiPanelTown) == 56, "VcmiPanelTown is part of the bridge ABI");

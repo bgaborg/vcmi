@@ -764,8 +764,10 @@ public:
 			{
 				if(!(o.flags & VCMI_OBJECT_PRESENT) || (o.flags & VCMI_OBJECT_HIDDEN) || o.z != level || !anchors.has_point(Vector2i(o.x, o.y)))
 					return;
-				if(o.animation < animationNames.size() && seen.insert(o.animation).second)
-					names.push_back(animationNames[o.animation]);
+				// the body, and a manned boat's flag and waves (index + 1)
+				for(const int animation : {int(o.animation), o.flagAnimation - 1, o.overlayAnimation - 1})
+					if(animation >= 0 && size_t(animation) < animationNames.size() && seen.insert(uint16_t(animation)).second)
+						names.push_back(animationNames[animation]);
 				// heroes fly a separate flag animation (MapRendererObjects::getFlagAnimation)
 				if((o.flags & VCMI_OBJECT_HERO) && o.owner < 8 && flags.insert(o.owner).second)
 					names.push_back("AF0" + std::to_string(o.owner));
@@ -911,10 +913,13 @@ public:
 		const bool flat = isFlat(animationNames[o.animation]);
 		const size_t first = out.size();
 		add(o.animation, 0, owner);
-		// shortcut: a boat with a hero flies boat->flagAnimations[owner] with a wave overlay (MapRendererObjects::
-		// getFlagAnimation, getOverlayAnimation); not published by the bridge yet, so boats have no flag
 		if(hero && o.owner < 8)
 			add(FLAG_KEY + o.owner, 1, 9);
+		// a boat with a hero: its flag, then its waves (MapRendererObjects::renderObject)
+		if(o.flagAnimation)
+			add(o.flagAnimation - 1, 1, 9);
+		if(o.overlayAnimation)
+			add(o.overlayAnimation - 1, 2, 9);
 		if(flat)
 			for(size_t i = first; i < out.size(); i++)
 				out[i].custom[1] += 4096;
@@ -1172,7 +1177,9 @@ public:
 					continue;
 				}
 				const VcmiObject & o = objects[sprite.id];
-				const std::string name = sprite.order ? "AF0" + std::to_string(o.owner) : animationNames[o.animation];
+				const bool hero = o.flags & VCMI_OBJECT_HERO;
+				const int extra = (sprite.order == 1 ? o.flagAnimation : o.overlayAnimation) - 1;
+				const std::string name = sprite.order && hero ? "AF0" + std::to_string(o.owner) : animationNames[sprite.order ? extra : o.animation];
 				spriteNames.push_back(String((name + " " + std::to_string(o.x) + "," + std::to_string(o.y) + " " + std::to_string(o.group)).c_str()));
 			}
 		spriteMicros = microsSince(from);
