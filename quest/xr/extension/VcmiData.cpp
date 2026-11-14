@@ -1349,7 +1349,8 @@ public:
 	}
 
 	/// the battle the game shows (VcmiBridgeApi.battle), when it changed since the last call, else an empty
-	/// Dictionary: {shown, my_turn, picture (the background's name, for image_file), reach: PackedByteArray (1 for each hex the active stack can move to), blocked:
+	/// Dictionary: {shown, my_turn, picture (the background's name, for image_file), walls ([{name, at}]: a siege's
+	/// wall pieces, each a picture named as the background with its last four letters replaced), reach: PackedByteArray (1 for each hex the active stack can move to), blocked:
 	/// PackedByteArray (1 for each hex with an obstacle or a wall),
 	/// stacks: [{id, hex, side (0 attacker), owner, count, wide, alive, active, turn (its turn, any player's),
 	/// animation}]}
@@ -1369,6 +1370,16 @@ public:
 		result["picture"] = String::utf8(data->picture, strnlen(data->picture, sizeof(data->picture)));
 		// the last attack (kind 1), shot (2) or spell (3): its sequence (0: none yet), the acting stack's and the first
 		// hurt stack's id (-1: a hero, none), a spell's target hex (-1: none)
+		Array walls;
+		for(int i = 0; i < std::min<int>(data->wallCount, VCMI_WALL_PIECES); i++)
+		{
+			const VcmiWallPiece & w = data->walls[i];
+			Dictionary piece;
+			piece["name"] = String::utf8(w.name, strnlen(w.name, sizeof(w.name)));
+			piece["at"] = Vector2i(w.x, w.y);
+			walls.push_back(piece);
+		}
+		result["walls"] = walls;
 		result["action"] = int64_t(data->actionSequence);
 		result["action_kind"] = data->actionKind;
 		result["action_stack"] = data->actionStack == VCMI_NONE ? int64_t(-1) : int64_t(data->actionStack);

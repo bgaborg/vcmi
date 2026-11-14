@@ -155,6 +155,10 @@ func _add_table_panel(room: Node3D) -> void:
 func _add_battle(room: Node3D) -> void:
 	var field: Node3D = preload("res://battle_field.gd").new()
 	room.add_table_panel(field)
+	var seat: Transform3D = room.seat()
+	views["sprites-battle"] = [seat.origin, seat.origin - seat.basis.z]
+	_minimap_view(room, "sprites-battle-low", Vector3(-0.1, 0.2, 0.55), Vector3(0.0, 0.0, 0.0))
+	_minimap_view(room, "sprites-battle-top", Vector3(0.0, 1.0, 0.01), Vector3(0.0, 0.0, 0.0))
 	field.show_sample()
 	field.set_hover(5 * 17 + 9)
 	# the creatures' own frames and the battlefield's picture, when quest/tools/h3-extract.py has put them in
@@ -169,15 +173,28 @@ func _add_battle(room: Node3D) -> void:
 			for frame: Dictionary in listed["frames"]:
 				frame["image"] = Image.load_from_file(folder.path_join(frame["file"])) if frame["file"] != "" else null
 			field.cards.set_creature(creature, listed)
+	if "siege" in OS.get_cmdline_user_args():
+		# a Castle under siege, its walls whole (config/factions/castle.json), read as main.gd reads them from the
+		# bridge: `h3-extract.py raw:SGCSBACK.pcx raw:SGCSMOAT.pcx ...` for each name below
+		var raw := ProjectSettings.globalize_path(H3.path_join("raw"))
+		var background: Image = field.decode_picture(FileAccess.get_file_as_bytes(raw.path_join("SGCSBACK")))
+		var pieces := []
+		for piece in [["MOAT", 410, 90], ["MLIP", 403, 80], ["TPWL", 600, 49], ["MAN1", 720, 158], ["TW11", 602, 500],
+				["WA11", 528, 350], ["WA31", 469, 291], ["WA41", 470, 127], ["WA61", 524, 32], ["TW21", 569, 35],
+				["ARCH", 477, 238], ["WA2", 512, 347], ["WA5", 489, 79], ["MANC", 720, 158], ["TW1C", 602, 500],
+				["TW2C", 557, 24]]:
+			pieces.append({"at": Vector2i(piece[1], piece[2]), "image": field.decode_picture(
+					FileAccess.get_file_as_bytes(raw.path_join("SGCS" + piece[0])), true)})
+		if background != null:
+			field.compose_picture(background, pieces)
+			background.generate_mipmaps()
+			field.set_picture(ImageTexture.create_from_image(background))
+		return
 	var picture := ProjectSettings.globalize_path(H3.path_join("CMBKGRMT.png"))
 	if FileAccess.file_exists(picture):
 		var image := Image.load_from_file(picture)
 		image.generate_mipmaps()
 		field.set_picture(ImageTexture.create_from_image(image))
-	var seat: Transform3D = room.seat()
-	views["sprites-battle"] = [seat.origin, seat.origin - seat.basis.z]
-	_minimap_view(room, "sprites-battle-low", Vector3(-0.1, 0.2, 0.55), Vector3(0.0, 0.0, 0.0))
-	_minimap_view(room, "sprites-battle-top", Vector3(0.0, 1.0, 0.01), Vector3(0.0, 0.0, 0.0))
 
 
 ## the wrist panel's two pages (wrist_panel.gd) side by side, 35 cm from the eyes as a raised wrist is

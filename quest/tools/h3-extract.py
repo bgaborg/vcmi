@@ -8,7 +8,8 @@ Usage: h3-extract.py NAME [NAME...]      (e.g. CPKMAN.def CmBkGrMt.pcx; case doe
 
 An animation becomes quest/out/h3/<NAME>/<group>_<frame>.png (cropped, shadow in the alpha) and frames.json:
 {"frames": [{"group", "frame", "left", "top", "full_size": [w, h], "file"}]}, the layout of VcmiData.decode_animation.
-A picture becomes quest/out/h3/<NAME>.png.
+A picture becomes quest/out/h3/<NAME>.png. raw:NAME writes the file's own bytes to quest/out/h3/raw/<NAME>, as the
+bridge's imageFile hands them to the host.
 """
 
 import json
@@ -126,4 +127,9 @@ def extract_pcx(name, data):
 
 
 for wanted in sys.argv[1:]:
+    if wanted.startswith("raw:"):
+        (OUT / "raw").mkdir(parents=True, exist_ok=True)
+        (OUT / "raw" / wanted[4:].upper().rsplit(".", 1)[0]).write_bytes(lod_file(wanted[4:]))
+        print(wanted, "-> raw")
+        continue
     (extract_def if wanted.lower().endswith(".def") else extract_pcx)(wanted, lod_file(wanted))

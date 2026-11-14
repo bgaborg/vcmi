@@ -147,6 +147,14 @@ func _initialize() -> void:
 	var picture: Image = field.decode_picture(pcx)
 	_expect("a palette PCX", [picture.get_size(), picture.get_pixel(0, 0).r8, picture.get_pixel(0, 0).b8], [Vector2i(2,
 			1), 10, 30])
+	# a wall piece: its first palette colour is clear, and it covers the background only where it is not
+	var piece: Image = field.decode_picture(pcx, true)
+	_expect("a keyed PCX", [piece.get_pixel(0, 0).a8, piece.get_pixel(1, 0).a8], [255, 0])
+	var ground := Image.create(4, 1, false, Image.FORMAT_RGBA8)
+	ground.fill(Color.WHITE)
+	field.compose_picture(ground, [{"image": piece, "at": Vector2i(1, 0)}, {"image": null, "at": Vector2i.ZERO}])
+	_expect("a wall over the ground", [ground.get_pixel(0, 0).r8, ground.get_pixel(1, 0).r8, ground.get_pixel(2, 0).r8],
+			[255, 10, 255])
 	picture = field.decode_picture(PackedByteArray([3, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 30, 20, 10]))
 	_expect("a BGR PCX", [picture.get_pixel(0, 0).r8, picture.get_pixel(0, 0).b8], [10, 30])
 	_expect("not a picture", field.decode_picture(PackedByteArray([1, 2, 3])), null)

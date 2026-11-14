@@ -10,7 +10,7 @@
 #include <stdint.h>
 
 // raise on any change to the structs below; the extension refuses a table with another version
-#define VCMI_BRIDGE_VERSION 16
+#define VCMI_BRIDGE_VERSION 17
 
 typedef struct VcmiBridgeStats
 {
@@ -110,6 +110,15 @@ typedef struct VcmiBattleStack
 #define VCMI_ACTION_SHOT 2
 #define VCMI_ACTION_SPELL 3
 
+// a piece of a besieged town's walls as the 2D battle draws it now: the picture named by the background's name with
+// its last four letters ("BACK") replaced by `name`, its corner at x, y of the battlefield
+typedef struct VcmiWallPiece
+{
+	char name[12];
+	int16_t x, y;
+} VcmiWallPiece; // 16 bytes
+#define VCMI_WALL_PIECES 20
+
 #define VCMI_BATTLE_STACKS 64
 #define VCMI_BATTLE_HEXES 187
 
@@ -129,7 +138,8 @@ typedef struct VcmiBattle
 	uint32_t actionTarget; // the first hurt or affected stack's unit id, VCMI_NONE when none
 	uint16_t actionHex; // a spell's target hex, VCMI_BATTLE_HEXES and more when it has none
 	uint8_t actionKind; // VCMI_ACTION_*
-	uint8_t pad2;
+	uint8_t wallCount; // a siege's wall pieces, in drawing order; 0 in the field
+	VcmiWallPiece walls[VCMI_WALL_PIECES];
 	VcmiBattleStack stacks[VCMI_BATTLE_STACKS];
 } VcmiBattle;
 

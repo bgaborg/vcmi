@@ -508,6 +508,69 @@ std::mutex hexMutex;
 std::optional<uint16_t> pendingHexHover;
 std::vector<uint16_t> pendingHexClicks;
 
+// The pieces of the besieged town's walls as BattleSiegeController shows them now (its getWallPieceImageName,
+// getWallPieceExistence, applyGateState and showWallPiece, which are private): the moat first, then the walls in
+// their drawing order. A copy of that logic: check it against the controller when a siege looks wrong after a rebase.
+void wallPieces(const BattleSiegeController & siege, const CPlayerBattleCallback & state, VcmiBattle & out)
+{
+	const CGTownInstance * town = siege.getSiegedTown();
+	if(!town || !town->getTown())
+		return;
+	const auto & fort = town->fortificationsLevel();
+	const auto & positions = town->getTown()->clientInfo.siegePositions;
+	const auto add = [&](int visual, const std::string & name)
+	{
+		if(out.wallCount == VCMI_WALL_PIECES || visual >= static_cast<int>(positions.size()) || !positions[visual].isValid())
+			return;
+		VcmiWallPiece & piece = out.walls[out.wallCount++];
+		std::memcpy(piece.name, name.data(), std::min(name.size(), sizeof(piece.name) - 1));
+		piece.x = static_cast<int16_t>(positions[visual].x);
+		piece.y = static_cast<int16_t>(positions[visual].y);
+	};
+	const auto health = [&](EWallPart part)
+	{
+		return static_cast<int>(state.battleGetWallState(part));
+	};
+	const auto tower = [&](EWallPart part)
+	{
+		return health(part) > 0 ? "1" : "2";
+	};
+	const auto wall = [&](EWallPart part)
+	{
+		return health(part) == fort.wallsHealth ? "1" : health(part) > 0 ? "2" : "3";
+	};
+	if(fort.hasMoat)
+	{
+		add(EWallVisual::MOAT, "MOAT");
+		add(EWallVisual::MOAT_BANK, "MLIP");
+	}
+	const FactionID faction = town->getFactionID();
+	const bool low = faction == ETownType::RAMPART || faction == ETownType::NECROPOLIS || faction == ETownType::DUNGEON || faction == ETownType::STRONGHOLD;
+	add(EWallVisual::BACKGROUND_WALL, low ? "TPW1" : "TPWL");
+	add(EWallVisual::KEEP, std::string("MAN") + tower(EWallPart::KEEP));
+	add(EWallVisual::BOTTOM_TOWER, std::string("TW1") + tower(EWallPart::BOTTOM_TOWER));
+	add(EWallVisual::BOTTOM_WALL, std::string("WA1") + wall(EWallPart::BOTTOM_WALL));
+	add(EWallVisual::WALL_BELLOW_GATE, std::string("WA3") + wall(EWallPart::BELOW_GATE));
+	add(EWallVisual::WALL_OVER_GATE, std::string("WA4") + wall(EWallPart::OVER_GATE));
+	add(EWallVisual::UPPER_WALL, std::string("WA6") + wall(EWallPart::UPPER_WALL));
+	add(EWallVisual::UPPER_TOWER, std::string("TW2") + tower(EWallPart::UPPER_TOWER));
+	// the closed gate is part of the static wall; lowered and destroyed it has its own pictures
+	const EGateState gate = state.battleGetGateState();
+	if(gate == EGateState::OPENED)
+		add(EWallVisual::GATE, "DRW2");
+	else if(gate == EGateState::DESTROYED)
+		add(EWallVisual::GATE, "DRW3");
+	add(EWallVisual::GATE_ARCH, "ARCH");
+	add(EWallVisual::BOTTOM_STATIC_WALL, "WA2");
+	add(EWallVisual::UPPER_STATIC_WALL, "WA5");
+	if(fort.citadelHealth > 0 && health(EWallPart::KEEP) > 0)
+		add(EWallVisual::KEEP_BATTLEMENT, "MANC");
+	if(fort.lowerTowerHealth > 0 && health(EWallPart::BOTTOM_TOWER) > 0)
+		add(EWallVisual::BOTTOM_BATTLEMENT, "TW1C");
+	if(fort.upperTowerHealth > 0 && health(EWallPart::UPPER_TOWER) > 0)
+		add(EWallVisual::UPPER_BATTLEMENT, "TW2C");
+}
+
 // game thread, interfaceMutex held, each tick: the battle the game shows, for the table (quest/PHASE5.md 5b), and the
 // hex inputs from the table, run as BattleFieldController::mouseMoved and activateHoveredHex run the mouse's
 void publishBattle()
@@ -599,7 +662,10 @@ void publishBattle()
 		// as BattleFieldController chooses its background
 		ImagePath picture;
 		if(battle->siegeController)
+		{
 			picture = battle->siegeController->getBattleBackgroundName();
+			wallPieces(*battle->siegeController, *state, next);
+		}
 		else if(state->battleGetBattlefieldType() != BattleField::NONE)
 			picture = state->battleGetBattlefieldType().getInfo()->graphics;
 		const std::string pictureName = picture.getName();

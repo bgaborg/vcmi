@@ -100,11 +100,7 @@ var followed_move := 0 ## the sequence of the last hero step the view followed
 var table_panel: Node3D
 ## the battle on the table (quest/PHASE5.md): shown in tabletop mode instead of the map while the game shows a battle
 var battle_field: Node3D = BattleField.new()
-var battle_shown := false ## the game shows a battle (VcmiData.battle)
 var battle_sample := false ## the test command `battle`: sample armies on the table
-var battle_picture := "" ## the name of the battlefield's background a worker reads or has read
-var battle_tasks: Array[int] = [] ## the workers that read the battle's art: waited for at exit
-var creatures_asked := {} ## the creature animations a worker decodes or has decoded for the battle's cards
 var table_icons_tried := false ## SMALRES decoded once, found or not
 var pop_cards := true ## the next sprites shown pop their cards up (room.show_sprites): the table came near
 var shown_selection := Vector3i(-2, -2, -2) ## the selected hero's tile the table last followed and marked
@@ -455,8 +451,7 @@ func _atlas_scale() -> int:
 func _exit_tree() -> void:
 	if atlas_task >= 0:
 		WorkerThreadPool.wait_for_task_completion(atlas_task)
-	for task in battle_tasks:
-		WorkerThreadPool.wait_for_task_completion(task)
+	battle_field.wait_for_workers()
 
 
 func _process(delta: float) -> void:
@@ -529,43 +524,12 @@ func _process(delta: float) -> void:
 		if changed & 4 and tracked != null and not sprites_held:
 			_update_sprite_view((origin.transform * (tracked as Transform3D)).origin)
 		_update_table(changed)
-		var battle: Dictionary = vcmi_data.battle()
-		if not battle.is_empty():
-			battle_shown = battle.get("shown", false)
-			wrist_panel.set_battle(battle_shown)
+		if battle_field.poll(vcmi_data, card_lean):
+			wrist_panel.set_battle(battle_field.shown)
 			hotkey_hover = -1 # of the buttons before
-			if battle_shown:
-				battle_field.cards.set_card_lean(card_lean)
-				battle_field.set_battle(battle)
-				var picture: String = battle.get("picture", "")
-				if picture != battle_picture:
-					battle_picture = picture
-					battle_field.set_picture(null) # bare paper until the new one is read, and without one
-					battle_tasks.append(WorkerThreadPool.add_task(func():
-						var image: Image = BattleField.decode_picture(vcmi_data.image_file(picture))
-						if image != null:
-							image.generate_mipmaps()
-							_set_battle_picture.call_deferred(picture, image)))
-			else:
-				# the next battle's stacks have the same ids: no card, no frame and no turn is left of this one
-				battle_field.clear()
-				creatures_asked.clear()
-				battle_picture = ""
-				battle_field.set_picture(null)
-				for task in battle_tasks:
-					WorkerThreadPool.wait_for_task_completion(task) # long over: this only frees their ids
-				battle_tasks.clear()
-		battle_field.visible = tabletop and (battle_shown or battle_sample)
+		battle_field.visible = tabletop and (battle_field.shown or battle_sample)
 		if battle_field.visible:
-			# a creature's frames are read from the game's files: on a worker, once
-			for creature: String in battle_field.cards.missing_creatures():
-				if not creatures_asked.has(creature):
-					creatures_asked[creature] = true
-					battle_tasks.append(WorkerThreadPool.add_task(func():
-						# standing and moving, which show most of the time, at twice the game's pixels; the rest at 1x:
-						# all at 2x would be about 15 MB a creature
-						var decoded: Dictionary = vcmi_data.decode_animation_hd(creature, 2, PackedInt32Array([0, 2]))
-						battle_field.cards.set_creature.call_deferred(creature, decoded)))
+			battle_field.load_creatures(vcmi_data)
 		if changed & 4 == 0 and not layer.visible: # out of the game (main menu, loading): always the screen
 			layer.visible = true
 
@@ -675,7 +639,7 @@ func _table_pointer() -> void:
 	var hit: Vector3 = room.table_hit(ray[0], ray[1]) if not ray.is_empty() else Vector3.INF
 	if battle_field.visible: # the battlefield covers the map: the hex under the ray lights up
 		var hex: int = battle_field.ray_hex(ray[0], ray[1]) if hit != Vector3.INF else -1
-		if battle_shown and hex >= 0 and hex != battle_field.hover:
+		if battle_field.shown and hex >= 0 and hex != battle_field.hover:
 			vcmi_data.hex_input(hex, false)
 		battle_field.set_hover(hex)
 		pointer_dot.visible = hex >= 0
@@ -798,12 +762,6 @@ func _update_hotkey_panel() -> void:
 			hotkey_hover = hit[0]
 			_show_ray(1 - wrist_hand, ray[0], ray[1].normalized(), ray[0].distance_to(hit[1]))
 	wrist_panel.set_hover(hotkey_hover)
-
-
-## A worker has read the battlefield's background `picture`: shown when it is still the battle's
-func _set_battle_picture(picture: String, image: Image) -> void:
-	if picture == battle_picture:
-		battle_field.set_picture(ImageTexture.create_from_image(image))
 
 
 ## The settings' texts on the wrist panel (wrist_panel.gd SETTINGS)
@@ -1070,7 +1028,7 @@ func _table_press(button: int, hand: int, pressed: bool) -> void:
 		var ray := _aim_ray(hand)
 		var hex: int = battle_field.ray_hex(ray[0], ray[1]) if not ray.is_empty() else -1
 		print("VCMI XR: battle hex ", hex)
-		if battle_shown and hex >= 0:
+		if battle_field.shown and hex >= 0:
 			vcmi_data.hex_input(hex, false) # the game hovers before it clicks, as in 2D
 			vcmi_data.hex_input(hex, true)
 			_pulse(hand, 0.5)
@@ -1415,9 +1373,8 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 		# 1: a sample battle on the table instead of the map (battle_field.gd), for its look and the hexes' picking
 		"battle":
 			battle_sample = a > 0.0
-			if not battle_sample and not battle_shown:
+			if not battle_sample and not battle_field.shown:
 				battle_field.clear()
-				creatures_asked.clear()
 			if battle_sample:
 				battle_field.cards.set_card_lean(card_lean)
 				battle_field.show_sample()
