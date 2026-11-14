@@ -49,7 +49,8 @@ Not closed yet:
 2. **Milestone 4, battle**, and **phase 5, battle diorama** ([`PHASE5.md`](PHASE5.md)). The diorama uses the map's book, paper and cards ([`VISUALS.md`](VISUALS.md#6-the-battle-diorama-phase-5)).
    1. **5a, the field on the table:** done on the PC (hexes, states, marker cards, picking; test command `battle 1`).
    2. **5b, the battle's state and input** through the bridge: written and built, never run.
-   3. **5c to 5f:** the creatures as cards, the actions, the battle's keys, the battlefield's picture. Plan revised on 2026-11-14 so that it is built and tested on the PC ([`PHASE5.md`, section 3](PHASE5.md#3-milestones)).
+   3. **5c to 5f:** the creatures as cards, the actions, the battle's keys, the battlefield's picture: written, tested on the PC with the game's own art (`quest/tools/h3-extract.py`), built, never run ([`PHASE5.md`](PHASE5.md)).
+   4. **Left in phase 5, after the first headset run:** a siege's walls, towers and moat as pictures; the heroes at the field's ends; projectiles and spell effects; battle events from the bridge instead of the guessed attack; HD (xBRZ) creature art.
 3. **Everything written since 2026-11-12 is untested on the headset.** [`HEADSET_CHECKLIST.md`](HEADSET_CHECKLIST.md) lists what to check, in order, before the release.
 
 Each milestone records its numbers in `DATA_BRIDGE.md` and is optimised before the next one starts.

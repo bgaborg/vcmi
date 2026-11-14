@@ -217,6 +217,8 @@ func _dress(card: Dictionary) -> void:
 	(card["node"] as Node3D).rotation.x = _lean - PI / 2.0 if alive or has_art else -PI / 2.0
 	(card["count"] as Label3D).text = str(stack.get("count", 1))
 	(card["count"] as Label3D).visible = alive
+	# beside the feet, on the side the stack faces, as the 2D battle's count box
+	(card["count"] as Label3D).position.x = (1.0 if side == 0 else -1.0) * 0.6 * BattleMath.PITCH.x * PIXEL
 	if card["slide"] >= 1.0:
 		(card["node"] as Node3D).position = _place(stack) + (Vector3.ZERO if alive or has_art else Vector3(0.0, 0.001,
 				MARKER.y / 2.0 - (FEET - ANCHOR.y) * PIXEL))

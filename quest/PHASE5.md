@@ -2,7 +2,7 @@
 
 The battle played on the war table, as the adventure map is in [phase 4](PHASE4.md). Look and layout: [`VISUALS.md`, section 6](VISUALS.md#6-the-battle-diorama-phase-5). Data path: [`DATA_BRIDGE.md`](DATA_BRIDGE.md) (milestone 4, battle).
 
-As of 2026-11-14: milestone 5a is built and checked on the PC; 5b is written and builds for Android. Nothing of phase 5 has run on the headset.
+As of 2026-11-14: milestones 5a to 5f are written, tested on the PC and build for Android. Nothing of phase 5 has run on the headset: [`HEADSET_CHECKLIST.md`](HEADSET_CHECKLIST.md), section 3.
 
 ## 1. What exists
 
