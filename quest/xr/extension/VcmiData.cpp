@@ -1337,7 +1337,8 @@ public:
 	}
 
 	/// the battle the game shows (VcmiBridgeApi.battle), when it changed since the last call, else an empty
-	/// Dictionary: {shown, my_turn, reach: PackedByteArray (1 for each hex the active stack can move to),
+	/// Dictionary: {shown, my_turn, reach: PackedByteArray (1 for each hex the active stack can move to), blocked:
+	/// PackedByteArray (1 for each hex with an obstacle or a wall),
 	/// stacks: [{id, hex, side (0 attacker), owner, count, wide, alive, active, animation}]}
 	Dictionary battle()
 	{
@@ -1353,10 +1354,16 @@ public:
 		result["shown"] = data->shown != 0;
 		result["my_turn"] = data->myTurn != 0;
 		PackedByteArray reach;
+		PackedByteArray blocked;
 		reach.resize(VCMI_BATTLE_HEXES);
+		blocked.resize(VCMI_BATTLE_HEXES);
 		for(int hex = 0; hex < VCMI_BATTLE_HEXES; hex++)
+		{
 			reach[hex] = (data->reach[hex / 8] >> (hex % 8)) & 1;
+			blocked[hex] = (data->blocked[hex / 8] >> (hex % 8)) & 1;
+		}
 		result["reach"] = reach;
+		result["blocked"] = blocked;
 		Array stacks;
 		for(int i = 0; i < std::min<int>(data->stackCount, VCMI_BATTLE_STACKS); i++)
 		{

@@ -6,7 +6,7 @@ extends Node3D
 ## sprite atlas (milestone 5c).
 
 ## what a hex shows (set_states): the values of the state texture
-enum State { NONE, REACH, ACTIVE, HOVER, TARGET }
+enum State { NONE, REACH, ACTIVE, HOVER, TARGET, BLOCKED }
 
 const BattleMath := preload("res://battle_math.gd")
 const AREA := Vector2(1.5, 0.94) ## metres: room.gd MINIMAP_AREA
@@ -58,7 +58,8 @@ void fragment() {
 	if (hex.x >= 0) {
 		int state = int(texelFetch(states, hex, 0).r * 255.0 + 0.5);
 		vec4 wash = state == 1 ? vec4(0.25, 0.45, 0.2, 0.3) : state == 2 ? vec4(0.95, 0.75, 0.2, 0.55)
-				: state == 3 ? vec4(1.0, 1.0, 0.9, 0.45) : state == 4 ? vec4(0.8, 0.15, 0.1, 0.5) : vec4(0.0);
+				: state == 3 ? vec4(1.0, 1.0, 0.9, 0.45) : state == 4 ? vec4(0.8, 0.15, 0.1, 0.5)
+				: state == 5 ? vec4(ink, 0.45) : vec4(0.0);
 		colour = mix(colour, wash.rgb, wash.a);
 	}
 	// pixels from the border between the two cells; the line is antialiased over a screen pixel
@@ -120,21 +121,20 @@ func set_hover(hex: int) -> void:
 		set_states(states)
 
 
-## The game's battle (VcmiData.battle): a card for each living stack, the active stack's hex and the hexes it reaches
+## The game's battle (VcmiData.battle): a card for each stack, the obstacles, the active stack's hex and the hexes it
+## reaches
 func set_battle(data: Dictionary) -> void:
 	var shown := PackedByteArray(data.get("reach", PackedByteArray()))
+	var blocked := PackedByteArray(data.get("blocked", PackedByteArray()))
 	shown.resize(BattleMath.COLUMNS * BattleMath.ROWS)
+	blocked.resize(shown.size())
 	for hex in shown.size():
-		shown[hex] = State.REACH if shown[hex] else State.NONE
-	var living := []
+		shown[hex] = State.BLOCKED if blocked[hex] else State.REACH if shown[hex] else State.NONE
 	for stack: Dictionary in data.get("stacks", []):
-		if not stack.get("alive", false): # shortcut: the dead leave the table; they lie flat with the creatures (5c)
-			continue
-		living.append(stack)
 		var hex: int = stack.get("hex", -1)
 		if stack.get("active", false) and hex >= 0 and hex < shown.size():
 			shown[hex] = State.ACTIVE
-	set_stacks(living)
+	set_stacks(data.get("stacks", []))
 	set_states(shown)
 
 
@@ -145,19 +145,23 @@ func show_sample() -> void:
 		stacks.append({"hex": (2 * i) * 17 + 1, "side": 0, "count": [12, 40, 7, 3, 25, 1][i], "wide": i == 3})
 		stacks.append({"hex": (2 * i) * 17 + 15, "side": 1, "count": [30, 9, 14, 2, 60, 5][i], "wide": i == 1})
 	stacks[4]["hex"] = 4 * 17 + 6 # the active stack, out in the field
-	set_stacks(stacks)
 	var sample := PackedByteArray()
 	sample.resize(BattleMath.COLUMNS * BattleMath.ROWS)
 	for hex in sample.size():
 		@warning_ignore("integer_division")
 		if absi(hex % 17 - 6) + absi(hex / 17 - 4) <= 4:
 			sample[hex] = State.REACH
+	for hex in [5 * 17 + 11, 5 * 17 + 12, 6 * 17 + 12, 2 * 17 + 9]: # a rock and a stump
+		sample[hex] = State.BLOCKED
+	stacks.append({"hex": 7 * 17 + 9, "side": 1, "count": 0, "alive": false})
+	set_stacks(stacks)
 	sample[4 * 17 + 6] = State.ACTIVE
 	sample[4 * 17 + 15] = State.TARGET
 	set_states(sample)
 
 
-## The stacks' marker cards. Each: hex (of its front half), side (0 attacker), count, wide (a two-hex creature)
+## The stacks' marker cards. Each: hex (of its front half), side (0 attacker), count, wide (a two-hex creature), alive
+## (default true; the dead lie flat and grey, without a count)
 func set_stacks(stacks: Array) -> void:
 	for card in _cards.get_children():
 		_cards.remove_child(card)
@@ -170,7 +174,8 @@ func set_stacks(stacks: Array) -> void:
 		quad.center_offset = Vector3(0.0, CARD.y / 2.0, 0.0)
 		var material := StandardMaterial3D.new()
 		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		material.albedo_color = SIDES[side]
+		var alive: bool = stack.get("alive", true)
+		material.albedo_color = SIDES[side] if alive else SIDES[side].lerp(Color(0.35, 0.33, 0.3), 0.75)
 		material.cull_mode = BaseMaterial3D.CULL_DISABLED
 		quad.material = material
 		var card := MeshInstance3D.new()
@@ -178,8 +183,12 @@ func set_stacks(stacks: Array) -> void:
 		# a two-hex stack's other half is behind it: towards its own side's edge
 		var behind := Vector3((-1.0 if side == 0 else 1.0) * hex_metres() / 2.0, 0.0, 0.0) if wide else Vector3.ZERO
 		card.position = hex_position(stack.get("hex", 0)) + behind + Vector3(0.0, LIFT, hex_metres() * 0.25)
-		card.rotation.x = _lean - PI / 2.0
+		card.rotation.x = _lean - PI / 2.0 if alive else -PI / 2.0
+		card.set_meta("alive", alive)
 		_cards.add_child(card)
+		if not alive:
+			card.position += Vector3(0.0, 0.001, CARD.y / 2.0 - hex_metres() * 0.25) # lying over its hex
+			continue
 		var count := Label3D.new()
 		count.text = str(stack.get("count", 1))
 		count.pixel_size = 0.0005
@@ -193,7 +202,8 @@ func set_stacks(stacks: Array) -> void:
 func set_card_lean(degrees: float) -> void:
 	_lean = deg_to_rad(degrees)
 	for card: Node3D in _cards.get_children():
-		card.rotation.x = _lean - PI / 2.0
+		if card.get_meta("alive", true):
+			card.rotation.x = _lean - PI / 2.0
 
 
 ## The middle of `hex` on the page, in this node's space

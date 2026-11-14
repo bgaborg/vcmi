@@ -22,11 +22,13 @@
 #include "../../client/adventureMap/AdventureMapInterface.h"
 #include "../../client/adventureMap/AdventureMapShortcuts.h"
 #include "../../client/battle/BattleActionsController.h"
+#include "../../client/battle/BattleFieldController.h"
 #include "../../client/battle/BattleInterface.h"
 #include "../../client/battle/BattleStacksController.h"
 #include "../../client/battle/BattleWindow.h"
 #include "../../client/gui/CIntObject.h"
 #include "../../client/gui/CursorHandler.h"
+#include "../../client/gui/EventDispatcher.h"
 #include "../../client/gui/Shortcut.h"
 #include "../../client/gui/WindowHandler.h"
 #include "../../client/mapView/IMapRendererObserver.h"
@@ -44,6 +46,7 @@
 #include "../../lib/StartInfo.h"
 #include "../../lib/TerrainHandler.h"
 #include "../../lib/UnlockGuard.h"
+#include "../../lib/battle/AccessibilityInfo.h"
 #include "../../lib/battle/CPlayerBattleCallback.h"
 #include "../../lib/callback/CCallback.h"
 #include "../../lib/entities/faction/CTown.h"
@@ -449,29 +452,61 @@ void publishBattle()
 	}
 	VcmiBattle next{};
 	const std::shared_ptr<BattleInterface> battle = CPlayerInterface::battleInt;
-	if(battle && battle->getBattle() && battle->stacksController && battle->actionsController)
+	// the battle is gone from the client before its window is (the result window): getBattle throws then
+	std::shared_ptr<CPlayerBattleCallback> state;
+	try
+	{
+		if(battle && battle->curInt && battle->curInt->cb)
+			state = battle->getBattle();
+	}
+	catch(const std::runtime_error &)
+	{
+	}
+	if(state && battle->stacksController && battle->actionsController)
 	{
 		// input only while the battle window is the top one: not under its result, a spell book or a question
 		if(battle->windowObject && ENGINE->windows().isTopWindow(battle->windowObject) && !battle->openingPlaying() && battle->curInt)
 		{
-			if(hover && *hover < VCMI_BATTLE_HEXES)
+			// The game's mouse goes to the hex, as a mouse move does (BattleFieldController::mouseMoved: the hovered hex,
+			// the hover's cursor and status text). The 2D battle attacks from the legal hex nearest the mouse
+			// (selectNearestDirection), so the mouse sits in the hex a little towards the active stack: the attack comes
+			// from the attacker's side.
+			const auto pointAt = [&battle](uint16_t hex)
+			{
+				const Point target = battle->fieldController->hexPositionAbsolute(BattleHex(hex)).center();
+				const CStack * active = battle->stacksController->getActiveStack();
+				if(!active || !active->getPosition().isValid())
+					return target;
+				const Point from = battle->fieldController->hexPositionAbsolute(active->getPosition()).center() - target;
+				const double length = std::sqrt(static_cast<double>(from.x * from.x + from.y * from.y));
+				// 12 pixels: inside the hex, whose sides are 22 from its middle
+				return length < 1 ? target : target + Point(static_cast<int>(from.x * 12 / length), static_cast<int>(from.y * 12 / length));
+			};
+			if(hover && *hover < VCMI_BATTLE_HEXES && battle->fieldController)
+			{
+				ENGINE->events().dispatchMouseMoved(Point(), pointAt(*hover));
+				// again: with a gamepad the mouse move hovers as the right button does (mouseMoved)
 				battle->actionsController->onHexHovered(BattleHex(*hover));
+			}
 			for(const uint16_t hex : clicks)
 			{
 				// the click before may have opened a window (a stack's info) in this same tick
-				if(hex >= VCMI_BATTLE_HEXES || !ENGINE->windows().isTopWindow(battle->windowObject))
+				if(hex >= VCMI_BATTLE_HEXES || !battle->fieldController || !ENGINE->windows().isTopWindow(battle->windowObject))
 					continue;
 				// a click on the battlefield ends auto-combat first, as in 2D
 				if(battle->curInt->isAutoFightOn)
+				{
 					battle->curInt->isAutoFightOn = false;
-				else
-					battle->actionsController->onHexLeftClicked(BattleHex(hex));
+					continue;
+				}
+				ENGINE->events().dispatchMouseMoved(Point(), pointAt(hex));
+				battle->actionsController->onHexLeftClicked(BattleHex(hex));
 			}
 		}
 		next.shown = 1;
 		next.myTurn = battle->makingTurn() ? 1 : 0;
 		const CStack * active = battle->stacksController->getActiveStack();
-		for(const CStack * stack : battle->getBattle()->battleGetAllStacks(false))
+		for(const CStack * stack : state->battleGetAllStacks(false))
 		{
 			if(next.stackCount == VCMI_BATTLE_STACKS)
 				break;
@@ -490,8 +525,16 @@ void publishBattle()
 				std::memcpy(out.animation, name.data(), std::min(name.size(), sizeof(out.animation) - 1));
 			}
 		}
+		const AccessibilityInfo accessibility = state->getAccessibility();
+		for(int hex = 0; hex < VCMI_BATTLE_HEXES; hex++)
+		{
+			const EAccessibility state = accessibility[hex];
+			if(state == EAccessibility::OBSTACLE || state == EAccessibility::DESTRUCTIBLE_WALL || state == EAccessibility::GATE
+			   || state == EAccessibility::UNAVAILABLE)
+				next.blocked[hex / 8] |= static_cast<uint8_t>(1 << (hex % 8));
+		}
 		if(active && next.myTurn)
-			for(const BattleHex & hex : battle->getBattle()->battleGetAvailableHexes(active, true))
+			for(const BattleHex & hex : state->battleGetAvailableHexes(active, true))
 				if(hex.isValid() && hex.toInt() < VCMI_BATTLE_HEXES)
 					next.reach[hex.toInt() / 8] |= static_cast<uint8_t>(1 << (hex.toInt() % 8));
 	}

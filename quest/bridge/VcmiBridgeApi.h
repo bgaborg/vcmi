@@ -10,7 +10,7 @@
 #include <stdint.h>
 
 // raise on any change to the structs below; the extension refuses a table with another version
-#define VCMI_BRIDGE_VERSION 12
+#define VCMI_BRIDGE_VERSION 13
 
 typedef struct VcmiBridgeStats
 {
@@ -116,6 +116,7 @@ typedef struct VcmiBattle
 	uint8_t stackCount;
 	uint8_t pad;
 	uint8_t reach[24]; // bit `hex`: the active stack can move there (the local player's turn only)
+	uint8_t blocked[24]; // bit `hex`: an obstacle, a wall or the gate, or not part of this battlefield
 	VcmiBattleStack stacks[VCMI_BATTLE_STACKS];
 } VcmiBattle;
 

@@ -50,11 +50,17 @@ func _initialize() -> void:
 	var reach := PackedByteArray()
 	reach.resize(187)
 	reach[40] = 1
-	field.set_battle({"reach": reach, "stacks": [{"hex": 39, "alive": true, "active": true, "count": 5},
+	var blocked := PackedByteArray()
+	blocked.resize(187)
+	blocked[100] = 1
+	field.set_battle({"reach": reach, "blocked": blocked, "stacks": [
+			{"hex": 39, "alive": true, "active": true, "count": 5},
 			{"hex": 50, "alive": false, "count": 0}, {"hex": 60, "alive": true, "side": 1, "count": 9}]})
-	_expect("the living stacks have cards", field._cards.get_child_count(), 2)
+	_expect("every stack has a card", field._cards.get_child_count(), 3)
+	_expect("the dead lie flat", is_equal_approx(field._cards.get_child(1).rotation.x, -PI / 2.0), true)
 	_expect("reach", field.states[40], field.State.REACH)
 	_expect("the active stack's hex", field.states[39], field.State.ACTIVE)
+	_expect("an obstacle", field.states[100], field.State.BLOCKED)
 	_expect("other hexes are bare", field.states[41], field.State.NONE)
 
 	print("battle_math_test: ", "PASS" if failures == 0 else "FAIL (%d)" % failures)
