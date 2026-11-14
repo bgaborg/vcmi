@@ -80,7 +80,9 @@ func _ready() -> void:
 					1).get_slice(",", 1)))
 	_add_table_panel(room)
 	_add_wrist_panel()
-	if FileAccess.file_exists(SPRITES):
+	if "battle" in OS.get_cmdline_user_args(): # `-- sprites battle`: the battlefield instead of the map
+		_add_battle(room)
+	elif FileAccess.file_exists(SPRITES):
 		_load_sprites(room)
 	if "sprites" in OS.get_cmdline_user_args():
 		for view in views.keys():
@@ -140,6 +142,18 @@ func _add_table_panel(room: Node3D) -> void:
 	_minimap_view(room, "sprites-board", Vector3(-0.45, 0.4, 0.1), Vector3(-0.75, 0.2, -0.6))
 	# the whole desk from the side: what rests on what
 	_minimap_view(room, "sprites-desk", Vector3(-1.4, 0.6, 1.2), Vector3(0.0, 0.0, 0.0))
+
+
+## a sample battle on the page (battle_field.gd): two armies, the active stack and the hexes it reaches
+func _add_battle(room: Node3D) -> void:
+	var field: Node3D = preload("res://battle_field.gd").new()
+	room.add_table_panel(field)
+	field.show_sample()
+	field.set_hover(5 * 17 + 9)
+	var seat: Transform3D = room.seat()
+	views["sprites-battle"] = [seat.origin, seat.origin - seat.basis.z]
+	_minimap_view(room, "sprites-battle-low", Vector3(-0.1, 0.2, 0.55), Vector3(0.0, 0.0, 0.0))
+	_minimap_view(room, "sprites-battle-top", Vector3(0.0, 1.0, 0.01), Vector3(0.0, 0.0, 0.0))
 
 
 ## the wrist panel's two pages (wrist_panel.gd) side by side, 35 cm from the eyes as a raised wrist is

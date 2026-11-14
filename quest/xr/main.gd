@@ -16,6 +16,7 @@ const SURFACE_SIZE := Vector2i(2560, 1440) ## pixels of the game window
 const TableMath := preload("res://table_math.gd")
 const TablePanel := preload("res://table_panel.gd")
 const WristPanel := preload("res://wrist_panel.gd")
+const BattleField := preload("res://battle_field.gd")
 ## the view switch's place in tabletop mode, from the map's middle: over the resource bar on the shelf, where the
 ## seated player looks (the table's near corners are outside the headset's view)
 const SWITCH_AT := Vector3(0.0, TablePanel.SHELF + 0.16, TablePanel.FAR_EDGE)
@@ -95,6 +96,8 @@ var grab_view := {} ## the view when the current drag or two-hand zoom began: ce
 var followed_move := 0 ## the sequence of the last hero step the view followed
 ## the side panel at the table's near edge (quest/PHASE4.md 4d): resources, date, heroes, towns, end turn
 var table_panel: Node3D
+## the battle on the table (quest/PHASE5.md); so far only the test command `battle` shows it, with sample armies
+var battle_field: Node3D = BattleField.new()
 var table_icons_tried := false ## SMALRES decoded once, found or not
 var pop_cards := true ## the next sprites shown pop their cards up (room.show_sprites): the table came near
 var shown_selection := Vector3i(-2, -2, -2) ## the selected hero's tile the table last followed and marked
@@ -182,6 +185,8 @@ func _ready() -> void:
 	table_panel = TablePanel.new()
 	table_panel.visible = false
 	room.add_table_panel(table_panel)
+	battle_field.visible = false
+	room.add_table_panel(battle_field)
 	view_switch.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	view_switch.font_size = 64
 	view_switch.outline_size = 16
@@ -430,7 +435,7 @@ func _update_sprite_view(head: Vector3) -> void:
 				too_far_zoom = room.zoom # some objects would have no sprite even at 1x: markers until closer
 				print("VCMI XR: the atlas cannot hold the view at zoom ", room.zoom, ": markers")
 	var shown: bool = near and (not sprites_pending or room.sprite_multimesh().instance_count > 0)
-	room.show_sprites(shown, pop_cards)
+	room.show_sprites(shown and not battle_field.visible, pop_cards)
 	pop_cards = not near or (pop_cards and not shown) # the cards rise when the table comes near, not after a refill
 	vcmi_data.animate_move(room.sprite_multimesh())
 
@@ -620,6 +625,14 @@ func _table_pointer() -> void:
 		pointer_dot.global_position = on_panel[1]
 		return
 	var hit: Vector3 = room.table_hit(ray[0], ray[1]) if not ray.is_empty() else Vector3.INF
+	if battle_field.visible: # the battlefield covers the map: the hex under the ray lights up
+		var hex: int = battle_field.ray_hex(ray[0], ray[1]) if hit != Vector3.INF else -1
+		battle_field.set_hover(hex)
+		pointer_dot.visible = hex >= 0
+		if hex >= 0:
+			_show_ray(active_hand, ray[0], ray[1].normalized(), ray[0].distance_to(hit))
+			pointer_dot.global_position = hit
+		return
 	var tile := _table_tile(active_hand) if hit != Vector3.INF else TableMath.NO_TILE
 	pointer_dot.visible = tile.x >= 0
 	if tile.x < 0:
@@ -978,6 +991,9 @@ func _table_press(button: int, hand: int, pressed: bool) -> void:
 	active_hand = hand
 	if await _table_panel_press(hand):
 		return
+	if battle_field.visible: # no battle input yet (quest/PHASE5.md 5b): the hex is only logged
+		print("VCMI XR: battle hex ", battle_field.hover)
+		return
 	var tile := _table_tile(hand)
 	if tile.x < 0:
 		return
@@ -1304,6 +1320,12 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 		# table; 0: back
 		"tabletop":
 			_set_tabletop(a > 0.0)
+		# 1: a sample battle on the table instead of the map (battle_field.gd), for its look and the hexes' picking
+		"battle":
+			battle_field.visible = a > 0.0
+			if battle_field.visible:
+				battle_field.set_card_lean(card_lean)
+				battle_field.show_sample()
 		# a, b the tile of level 0, c the kind (0 hover, 1 click, 2 popup, 3 popup end): through the bridge (PHASE4.md)
 		"tile":
 			if vcmi_data:

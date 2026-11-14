@@ -143,7 +143,8 @@ from about 9.9 ms to about 9.1 ms.
 
 ## 6. The battle diorama (phase 5)
 
-Phase 5 is not built. It will use what this pass made, so both views look like one book:
+Plan and state: [`PHASE5.md`](PHASE5.md); the field with marker cards is built (5a). It uses what this pass made, so
+both views look like one book:
 
 - the same book, paper and desk; the battlefield's background painted on the page, the hexes as inked lines;
 - stacks, obstacles and heroes as cards (the `SPRITE` shader's card pass), corpses flat;

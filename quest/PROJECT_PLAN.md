@@ -46,7 +46,9 @@ Not closed yet:
    2. **4e, the rest:** boats' flags and waves are built (not yet seen on the headset); fades are left out (`shortcut:` in [`PHASE4.md`](PHASE4.md)). To see on the headset: boats, teleports, embarking, an enemy hero's flag moving.
    3. **4f, exit pass:** the first scenario played on the table, then the heaviest map for the budgets.
    4. **Needs a person in the headset:** the look review, the comfort check, and ray jitter against the tile size (check 3).
-2. **Milestone 4, battle**, then **phase 5, battle diorama**. The diorama uses the map's book, paper and cards ([`VISUALS.md`](VISUALS.md#6-the-battle-diorama-phase-5)).
+2. **Milestone 4, battle**, and **phase 5, battle diorama** ([`PHASE5.md`](PHASE5.md)). The diorama uses the map's book, paper and cards ([`VISUALS.md`](VISUALS.md#6-the-battle-diorama-phase-5)).
+   1. **5a, the field on the table:** done on the PC (hexes, states, marker cards, picking; test command `battle 1`).
+   2. **5b, the battle's state and input** through the bridge: next.
 
 Each milestone records its numbers in `DATA_BRIDGE.md` and is optimised before the next one starts.
 

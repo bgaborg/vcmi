@@ -75,6 +75,7 @@ Test commands (`main.gd` `_on_test_command`) drive the same code paths as the co
 | `pad keycode`, `stick x y`, `lstick x y` | a gamepad button; right thumbstick; left thumbstick (screen distance and width; `lstick 0 0` releases and saves) |
 | `screen distance width`, `env index` | screen in metres; environment 0 war room, 1 passthrough, 2 black. Not saved |
 | `lmenu seconds` | holds the left menu button (under 0.6 s: game options; longer: next environment) |
+| `battle 1` / `battle 0` | a sample battle on the war table instead of the map ([`PHASE5.md`](PHASE5.md)); the ray lights the hex under it |
 | `wrist 1` / `wrist 0` | holds the hotkey panel 0.35 m in front of the head, so `aim` and `click` reach it (at the default head `aim 6.5 -14` is Kingdom) |
 | `gfx feature 0/1` | switches a room GPU cost at runtime (`room.gd` `set_feature`; `gfx 10 level` foveation, `gfx 11 0/1` dynamic foveation) |
 | `probe`, `bridge` | only the log line; `bridge` for the data bridge stats |
