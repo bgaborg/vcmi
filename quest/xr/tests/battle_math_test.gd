@@ -42,32 +42,70 @@ func _initialize() -> void:
 	_expect("slanted ray", field.ray_hex(point + up * 0.3 + field.global_basis.z * 0.3, -up - field.global_basis.z), hex)
 	_expect("ray from below", field.ray_hex(point - up * 0.3, up), BattleMath.NO_HEX)
 	_expect("ray beside the page", field.ray_hex(point + up * 0.3 + field.global_basis.x * 2.0, -up), BattleMath.NO_HEX)
-	field.set_stacks([{"hex": hex, "side": 1, "count": 12}, {"hex": 18, "side": 0, "count": 3, "wide": true}])
-	field.set_stacks([{"hex": hex, "side": 1, "count": 11}])
-	_expect("the cards follow the stacks", field._cards.get_child_count(), 1)
-
-	# the game's battle (VcmiData.battle): the living stacks' cards, the reach and the active stack's hex
+	# the game's battle (VcmiData.battle): the stacks' cards, the reach, the obstacles and the active stack's hex
 	var reach := PackedByteArray()
 	reach.resize(187)
 	reach[40] = 1
 	var blocked := PackedByteArray()
 	blocked.resize(187)
 	blocked[100] = 1
-	field.set_battle({"reach": reach, "blocked": blocked, "stacks": [
-			{"hex": 39, "alive": true, "active": true, "count": 5},
-			{"hex": 50, "alive": false, "count": 0}, {"hex": 60, "alive": true, "side": 1, "count": 9}]})
-	_expect("every stack has a card", field._cards.get_child_count(), 3)
-	_expect("the dead lie flat", is_equal_approx(field._cards.get_child(1).rotation.x, -PI / 2.0), true)
+	var stacks := [{"id": 1, "hex": 39, "alive": true, "active": true, "count": 5, "animation": "TEST"},
+			{"id": 2, "hex": 50, "alive": false, "count": 0}, {"id": 3, "hex": 60, "alive": true, "side": 1, "count": 9}]
+	field.set_battle({"reach": reach, "blocked": blocked, "stacks": stacks})
+	_expect("every stack has a card", field.cards.card_count(), 3)
+	_expect("a dead marker lies flat", is_equal_approx(field.cards.card(2)["node"].rotation.x, -PI / 2.0), true)
 	_expect("reach", field.states[40], field.State.REACH)
 	_expect("the active stack's hex", field.states[39], field.State.ACTIVE)
 	_expect("an obstacle", field.states[100], field.State.BLOCKED)
 	_expect("other hexes are bare", field.states[41], field.State.NONE)
+
+	# the cards (battle_cards.gd): a creature's frames replace the marker; the stack's changes play its groups
+	var cards: Node3D = field.cards
+	_expect("a creature to load", cards.missing_creatures(), PackedStringArray(["TEST"]))
+	var frames := []
+	for group in [cards.Group.HOLDING, cards.Group.MOVING, cards.Group.HIT, cards.Group.DEATH, cards.Group.ATTACK]:
+		for i in 3:
+			frames.append({"group": group, "frame": i, "left": 180, "top": 200, "image": Image.create(40, 60, false,
+					Image.FORMAT_RGBA8)})
+	cards.set_creature("TEST", {"frames": frames})
+	_expect("loaded", cards.missing_creatures(), PackedStringArray())
+	cards._process(0.01)
+	var first: Dictionary = cards.card(1)
+	_expect("the art shows instead of the marker", [first["sprite"].visible, first["marker"].visible], [true, false])
+	# the frame's pixels 180..220 x 200..260 against the anchor 196, 251 and the feet's line 263
+	_expect("the frame's place on the card", first["sprite"].position.is_equal_approx(Vector3(4.0 * cards.PIXEL,
+			33.0 * cards.PIXEL, 0.0)), true)
+	_expect("a stack without art keeps its marker", cards.card(3)["marker"].visible, true)
+	var at: Vector3 = first["node"].position
+	stacks[0] = stacks[0].merged({"hex": 41}, true)
+	cards.set_stacks(stacks)
+	_expect("a new hex: the stack moves", first["group"], cards.Group.MOVING)
+	cards._process(cards.SLIDE / 2.0)
+	_expect("half way there", first["node"].position.x > at.x and first["node"].position.x < at.x + 2.0
+			* field.hex_metres(), true)
+	cards._process(cards.SLIDE)
+	_expect("arrived, standing", [first["group"], first["node"].position.is_equal_approx(at + Vector3(2.0
+			* field.hex_metres(), 0.0, 0.0))], [cards.Group.HOLDING, true])
+	stacks[0] = stacks[0].merged({"count": 3}, true)
+	cards.set_stacks(stacks)
+	_expect("fewer creatures: hit", first["group"], cards.Group.HIT)
+	cards._process(1.0)
+	_expect("then standing again", first["group"], cards.Group.HOLDING)
+	cards.attack(1, false)
+	_expect("an attack", first["group"], cards.Group.ATTACK)
+	stacks[0] = stacks[0].merged({"alive": false, "count": 0}, true)
+	cards.set_stacks(stacks)
+	cards._process(5.0)
+	_expect("dead: the death's last frame stays, standing", [first["group"], first["sprite"].visible,
+			is_equal_approx(first["node"].rotation.x, -PI / 2.0)], [cards.Group.DEATH, true, false])
+	cards.set_stacks([stacks[2]])
+	_expect("gone stacks lose their cards", cards.card_count(), 1)
 
 	print("battle_math_test: ", "PASS" if failures == 0 else "FAIL (%d)" % failures)
 	quit(1 if failures else 0)
 
 
 func _expect(name_: String, got: Variant, want: Variant) -> void:
-	if got.distance_to(want) > 0.001 if got is Vector2 else got != want:
+	if got.distance_to(want) > 0.001 if got is Vector2 else typeof(got) != typeof(want) or got != want:
 		failures += 1
 		print("battle_math_test: FAIL ", name_, ": got ", got, ", want ", want)

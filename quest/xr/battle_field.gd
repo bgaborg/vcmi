@@ -2,17 +2,15 @@ extends Node3D
 ## The battle on the war table (phase 5, quest/PHASE5.md): the battlefield over the book's page, its hexes as inked
 ## lines, the hexes' states as washes of colour, and a card for each stack. A child of the map's panel (room.gd
 ## add_table_panel): x right, y up, z towards the player, the page's middle at the origin.
-## The cards here are markers in the side's colour with the stack's count: the creatures' own animations come with the
-## sprite atlas (milestone 5c).
+## The cards are battle_cards.gd's.
 
 ## what a hex shows (set_states): the values of the state texture
 enum State { NONE, REACH, ACTIVE, HOVER, TARGET, BLOCKED }
 
 const BattleMath := preload("res://battle_math.gd")
+const BattleCards := preload("res://battle_cards.gd")
 const AREA := Vector2(1.5, 0.94) ## metres: room.gd MINIMAP_AREA
 const LIFT := 0.0015 ## metres over the page
-const CARD := Vector2(0.055, 0.085) ## metres, a marker card; a two-hex stack's is twice as wide
-const SIDES := [Color(0.25, 0.4, 0.8), Color(0.75, 0.2, 0.15)] ## attacker, defender, until the players' colours come
 const FIELD_SHADER := """shader_type spatial;
 render_mode unshaded, shadows_disabled;
 uniform sampler2D states : filter_nearest, repeat_disable; // 17 x 11, a hex's State / 255 in red
@@ -71,10 +69,9 @@ void fragment() {
 
 var states := PackedByteArray() ## BattleMath.COLUMNS * ROWS of State
 var hover := BattleMath.NO_HEX ## the hex under the player's ray (set_hover): shown as State.HOVER over its own state
+var cards: Node3D = BattleCards.new() ## the stacks
 var _field := MeshInstance3D.new()
 var _states := ImageTexture.new()
-var _cards := Node3D.new()
-var _lean := deg_to_rad(82.0)
 
 
 func _init() -> void:
@@ -90,7 +87,7 @@ func _init() -> void:
 	_field.position.y = LIFT
 	_field.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(_field)
-	add_child(_cards)
+	add_child(cards)
 	set_states(PackedByteArray())
 
 
@@ -134,17 +131,22 @@ func set_battle(data: Dictionary) -> void:
 		var hex: int = stack.get("hex", -1)
 		if stack.get("active", false) and hex >= 0 and hex < shown.size():
 			shown[hex] = State.ACTIVE
-	set_stacks(data.get("stacks", []))
+	cards.set_stacks(data.get("stacks", []))
 	set_states(shown)
 
 
 ## Two armies, the active stack and the hexes it reaches: for the PC preview and the test command `battle`
 func show_sample() -> void:
+	var creatures := ["CPKMAN", "CGRIFF", "CSKELE", "CBDRGN"] # pikemen, griffins, skeletons, black dragons
 	var stacks := []
 	for i in 6:
-		stacks.append({"hex": (2 * i) * 17 + 1, "side": 0, "count": [12, 40, 7, 3, 25, 1][i], "wide": i == 3})
-		stacks.append({"hex": (2 * i) * 17 + 15, "side": 1, "count": [30, 9, 14, 2, 60, 5][i], "wide": i == 1})
+		stacks.append({"id": 2 * i, "hex": (2 * i) * 17 + 1, "side": 0, "count": [12, 40, 7, 3, 25, 1][i],
+				"wide": i % 2 == 1, "animation": creatures[i % 2]})
+		stacks.append({"id": 2 * i + 1, "hex": (2 * i) * 17 + 15, "side": 1, "count": [30, 9, 14, 2, 60, 5][i],
+				"wide": i == 1, "animation": creatures[2 + int(i == 1)]})
 	stacks[4]["hex"] = 4 * 17 + 6 # the active stack, out in the field
+	stacks.append({"id": 20, "hex": 7 * 17 + 9, "side": 1, "count": 0, "alive": false, "animation": "CSKELE"})
+	cards.set_stacks(stacks)
 	var sample := PackedByteArray()
 	sample.resize(BattleMath.COLUMNS * BattleMath.ROWS)
 	for hex in sample.size():
@@ -153,57 +155,9 @@ func show_sample() -> void:
 			sample[hex] = State.REACH
 	for hex in [5 * 17 + 11, 5 * 17 + 12, 6 * 17 + 12, 2 * 17 + 9]: # a rock and a stump
 		sample[hex] = State.BLOCKED
-	stacks.append({"hex": 7 * 17 + 9, "side": 1, "count": 0, "alive": false})
-	set_stacks(stacks)
 	sample[4 * 17 + 6] = State.ACTIVE
 	sample[4 * 17 + 15] = State.TARGET
 	set_states(sample)
-
-
-## The stacks' marker cards. Each: hex (of its front half), side (0 attacker), count, wide (a two-hex creature), alive
-## (default true; the dead lie flat and grey, without a count)
-func set_stacks(stacks: Array) -> void:
-	for card in _cards.get_children():
-		_cards.remove_child(card)
-		card.queue_free()
-	for stack: Dictionary in stacks:
-		var wide: bool = stack.get("wide", false)
-		var side: int = clampi(stack.get("side", 0), 0, 1)
-		var quad := QuadMesh.new()
-		quad.size = Vector2(CARD.x * (2.0 if wide else 1.0), CARD.y)
-		quad.center_offset = Vector3(0.0, CARD.y / 2.0, 0.0)
-		var material := StandardMaterial3D.new()
-		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		var alive: bool = stack.get("alive", true)
-		material.albedo_color = SIDES[side] if alive else SIDES[side].lerp(Color(0.35, 0.33, 0.3), 0.75)
-		material.cull_mode = BaseMaterial3D.CULL_DISABLED
-		quad.material = material
-		var card := MeshInstance3D.new()
-		card.mesh = quad
-		# a two-hex stack's other half is behind it: towards its own side's edge
-		var behind := Vector3((-1.0 if side == 0 else 1.0) * hex_metres() / 2.0, 0.0, 0.0) if wide else Vector3.ZERO
-		card.position = hex_position(stack.get("hex", 0)) + behind + Vector3(0.0, LIFT, hex_metres() * 0.25)
-		card.rotation.x = _lean - PI / 2.0 if alive else -PI / 2.0
-		card.set_meta("alive", alive)
-		_cards.add_child(card)
-		if not alive:
-			card.position += Vector3(0.0, 0.001, CARD.y / 2.0 - hex_metres() * 0.25) # lying over its hex
-			continue
-		var count := Label3D.new()
-		count.text = str(stack.get("count", 1))
-		count.pixel_size = 0.0005
-		count.font_size = 40
-		count.outline_size = 10
-		count.position = Vector3(0.0, 0.014, 0.001)
-		card.add_child(count)
-
-
-## The cards' angle from the table, as the map's (room.gd set_card_lean)
-func set_card_lean(degrees: float) -> void:
-	_lean = deg_to_rad(degrees)
-	for card: Node3D in _cards.get_children():
-		if card.get_meta("alive", true):
-			card.rotation.x = _lean - PI / 2.0
 
 
 ## The middle of `hex` on the page, in this node's space

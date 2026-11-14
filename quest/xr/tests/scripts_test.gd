@@ -6,7 +6,7 @@ extends SceneTree
 func _initialize() -> void:
 	var failures := 0
 	for path in ["res://main.gd", "res://room.gd", "res://table_math.gd", "res://preview/preview.gd",
-			"res://wrist_panel.gd", "res://battle_math.gd", "res://battle_field.gd"]:
+			"res://wrist_panel.gd", "res://battle_math.gd", "res://battle_field.gd", "res://battle_cards.gd"]:
 		var script: GDScript = load(path)
 		if script == null or not script.can_instantiate():
 			failures += 1

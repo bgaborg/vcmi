@@ -19,6 +19,7 @@ const SPRITES := "res://../out/sprites-dump/sprites.bin"
 ## with `-- sprites hd`: the dump as the 4x HD atlas holds it (made from sprites.bin with VCMI's xBRZ, see
 ## quest/PHASE4.md 4e); the views then show the table's HD sprites
 const SPRITES_HD := "res://../out/sprites-dump/sprites-hd.bin"
+const H3 := "res://../out/h3" ## quest/out/h3: game art extracted on the PC (quest/tools/h3-extract.py)
 const SIZE := Vector2i(1920, 1080)
 const HEAD := Vector3(0.0, 1.6, 0.0)
 const SEATED := Vector3(0.0, 1.2, 0.0)
@@ -150,6 +151,23 @@ func _add_battle(room: Node3D) -> void:
 	room.add_table_panel(field)
 	field.show_sample()
 	field.set_hover(5 * 17 + 9)
+	# the creatures' own frames and the battlefield's picture, when quest/tools/h3-extract.py has put them in
+	# quest/out/h3 (the player's game art, not in git): `h3-extract.py CPKMAN.def CGRIFF.def CSKELE.def CBDRGN.def
+	# CMBKGRMT.pcx`. `-- sprites battle bare` leaves them out
+	if "bare" in OS.get_cmdline_user_args():
+		return
+	for creature: String in field.cards.missing_creatures():
+		var folder := ProjectSettings.globalize_path(H3.path_join(creature))
+		var listed: Variant = JSON.parse_string(FileAccess.get_file_as_string(folder.path_join("frames.json")))
+		if listed is Dictionary:
+			for frame: Dictionary in listed["frames"]:
+				frame["image"] = Image.load_from_file(folder.path_join(frame["file"])) if frame["file"] != "" else null
+			field.cards.set_creature(creature, listed)
+	var picture := ProjectSettings.globalize_path(H3.path_join("CMBKGRMT.png"))
+	if FileAccess.file_exists(picture):
+		var image := Image.load_from_file(picture)
+		image.generate_mipmaps()
+		field.set_picture(ImageTexture.create_from_image(image))
 	var seat: Transform3D = room.seat()
 	views["sprites-battle"] = [seat.origin, seat.origin - seat.basis.z]
 	_minimap_view(room, "sprites-battle-low", Vector3(-0.1, 0.2, 0.55), Vector3(0.0, 0.0, 0.0))

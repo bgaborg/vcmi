@@ -31,14 +31,18 @@ As of 2026-11-14: milestone 5a is built and checked on the PC; 5b is written and
 
 ## 3. Milestones
 
-Each is built, measured and reviewed before the next, as in phase 4.
+Revised 2026-11-14, after 5b. The first plan drew the creatures with the map's sprite atlas and made the game wait for Godot at every battle event. That is much new C++ in the game process which cannot run on the PC, for at most 20 stacks. The revised plan keeps the 2D battle as the master and draws from Godot what the bridge publishes, so most of it is GDScript that the PC tests and renders cover.
 
 1. **5a, the field on the table (done on the PC).** Left for the headset: the look, and whether a ray holds a 7.4 cm hex from the chair (the far rows are about 1.3 m away).
-2. **5b, the battle's state and input.** The bridge publishes a battle record: the battlefield's picture name, the stacks (id, side, hex, two-hex, count, creature animation, alive, facing), the active stack, the hexes it reaches and the ones it can attack. It takes a hex hover and click from Godot. Godot shows the field instead of the map while a battle is on, with marker cards. **Exit:** a battle is fought on the table with markers; the 2D battle stays visible on the screen to compare.
-3. **5c, the creatures.** The stacks' animations in the sprite atlas (the map's sprites leave it for the battle), drawn by the `SPRITE` shader's card pass, idle and facing; corpses flat; obstacles; the heroes at the field's ends.
-4. **5d, the actions.** Moves, attacks, shots, spells and deaths shown from the events, with the game waiting for Godot as it does for a hero's step (the 2D battle at its fastest speed, [`DATA_BRIDGE.md`](DATA_BRIDGE.md)).
-5. **5e, the battle's panel.** Wait, defend, spellbook, auto-combat, retreat and surrender, the stack queue and the log on the shelf; the result window on the game screen.
-6. **5f, sieges and the exit pass.** Walls, towers, the moat and the catapult; then every battle type against the 2D battle, and the budgets on the largest armies.
+2. **5b, the battle's state and input (written, builds, never run).** Section 1.
+3. **5c, the creatures.** One card per stack, textured with its creature's own animation. Godot decodes the animation on a worker (`VcmiData.decode_animation`, as the panel's icons) and plays a group's frames on the card: the standing group, mirrored for the side that faces left, placed as `BattleStacksController::getStackPositionAtHex` places the 450 x 400 frame. The marker card stays until the frames are there, and for a creature without them.
+   - `shortcut:` the game's 1x art, not xBRZ: at most 20 cards, and the atlas's upscaler is not reachable from GDScript. Use the HD pack's frames, or expose the upscaler, when the cards look coarse in the headset.
+   - `shortcut:` a draw call per card (at most about 20) instead of the atlas's multimesh.
+4. **5d, the actions.** From the published state, 10 times a second: a stack whose hex changed slides there with its moving group; a stack that lost creatures plays its hit group; a stack that died plays its death group and stays on its last frame. The bridge adds the last attack (attacker, target hex, shot or not) from a battle events receiver, and the attacker plays its attack or shoot group. The game does not wait for the table: the 2D battle runs at its own speed, and the table follows up to a tick later.
+   - Left out: projectiles, spell effects, the turn animations.
+5. **5e, the battle's keys.** A "Battle" page on the wrist panel with the game's own battle keys (wait, defend, spell book, auto-combat, retreat, surrender, the active stack's info), shown while a battle is on. The stack queue, the log and the result stay on the game screen.
+6. **5f, the battlefield's picture and sieges.** The bridge decodes the battlefield's background image for the page under the hexes. A siege is playable with the walls and the gate as dark hexes (5b's mask); the walls' own pictures, the towers and the moat are left for after the first headset run.
+7. **Exit, on the headset:** every battle type against the 2D battle, the look, and the budgets with seven stacks a side ([`HEADSET_CHECKLIST.md`](HEADSET_CHECKLIST.md)).
 
 ## 4. Open decisions
 

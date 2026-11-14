@@ -100,6 +100,7 @@ var table_panel: Node3D
 var battle_field: Node3D = BattleField.new()
 var battle_shown := false ## the game shows a battle (VcmiData.battle)
 var battle_sample := false ## the test command `battle`: sample armies on the table
+var creatures_asked := {} ## the creature animations a worker decodes or has decoded for the battle's cards
 var table_icons_tried := false ## SMALRES decoded once, found or not
 var pop_cards := true ## the next sprites shown pop their cards up (room.show_sprites): the table came near
 var shown_selection := Vector3i(-2, -2, -2) ## the selected hero's tile the table last followed and marked
@@ -526,9 +527,17 @@ func _process(delta: float) -> void:
 		if not battle.is_empty():
 			battle_shown = battle.get("shown", false)
 			if battle_shown:
-				battle_field.set_card_lean(card_lean)
+				battle_field.cards.set_card_lean(card_lean)
 				battle_field.set_battle(battle)
 		battle_field.visible = tabletop and (battle_shown or battle_sample)
+		if battle_field.visible:
+			# a creature's frames are read from the game's files: on a worker, once
+			for creature: String in battle_field.cards.missing_creatures():
+				if not creatures_asked.has(creature):
+					creatures_asked[creature] = true
+					WorkerThreadPool.add_task(func():
+						var decoded: Dictionary = vcmi_data.decode_animation(creature)
+						battle_field.cards.set_creature.call_deferred(creature, decoded))
 		if changed & 4 == 0 and not layer.visible: # out of the game (main menu, loading): always the screen
 			layer.visible = true
 
@@ -1344,7 +1353,7 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 		"battle":
 			battle_sample = a > 0.0
 			if battle_sample:
-				battle_field.set_card_lean(card_lean)
+				battle_field.cards.set_card_lean(card_lean)
 				battle_field.show_sample()
 		# a, b the tile of level 0, c the kind (0 hover, 1 click, 2 popup, 3 popup end): through the bridge (PHASE4.md)
 		"tile":
