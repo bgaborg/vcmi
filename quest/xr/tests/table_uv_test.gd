@@ -42,6 +42,21 @@ func _initialize() -> void:
 	room.set_zoom(4.0, Vector2(0.0, 0.0))
 	_expect("zoom 4, clamped centre", ray_at.call(Vector2(0.5, 0.5)), Vector2(0.125, 0.125))
 
+	# tilted as a lectern (the wrist panel's setting), the picking follows the map
+	room.set_tilt(20.0)
+	panel = room._minimap.global_transform
+	down = -panel.basis.y.normalized()
+	# (a lambda keeps the values its locals had when it was made: the ray is built again here)
+	_expect("tilted, zoom 4, clamped centre", room.table_uv(panel.origin - down * 0.1, down), Vector2(0.125, 0.125))
+	_expect("tilted, a ray from the chair", room.table_uv(room.global_transform * room.seat().origin,
+			panel.origin - room.global_transform * room.seat().origin), Vector2(0.125, 0.125))
+	_expect("tilted, the near edge stays in place", (panel * Vector3(0.0, 0.0, size.y / 2.0)).y - room.global_position.y
+			< room.TABLE_TOP + room.MAP_LIFT + 0.02, true)
+	_expect("tilted, the far edge rises", (panel * Vector3(0.0, 0.0, -size.y / 2.0)).y - room.global_position.y
+			> room.TABLE_TOP + room.MAP_LIFT + 0.1, true)
+	room.set_tilt(0.0)
+	panel = room._minimap.global_transform
+
 	var centre: Vector3 = room.minimap_centre()
 	_expect("ray along the table", room.table_uv(centre + panel.basis.y * 0.1, panel.basis.x), Vector2(-1.0, -1.0))
 	_expect("ray away from the table", room.table_uv(centre + panel.basis.y * 0.1, -down), Vector2(-1.0, -1.0))
@@ -50,7 +65,7 @@ func _initialize() -> void:
 	quit(1 if failures else 0)
 
 
-func _expect(name_: String, got: Vector2, want: Vector2) -> void:
-	if got.distance_to(want) > 0.0001:
+func _expect(name_: String, got: Variant, want: Variant) -> void:
+	if got != want if got is bool else got.distance_to(want) > 0.0001:
 		failures += 1
 		print("table_uv_test: FAIL ", name_, ": got ", got, ", want ", want)

@@ -73,10 +73,13 @@ func _ready() -> void:
 		if arg.begins_with("table_zoom="): # table_zoom=factor,u,v: the minimap's own zoom (room.set_zoom)
 			var v := arg.get_slice("=", 1).split(",")
 			table_zoom = [float(v[0]), Vector2(float(v[1]), float(v[2]))]
+		if arg.begins_with("tilt="): # tilt=degrees: the map raised at its far edge (room.set_tilt)
+			room.set_tilt(float(arg.get_slice("=", 1)))
 		if arg.begins_with("zoom="):
 			zoom_tile = Vector2(float(arg.get_slice("=", 1).get_slice(",", 0)), float(arg.get_slice("=",
 					1).get_slice(",", 1)))
 	_add_table_panel(room)
+	_add_wrist_panel()
 	if FileAccess.file_exists(SPRITES):
 		_load_sprites(room)
 	if "sprites" in OS.get_cmdline_user_args():
@@ -137,6 +140,18 @@ func _add_table_panel(room: Node3D) -> void:
 	_minimap_view(room, "sprites-board", Vector3(-0.45, 0.4, 0.1), Vector3(-0.75, 0.2, -0.6))
 	# the whole desk from the side: what rests on what
 	_minimap_view(room, "sprites-desk", Vector3(-1.4, 0.6, 1.2), Vector3(0.0, 0.0, 0.0))
+
+
+## the wrist panel's two pages (wrist_panel.gd) side by side, 35 cm from the eyes as a raised wrist is
+func _add_wrist_panel() -> void:
+	for page in 2:
+		var panel: Node3D = preload("res://wrist_panel.gd").new()
+		add_child(panel)
+		panel.transform = Transform3D(Basis(Vector3.UP, PI), HEAD + Vector3((page - 0.5) * 0.18, 0.0, 0.35))
+		panel.show_page(page, {"height": "45 cm below", "tilt": "10°", "cards": "82°", "wrist": "left",
+				"room": "war room"})
+		panel.set_hover(3 + page)
+	views["sprites-wrist"] = [HEAD, HEAD + Vector3.BACK, 60.0]
 
 
 func _minimap_view(room: Node3D, view: String, eye: Vector3, target: Vector3) -> void:

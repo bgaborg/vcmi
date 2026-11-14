@@ -36,10 +36,16 @@ the cards stand on it.
   high from a real chair; 0.6 m under the eyes was too low. The virtual floor is then not the real one.
 - **The chair faces the room.** The table is turned so that the lord's chair stands on the wall's side and the shelf
   with the panels on the room's side.
-- **Settings on the wrist panel,** saved: "Table lower / higher" (5 cm a press, 0.3 to 1.1 m under the eyes; the left
-  stick does the same at the table), "Tilt less / more" (the map with its book and shelf raised at the far edge as a
-  lectern, 5 degrees a press, up to 20), "Cards flatter / upright" (the cards' angle from the table, 30 to 90 degrees).
-  `shortcut:` the panel is on the left wrist only; add the side as a setting when someone asks.
+- **Settings on the wrist panel** (`xr/wrist_panel.gd`), saved. The panel has two pages, "Keys" and "Settings". A
+  setting is a line with its value between a - and a + button:
+  - "Table": 5 cm a press, 0.3 to 1.1 m under the eyes (the left stick does the same at the table);
+  - "Board tilt": the map with its book and shelf raised at the far edge as a lectern, 5 degrees a press, up to 20;
+  - "Cards": the cards' angle from the table, 30 to 90 degrees;
+  - "Wrist": the controller that carries the panel, left or right; the other hand's ray presses it;
+  - "Room": war room, passthrough or black (also a long press of the left menu button).
+
+  Checked on the PC: `render-room.sh sprites` draws both pages (`sprites-wrist.png`) and takes `tilt=<degrees>`;
+  `tests/wrist_panel_test.gd` and the tilted picking in `tests/table_uv_test.gd`. Not yet seen on the headset.
 - **Loading:** the host shows "VCMI Loading..." before the eyes from its first frame and builds the room after it
   (`main.gd` `_ready`). Horizon OS's own splash (`vr_splash.png`, `com.oculus.ossplash`) is loaded by the system but
   did not show after Play in the launcher. Not seen yet on the headset: the first seconds before the host's first

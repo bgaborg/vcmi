@@ -15,6 +15,7 @@ const SETTINGS_PATH := "user://screen.cfg"
 const SURFACE_SIZE := Vector2i(2560, 1440) ## pixels of the game window
 const TableMath := preload("res://table_math.gd")
 const TablePanel := preload("res://table_panel.gd")
+const WristPanel := preload("res://wrist_panel.gd")
 ## the view switch's place in tabletop mode, from the map's middle: over the resource bar on the shelf, where the
 ## seated player looks (the table's near corners are outside the headset's view)
 const SWITCH_AT := Vector3(0.0, TablePanel.SHELF + 0.16, TablePanel.FAR_EDGE)
@@ -53,23 +54,6 @@ const PAD_BUTTONS := {
 }
 ## holding the left menu button this long switches the environment instead of opening the game options
 const MENU_HOLD_MS := 600
-## the wrist panel: label and Android KeyEvent.KEYCODE_*, the game's own keys from config/keyBindingsConfig.json
-## "keyboard";
-## the labels name the key because other screens bind it to something else (in battle D is defend)
-const HOTKEYS := [
-	["End turn (E)", 33], ["Spells (C)", 31],
-	["Kingdom (K)", 39], ["Quests (Q)", 45],
-	["Sleep (Z)", 54], ["Dig (D)", 32],
-	["Quick save (F8)", 138], ["Quick load (F9)", 139],
-	["Table / screen", -1], ["Next hero (H)", 36], # -1: switches tabletop mode in Godot (also the right stick click)
-	# the table's settings (_wrist_setting), saved: its height under the eyes, its tilt to the player, the cards' angle
-	["Table lower", -2], ["Table higher", -3],
-	["Tilt less", -4], ["Tilt more", -5],
-	["Cards flatter", -6], ["Cards upright", -7],
-]
-const HOTKEY_SIZE := Vector2(0.08, 0.025) ## metres per button
-## above the back of the left controller, tilted towards the eyes like a watch face
-const HOTKEY_PANEL_POSE := Transform3D(Basis(Vector3.RIGHT, deg_to_rad(-45.0)), Vector3(0.0, 0.05, 0.07))
 ## the right thumbstick is the gamepad right stick: the game scrolls the map with it ("mouseSwipe")
 const PAD_RIGHT_X := 2
 const PAD_RIGHT_Y := 3
@@ -140,10 +124,10 @@ var screen_occluder: ShaderMaterial
 var menu_pressed_at := -1 ## Time.get_ticks_msec() of a left menu press not yet handled, or -1
 var environment: Environment ## around the screen when it is not the war room, which has its own
 var world: WorldEnvironment
-var hotkey_panel: Node3D ## on the left controller, shown when it faces the head; the right ray presses its buttons
-var hotkey_buttons: Array[MeshInstance3D] = []
-var hotkey_hover := -1 ## HOTKEYS index the right ray points at, or -1
-var hotkey_pressed := false ## the right trigger went down on the panel: its release goes there too
+var wrist_panel: Node3D = WristPanel.new() ## on a controller, shown when it faces the head; the other ray presses it
+var wrist_hand := 0 ## the controller that carries it (0 left); the wrist panel's setting (saved)
+var hotkey_hover := -1 ## index in wrist_panel.buttons the other hand's ray points at, or -1
+var hotkey_pressed := -1 ## the hand whose trigger went down on the panel: its release goes there too
 var test_wrist := false ## the panel held in front of the head instead of on the controller
 var test_head: Variant = null ## Transform3D: simulated head pose in the world, null for the tracked head
 var test_head_start: Variant = null ## Transform3D: tracked head when the simulated head was set
@@ -263,6 +247,7 @@ void fragment() {
 		var lean: Variant = settings.get_value("table", "card_lean", card_lean)
 		if typeof(lean) in [TYPE_FLOAT, TYPE_INT]:
 			card_lean = clampf(lean, CARD_LEAN.x, CARD_LEAN.y)
+		wrist_hand = 1 if str(settings.get_value("wrist", "hand", 0)) == "1" else 0
 	else:
 		_size_screen(screen_distance, screen_width)
 	room.set_card_lean(card_lean)
@@ -308,7 +293,8 @@ void fragment() {
 		add_child(ray)
 		rays.append(ray)
 
-	_build_hotkey_panel()
+	wrist_panel.visible = false
+	grips[wrist_hand].add_child(wrist_panel)
 
 	# the game's own cursor is not drawn into the virtual display; a dot marks the pointer instead of changing VCMI
 	pointer_dot = Node3D.new()
@@ -535,7 +521,7 @@ func _process(delta: float) -> void:
 	for ray in rays:
 		ray.visible = false
 	_update_hotkey_panel()
-	if hotkey_hover >= 0 and active_hand == 1:
+	if hotkey_hover >= 0 and active_hand == 1 - wrist_hand:
 		pointer_dot.visible = false
 		table_panel.set_hover(-1)
 		return
@@ -717,71 +703,36 @@ func _set_environment(choice: Variant) -> void:
 	print("VCMI XR: environment ", choice)
 
 
-func _build_hotkey_panel() -> void:
-	hotkey_panel = Node3D.new()
-	hotkey_panel.transform = HOTKEY_PANEL_POSE
-	hotkey_panel.visible = false
-	grips[0].add_child(hotkey_panel)
-	for i in HOTKEYS.size():
-		var quad := QuadMesh.new()
-		quad.size = HOTKEY_SIZE * 0.92
-		var material := StandardMaterial3D.new()
-		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		quad.material = material
-		var button := MeshInstance3D.new()
-		button.mesh = quad
-		button.position = _hotkey_centre(i)
-		hotkey_panel.add_child(button)
-		hotkey_buttons.append(button)
-		var label := Label3D.new()
-		label.text = HOTKEYS[i][0]
-		label.pixel_size = 0.0002
-		label.font_size = 40
-		label.position.z = 0.001
-		button.add_child(label)
-
-
-## Button `i` centre in the panel: two columns, rows from the top
-@warning_ignore("integer_division")
-func _hotkey_centre(i: int) -> Vector3:
-	var rows := (HOTKEYS.size() + 1) / 2
-	return Vector3((i % 2 - 0.5) * HOTKEY_SIZE.x, ((rows - 1) / 2.0 - i / 2) * HOTKEY_SIZE.y, 0.0)
-
-
-## Shows the panel when the left controller turns it to the head, and finds the button under the right ray
+## Shows the panel when its controller turns it to the head, and finds the button under the other hand's ray
 func _update_hotkey_panel() -> void:
 	hotkey_hover = -1
 	var tracked: Variant = _tracked_head()
-	hotkey_panel.top_level = test_wrist
+	wrist_panel.top_level = test_wrist
 	if test_wrist and tracked != null:
-		hotkey_panel.global_transform = origin.transform * tracked * Transform3D(Basis(), Vector3(0.0, -0.1, -0.35))
-		hotkey_panel.visible = true
+		wrist_panel.global_transform = origin.transform * tracked * Transform3D(Basis(), Vector3(0.0, -0.1, -0.35))
+		wrist_panel.visible = true
 	else:
 		if not test_wrist:
-			hotkey_panel.transform = HOTKEY_PANEL_POSE
+			wrist_panel.transform = WristPanel.POSE
 		# hidden with a simulated head, like the controller models: the real controller may lie in front of the eyes
 		var facing := false
 		if tracked != null:
-			var to_eyes: Vector3 = ((origin.transform * tracked).origin - hotkey_panel.global_position).normalized()
-			facing = hotkey_panel.global_basis.z.dot(to_eyes) > 0.6
-		hotkey_panel.visible = test_head == null and grips[0].get_has_tracking_data() and facing
-	if hotkey_panel.visible:
-		var ray := _aim_ray(1)
-		if not ray.is_empty():
-			var to_panel := hotkey_panel.global_transform.affine_inverse()
-			var from: Vector3 = to_panel * ray[0]
-			var direction: Vector3 = to_panel.basis * ray[1]
-			if direction.z < -0.0001 and from.z > 0.0:
-				var hit := from + direction * (-from.z / direction.z)
-				for i in HOTKEYS.size():
-					var offset := hit - _hotkey_centre(i)
-					if absf(offset.x) <= HOTKEY_SIZE.x / 2.0 and absf(offset.y) <= HOTKEY_SIZE.y / 2.0:
-						hotkey_hover = i
-				if hotkey_hover >= 0:
-					_show_ray(1, ray[0], ray[1].normalized(), ray[0].distance_to(hotkey_panel.global_transform * hit))
-	for i in hotkey_buttons.size():
-		var material: StandardMaterial3D = hotkey_buttons[i].mesh.material
-		material.albedo_color = Color(0.85, 0.6, 0.15) if i == hotkey_hover else Color(0.2, 0.15, 0.1)
+			var to_eyes: Vector3 = ((origin.transform * tracked).origin - wrist_panel.global_position).normalized()
+			facing = wrist_panel.global_basis.z.dot(to_eyes) > 0.6
+		wrist_panel.visible = test_head == null and grips[wrist_hand].get_has_tracking_data() and facing
+	if wrist_panel.visible:
+		var ray := _aim_ray(1 - wrist_hand)
+		var hit: Array = [] if ray.is_empty() else wrist_panel.ray_button(ray[0], ray[1])
+		if not hit.is_empty():
+			hotkey_hover = hit[0]
+			_show_ray(1 - wrist_hand, ray[0], ray[1].normalized(), ray[0].distance_to(hit[1]))
+	wrist_panel.set_hover(hotkey_hover)
+
+
+## The settings' texts on the wrist panel (wrist_panel.gd SETTINGS)
+func _wrist_values() -> Dictionary:
+	return {"height": "%d cm below" % roundi(table_drop * 100.0), "tilt": "%d°" % roundi(table_tilt),
+			"cards": "%d°" % roundi(card_lean), "wrist": ["left", "right"][wrist_hand], "room": environment_name}
 
 
 ## Draws the ray of `hand` from `from` along the unit vector `direction` for `length` metres
@@ -912,21 +863,32 @@ func _on_stick(input_name: String, value: Vector2, hand: int) -> void:
 	screen_stick = stick
 
 
-## A setting on the wrist panel (HOTKEYS -2 to -7): one step of the table's height, its tilt or the cards' angle
-func _wrist_setting(code: int) -> void:
-	match code:
-		-2, -3:
-			var drop := clampf(table_drop + (0.05 if code == -2 else -0.05), TABLE_DROP.x, TABLE_DROP.y)
+## A press on the wrist panel that is not a key (wrist_panel.gd): its page, or one step of a setting (saved).
+## `step` 1 is the + button: the table higher, the map tilted more, the cards more upright
+func _wrist_setting(setting: String, step: int) -> void:
+	match setting:
+		"page":
+			wrist_panel.show_page(step, _wrist_values())
+			hotkey_hover = -1 # of the page before, until the next frame
+			return
+		"height":
+			var drop := clampf(table_drop - 0.05 * step, TABLE_DROP.x, TABLE_DROP.y)
 			if seated:
 				origin.position.y += drop - table_drop
 			table_drop = drop
-		-4, -5:
-			table_tilt = clampf(table_tilt + (5.0 if code == -5 else -5.0), 0.0, TABLE_TILT_MAX)
+		"tilt":
+			table_tilt = clampf(table_tilt + 5.0 * step, 0.0, TABLE_TILT_MAX)
 			room.set_tilt(table_tilt)
-		_:
-			card_lean = clampf(card_lean + (5.0 if code == -7 else -5.0), CARD_LEAN.x, CARD_LEAN.y)
+		"cards":
+			card_lean = clampf(card_lean + 5.0 * step, CARD_LEAN.x, CARD_LEAN.y)
 			room.set_card_lean(card_lean)
-	print("VCMI XR: table drop ", table_drop, " tilt ", table_tilt, " card lean ", card_lean)
+		"wrist":
+			wrist_hand = 1 - wrist_hand
+			wrist_panel.reparent(grips[wrist_hand], false)
+			if test_aim != null: # the simulated ray is the active hand's: it stays the pressing one
+				active_hand = 1 - wrist_hand
+		"room":
+			_set_environment(ENVIRONMENTS[posmod(ENVIRONMENTS.find(environment_name) + step, ENVIRONMENTS.size())])
 	_save_screen()
 
 
@@ -938,30 +900,32 @@ func _save_screen() -> void:
 	settings.set_value("table", "eyes_over_map", table_drop)
 	settings.set_value("table", "tilt", table_tilt)
 	settings.set_value("table", "card_lean", card_lean)
+	settings.set_value("wrist", "hand", wrist_hand)
 	settings.save(SETTINGS_PATH)
-	print("VCMI XR: screen distance ", screen_distance, " width ", screen_width, " environment ", environment_name)
+	print("VCMI XR: screen distance ", screen_distance, " width ", screen_width, " environment ", environment_name,
+			", table drop ", table_drop, " tilt ", table_tilt, " card lean ", card_lean, ", wrist ", wrist_hand)
+	wrist_panel.show_page(wrist_panel.page, _wrist_values()) # every changed setting is saved: the panel's texts follow
+	hotkey_hover = -1 # of the buttons before, until the next frame
 
 
 func _press(button: int, hand: int, pressed: bool) -> void:
-	var on_panel := hotkey_hover >= 0 if pressed else hotkey_pressed
-	if hand == 1 and button == BUTTON_LEFT and on_panel:
+	var on_panel := hand == 1 - wrist_hand and hotkey_hover >= 0 if pressed else hand == hotkey_pressed
+	if button == BUTTON_LEFT and on_panel:
 		# a press on the wrist panel sends its key instead of a click on the screen
-		hotkey_pressed = pressed
+		hotkey_pressed = hand if pressed else -1
 		if pressed:
 			active_hand = hand
-			var keycode: int = HOTKEYS[hotkey_hover][1]
-			print("VCMI XR: hotkey ", HOTKEYS[hotkey_hover][0])
-			if keycode < 0:
-				if keycode == -1:
-					_set_tabletop(not tabletop)
-				else:
-					_wrist_setting(keycode)
-				_pulse(hand, 0.25)
-				return
-			bridge.key(keycode, true)
+			var action: Variant = wrist_panel.buttons[hotkey_hover]["action"]
+			print("VCMI XR: hotkey ", wrist_panel.buttons[hotkey_hover]["label"], " ", action)
 			_pulse(hand, 0.25)
-			await get_tree().create_timer(0.1).timeout
-			bridge.key(keycode, false)
+			if action is Array:
+				_wrist_setting(action[0], action[1])
+			elif action == -1:
+				_set_tabletop(not tabletop)
+			else:
+				bridge.key(action, true)
+				await get_tree().create_timer(0.1).timeout
+				bridge.key(action, false)
 		return
 	if button == BUTTON_LEFT and (switch_pressed if not pressed else _switch_hit(hand) != Vector3.INF):
 		switch_pressed = pressed # its release goes neither to the game nor to the table
@@ -1188,6 +1152,7 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 			_on_stick("primary", Vector2(a, b), 0)
 		"wrist":
 			test_wrist = a != 0.0
+			active_hand = 1 - wrist_hand
 		"lmenu":
 			_on_button("menu_button", 0, true)
 			await get_tree().create_timer(a).timeout
@@ -1411,7 +1376,7 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 			rad_to_deg(screen_world.basis.get_euler().y), " distance ", screen_distance, " width ", screen_width,
 			" environment ", environment_name,
 			", pointer ", Vector2i(hit * Vector2(SURFACE_SIZE)) if hit != NO_HIT else "off screen",
-			", hotkey ", HOTKEYS[hotkey_hover][0] if hotkey_hover >= 0 else "none",
+			", hotkey ", wrist_panel.buttons[hotkey_hover]["label"] if hotkey_hover >= 0 else "none",
 			", controllers tracked ", aims.map(func(aim): return aim.get_has_tracking_data()),
 			", bridge ", vcmi_data.stats() if vcmi_data else "no extension")
 # gdlint: enable=max-returns
