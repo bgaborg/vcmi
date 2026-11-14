@@ -98,6 +98,40 @@ func set_picture(picture: Texture2D) -> void:
 	material.set_shader_parameter("has_picture", picture != null)
 
 
+## A picture's file as the game holds it (VcmiData.image_file) decoded: a PNG, a BMP, or a Heroes 3 PCX (its size in
+## bytes, width and height, then palette indices with a palette after them, or BGR). Null when it is none of them
+static func decode_picture(bytes: PackedByteArray) -> Image:
+	var image := Image.new()
+	if bytes.size() >= 8 and bytes.slice(0, 4) == PackedByteArray([0x89, 0x50, 0x4E, 0x47]):
+		return image if image.load_png_from_buffer(bytes) == OK else null
+	if bytes.size() >= 2 and bytes[0] == 0x42 and bytes[1] == 0x4D:
+		return image if image.load_bmp_from_buffer(bytes) == OK else null
+	if bytes.size() < 12:
+		return null
+	var size := bytes.decode_u32(0)
+	var width := bytes.decode_u32(4)
+	var height := bytes.decode_u32(8)
+	if width == 0 or height == 0 or width > 4096 or height > 4096:
+		return null
+	var rgb := PackedByteArray()
+	rgb.resize(width * height * 3)
+	if size == width * height and bytes.size() >= 12 + size + 768:
+		var palette := 12 + size
+		for i in size:
+			var colour := palette + 3 * bytes[12 + i]
+			rgb[3 * i] = bytes[colour]
+			rgb[3 * i + 1] = bytes[colour + 1]
+			rgb[3 * i + 2] = bytes[colour + 2]
+	elif size == width * height * 3 and bytes.size() >= 12 + size:
+		for i in width * height:
+			rgb[3 * i] = bytes[12 + 3 * i + 2]
+			rgb[3 * i + 1] = bytes[12 + 3 * i + 1]
+			rgb[3 * i + 2] = bytes[12 + 3 * i]
+	else:
+		return null
+	return Image.create_from_data(width, height, false, Image.FORMAT_RGB8, rgb)
+
+
 ## A State for each hex, by hex index; missing ones are NONE
 func set_states(new_states: PackedByteArray) -> void:
 	states = new_states.duplicate()

@@ -22,6 +22,13 @@ As of 2026-11-14: milestone 5a is built and checked on the PC; 5b is written and
   - **To check first on the headset:** a move, a shot and a melee attack from the table.
   - Not done in 5b: the battlefield's picture (an image, not an animation: the bridge decodes animations only), the map's markers and path under the field (to see on the headset), spell targeting from the table (cast from the 2D screen).
 
+- **5c to 5f (written 2026-11-14, tested on the PC with the game's own art, build for Android, never run):**
+  - **Creatures (5c):** `xr/battle_cards.gd`. `main.gd` asks a worker for each creature's animation once (`VcmiData.decode_animation`); a card then shows the frames of its group, 10 a second. A frame's pixels are placed about the frame's point that stands on the hex's middle (`ANCHOR` 196, 251; the feet's line `FEET` 263; a two-hex stack 44 further back), mirrored for the defender's side.
+  - **Actions (5d):** from the state's changes between two publishes: a new hex slides the card there with the moving group; fewer creatures plays the hit group; death plays the death group and keeps its last frame. The bridge flags the stack whose turn it is (`VCMI_STACK_TURN`); when an enemy of it is hurt, it plays its attack group, or its shoot group when it is more than 2.5 hexes away. No battle events receiver yet.
+  - **Keys (5e):** the wrist panel's first page is "Battle" while a battle is on (`wrist_panel.gd` `BATTLE_KEYS`).
+  - **Picture (5f):** the bridge publishes the background's name and hands its file's bytes over (`imageFile`); `battle_field.gd` `decode_picture` reads a PNG, a BMP or a Heroes 3 PCX on a worker. Sieges: the walls are dark hexes only.
+  - **On the PC:** `quest/tools/h3-extract.py` takes animations and pictures from the Heroes 3 data on the PC into `quest/out/h3/` (not in git); `render-room.sh sprites battle` then draws the sample battle with them (`sprites battle bare`: markers on paper). `tests/battle_math_test.gd` covers the placement, the groups and the PCX reader.
+
 ## 2. Facts from the code (read 2026-11-14; check again before 5b)
 
 - **Events:** `IBattleEventsReceiver` (`lib/callback/IBattleEventsReceiver.h`): `battleStart`, `battleStackMoved`, `battleAttack`, `battleStacksAttacked`, `battleSpellCast`, `battleUnitsChanged`, `battleObstaclesChanged`, `battleNewRound`, `battleEnd`, and more. `CClient::registerBattleInterface` gives them to an extra receiver after the 2D battle interface ([`DATA_BRIDGE.md`](DATA_BRIDGE.md)).

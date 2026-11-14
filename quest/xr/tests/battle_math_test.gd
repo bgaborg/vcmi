@@ -91,8 +91,22 @@ func _initialize() -> void:
 	_expect("fewer creatures: hit", first["group"], cards.Group.HIT)
 	cards._process(1.0)
 	_expect("then standing again", first["group"], cards.Group.HOLDING)
-	cards.attack(1, false)
-	_expect("an attack", first["group"], cards.Group.ATTACK)
+	# stack 3 (the other side) has the turn; then stack 1 loses creatures: stack 3 struck. It has no art, so its group
+	# is all that shows
+	stacks[2] = stacks[2].merged({"turn": true, "hex": 42}, true)
+	cards.set_stacks(stacks)
+	cards._process(1.0)
+	stacks[0] = stacks[0].merged({"count": 2}, true)
+	cards.set_stacks(stacks)
+	_expect("the stack whose turn it was strikes its neighbour", cards.card(3)["group"], cards.Group.ATTACK)
+	cards._process(2.0)
+	stacks[2] = stacks[2].merged({"hex": 50}, true)
+	cards.set_stacks(stacks)
+	cards._process(1.0)
+	stacks[0] = stacks[0].merged({"count": 1}, true)
+	cards.set_stacks(stacks)
+	_expect("from afar it shoots", cards.card(3)["group"], cards.Group.SHOOT)
+	cards._process(2.0)
 	stacks[0] = stacks[0].merged({"alive": false, "count": 0}, true)
 	cards.set_stacks(stacks)
 	cards._process(5.0)
@@ -100,6 +114,21 @@ func _initialize() -> void:
 			is_equal_approx(first["node"].rotation.x, -PI / 2.0)], [cards.Group.DEATH, true, false])
 	cards.set_stacks([stacks[2]])
 	_expect("gone stacks lose their cards", cards.card_count(), 1)
+	cards.clear()
+	_expect("after the battle nothing is kept", [cards.card_count(), cards.creatures.size()], [0, 0])
+
+	# a Heroes 3 PCX, as the bridge hands the battlefield's background over: 2 x 1 pixels by palette, and as BGR
+	var pcx := PackedByteArray([2, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 1, 0])
+	pcx.resize(14 + 768)
+	pcx[14 + 3] = 10 # palette entry 1: 10, 20, 30
+	pcx[14 + 4] = 20
+	pcx[14 + 5] = 30
+	var picture: Image = field.decode_picture(pcx)
+	_expect("a palette PCX", [picture.get_size(), picture.get_pixel(0, 0).r8, picture.get_pixel(0, 0).b8], [Vector2i(2,
+			1), 10, 30])
+	picture = field.decode_picture(PackedByteArray([3, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 30, 20, 10]))
+	_expect("a BGR PCX", [picture.get_pixel(0, 0).r8, picture.get_pixel(0, 0).b8], [10, 30])
+	_expect("not a picture", field.decode_picture(PackedByteArray([1, 2, 3])), null)
 
 	print("battle_math_test: ", "PASS" if failures == 0 else "FAIL (%d)" % failures)
 	quit(1 if failures else 0)

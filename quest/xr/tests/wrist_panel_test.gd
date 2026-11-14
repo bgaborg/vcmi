@@ -27,6 +27,12 @@ func _initialize() -> void:
 	var centre: Vector3 = panel.global_position
 	_expect("from behind", panel.ray_button(centre - normal * 0.2, normal), [])
 
+	panel.set_battle(true)
+	_expect("in a battle: its keys", [press.call(Vector2(-0.04, row.call(1))), panel.buttons[0]["label"]], [51,
+			"Battle"])
+	panel.set_battle(false)
+	_expect("after it: the map's keys", press.call(Vector2(-0.04, row.call(1))), 33)
+
 	panel.show_page(1, {"height": "45 cm below"})
 	_expect("settings page: tabs, - and +", panel.buttons.size(), WristPanel.PAGES.size() + 2 * WristPanel.SETTINGS.size())
 	_expect("table lower", press.call(Vector2(-0.07, row.call(1))), ["height", -1])

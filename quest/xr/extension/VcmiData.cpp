@@ -92,6 +92,7 @@ protected:
 		ClassDB::bind_method(D_METHOD("panel"), &VcmiData::panel);
 		ClassDB::bind_method(D_METHOD("select_object", "id", "open"), &VcmiData::select_object);
 		ClassDB::bind_method(D_METHOD("battle"), &VcmiData::battle);
+		ClassDB::bind_method(D_METHOD("image_file", "name"), &VcmiData::image_file);
 		ClassDB::bind_method(D_METHOD("hex_input", "hex", "click"), &VcmiData::hex_input);
 	}
 
@@ -1337,9 +1338,10 @@ public:
 	}
 
 	/// the battle the game shows (VcmiBridgeApi.battle), when it changed since the last call, else an empty
-	/// Dictionary: {shown, my_turn, reach: PackedByteArray (1 for each hex the active stack can move to), blocked:
+	/// Dictionary: {shown, my_turn, picture (the background's name, for image_file), reach: PackedByteArray (1 for each hex the active stack can move to), blocked:
 	/// PackedByteArray (1 for each hex with an obstacle or a wall),
-	/// stacks: [{id, hex, side (0 attacker), owner, count, wide, alive, active, animation}]}
+	/// stacks: [{id, hex, side (0 attacker), owner, count, wide, alive, active, turn (its turn, any player's),
+	/// animation}]}
 	Dictionary battle()
 	{
 		Dictionary result;
@@ -1353,6 +1355,7 @@ public:
 		seenBattle = data->generation;
 		result["shown"] = data->shown != 0;
 		result["my_turn"] = data->myTurn != 0;
+		result["picture"] = String::utf8(data->picture, strnlen(data->picture, sizeof(data->picture)));
 		PackedByteArray reach;
 		PackedByteArray blocked;
 		reach.resize(VCMI_BATTLE_HEXES);
@@ -1377,10 +1380,28 @@ public:
 			stack["wide"] = (s.flags & VCMI_STACK_WIDE) != 0;
 			stack["alive"] = (s.flags & VCMI_STACK_ALIVE) != 0;
 			stack["active"] = (s.flags & VCMI_STACK_ACTIVE) != 0;
+			stack["turn"] = (s.flags & VCMI_STACK_TURN) != 0;
 			stack["animation"] = String::utf8(s.animation, strnlen(s.animation, sizeof(s.animation)));
 			stacks.push_back(stack);
 		}
 		result["stacks"] = stacks;
+		return result;
+	}
+
+	/// the bytes of picture `name` as the game's files hold it (VcmiBridgeApi.imageFile; battle_field.gd
+	/// decode_picture reads them); empty when missing. Reads the game's files: from a worker thread
+	PackedByteArray image_file(const String & name) const
+	{
+		PackedByteArray result;
+		if(!api)
+			return result;
+		const uint8_t * bytes = nullptr;
+		const uint32_t size = api->imageFile(name.utf8().get_data(), &bytes);
+		if(size && bytes)
+		{
+			result.resize(size);
+			std::memcpy(result.ptrw(), bytes, size);
+		}
 		return result;
 	}
 

@@ -10,7 +10,7 @@
 #include <stdint.h>
 
 // raise on any change to the structs below; the extension refuses a table with another version
-#define VCMI_BRIDGE_VERSION 13
+#define VCMI_BRIDGE_VERSION 15
 
 typedef struct VcmiBridgeStats
 {
@@ -103,7 +103,8 @@ typedef struct VcmiBattleStack
 } VcmiBattleStack; // 48 bytes
 #define VCMI_STACK_WIDE 1 // two hexes: the other one is behind it, towards its side's edge
 #define VCMI_STACK_ALIVE 2
-#define VCMI_STACK_ACTIVE 4 // the stack whose turn it is
+#define VCMI_STACK_ACTIVE 4 // the stack the local player chooses an action for
+#define VCMI_STACK_TURN 8 // the stack whose turn it is, any player's (battleActiveUnit)
 
 #define VCMI_BATTLE_STACKS 64
 #define VCMI_BATTLE_HEXES 187
@@ -117,6 +118,7 @@ typedef struct VcmiBattle
 	uint8_t pad;
 	uint8_t reach[24]; // bit `hex`: the active stack can move there (the local player's turn only)
 	uint8_t blocked[24]; // bit `hex`: an obstacle, a wall or the gate, or not part of this battlefield
+	char picture[48]; // the battlefield's background, a name for imageFile; empty when unknown
 	VcmiBattleStack stacks[VCMI_BATTLE_STACKS];
 } VcmiBattle;
 
@@ -279,4 +281,9 @@ typedef struct VcmiBridgeApi
 	// tick as the 2D battlefield's own hover and click; only the latest hover is kept. Dropped outside a battle or
 	// while a window is over the battle. Any thread
 	void (*hexInput)(uint16_t hex, uint8_t kind);
+	// the bytes of picture `name` (VcmiBattle.picture) as the game's files hold it: a PNG, a BMP or a Heroes 3 PCX
+	// (width * height palette indices and a palette, or BGR); returns their count, 0 when it is missing or no game is
+	// loaded. Reads the game's files, so call it from a worker thread. `out` points into storage of the calling
+	// thread, valid until its next call
+	uint32_t (*imageFile)(const char * name, const uint8_t ** out);
 } VcmiBridgeApi;

@@ -24,6 +24,7 @@
 #include "../../client/battle/BattleActionsController.h"
 #include "../../client/battle/BattleFieldController.h"
 #include "../../client/battle/BattleInterface.h"
+#include "../../client/battle/BattleSiegeController.h"
 #include "../../client/battle/BattleStacksController.h"
 #include "../../client/battle/BattleWindow.h"
 #include "../../client/gui/CIntObject.h"
@@ -34,6 +35,7 @@
 #include "../../client/mapView/IMapRendererObserver.h"
 #include "../../client/mapView/mapHandler.h"
 #include "../../client/replay/GameplayReplayer.h"
+#include "../../lib/BattleFieldHandler.h"
 #include "../../lib/CConfigHandler.h"
 #include "../../lib/CCreatureHandler.h"
 #include "../../lib/CPlayerState.h"
@@ -506,6 +508,7 @@ void publishBattle()
 		next.shown = 1;
 		next.myTurn = battle->makingTurn() ? 1 : 0;
 		const CStack * active = battle->stacksController->getActiveStack();
+		const battle::Unit * turn = state->battleActiveUnit();
 		for(const CStack * stack : state->battleGetAllStacks(false))
 		{
 			if(next.stackCount == VCMI_BATTLE_STACKS)
@@ -518,13 +521,22 @@ void publishBattle()
 			out.hex = static_cast<uint16_t>(stack->getPosition().toInt());
 			out.side = stack->unitSide() == BattleSide::DEFENDER ? 1 : 0;
 			out.owner = static_cast<uint8_t>(stack->unitOwner().getNum());
-			out.flags = (stack->doubleWide() ? VCMI_STACK_WIDE : 0) | (stack->alive() ? VCMI_STACK_ALIVE : 0) | (stack == active ? VCMI_STACK_ACTIVE : 0);
+			out.flags = (stack->doubleWide() ? VCMI_STACK_WIDE : 0) | (stack->alive() ? VCMI_STACK_ALIVE : 0) | (stack == active ? VCMI_STACK_ACTIVE : 0)
+					  | (turn && turn->unitId() == stack->unitId() ? VCMI_STACK_TURN : 0);
 			if(const CCreature * type = stack->unitType())
 			{
 				const std::string name = type->animDefName.getOriginalName();
 				std::memcpy(out.animation, name.data(), std::min(name.size(), sizeof(out.animation) - 1));
 			}
 		}
+		// as BattleFieldController chooses its background
+		ImagePath picture;
+		if(battle->siegeController)
+			picture = battle->siegeController->getBattleBackgroundName();
+		else if(state->battleGetBattlefieldType() != BattleField::NONE)
+			picture = state->battleGetBattlefieldType().getInfo()->graphics;
+		const std::string pictureName = picture.getName();
+		std::memcpy(next.picture, pictureName.data(), std::min(pictureName.size(), sizeof(next.picture) - 1));
 		const AccessibilityInfo accessibility = state->getAccessibility();
 		for(int hex = 0; hex < VCMI_BATTLE_HEXES; hex++)
 		{
@@ -1046,6 +1058,36 @@ void hexInput(uint16_t hex, uint8_t kind)
 		pendingHexClicks.push_back(hex);
 }
 
+uint32_t imageFile(const char * name, const uint8_t ** out)
+{
+	thread_local std::vector<uint8_t> bytes;
+	bytes.clear();
+	if(name && inGame.load())
+	{
+		try
+		{
+			// as the game looks for a picture: by its name, among the bitmaps, among the sprites
+			for(const char * prefix : {"", "DATA/", "SPRITES/"})
+			{
+				const ResourcePath path(std::string(prefix) + name, EResType::IMAGE);
+				if(!CResourceHandler::get()->existsResource(path))
+					continue;
+				const auto data = CResourceHandler::get()->load(path)->readAll();
+				bytes.assign(data.first.get(), data.first.get() + data.second);
+				break;
+			}
+		}
+		catch(const std::exception & e)
+		{
+			logGlobal->warn("Quest bridge: picture %s: %s", name, e.what());
+			bytes.clear();
+		}
+	}
+	if(out)
+		*out = bytes.data();
+	return static_cast<uint32_t>(bytes.size());
+}
+
 void selectObject(uint32_t id, uint8_t open)
 {
 	std::lock_guard lock(inputMutex);
@@ -1248,5 +1290,5 @@ static_assert(sizeof(VcmiPanelTown) == 56, "VcmiPanelTown is part of the bridge 
 
 extern "C" __attribute__((visibility("default"))) const VcmiBridgeApi vcmi_bridge_api = {
 	VCMI_BRIDGE_VERSION, start,     stats,    copyTiles,     copyFog,   copyObjects,  copyObjectChanges, copyAnimation, decodeFrames, setTabletop, copyMove,
-	confirmMove,         tileInput, copyPath, tileAnimation, copyPanel, selectObject, copyBattle,        hexInput,
+	confirmMove,         tileInput, copyPath, tileAnimation, copyPanel, selectObject, copyBattle,        hexInput,      imageFile,
 };

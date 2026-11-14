@@ -3,7 +3,9 @@ extends Node3D
 ## creature's animation is loaded (set_creature) shows its frames, placed as the 2D battle places them
 ## (BattleStacksController::getStackPositionAtHex); until then, and without one, a marker in its side's colour.
 ## What a stack does is read from how it changed since the last set_stacks: it slides to a new hex, flinches when it
-## lost creatures, and dies. The node's space is the field's: x right, y up, z towards the player.
+## lost creatures, and dies; the stack whose turn it was strikes, or shoots from afar, when an enemy stack is hurt
+## (shortcut: also when its hero's spell hurt them; the bridge has no battle events yet).
+## The node's space is the field's: x right, y up, z towards the player.
 
 ## animation groups, as the game's ECreatureAnimType
 enum Group { MOVING = 0, HOLDING = 2, HIT = 3, DEATH = 5, ATTACK = 12, SHOOT = 15 }
@@ -27,6 +29,7 @@ const SLIDE := 0.45 ## seconds a stack takes to a new hex
 var creatures := {} ## animation name: {group: [{texture, rect (of the frame's pixels in the 450 x 400 frame)}]}
 var _stacks := {} ## stack id: {node, sprite, marker, count, stack, group, loop, time, from, slide}
 var _lean := deg_to_rad(82.0)
+var _turn := -1 ## the id of the stack whose turn it was at the last set_stacks
 var _unit := QuadMesh.new()
 
 
@@ -73,13 +76,17 @@ func missing_creatures() -> PackedStringArray:
 
 
 ## The battle's stacks. Each: id, hex (of its front half), side (0 attacker), count, wide (a two-hex creature), alive
-## (default true), animation (its creature's, or none for a marker)
+## (default true), turn (it is its turn), animation (its creature's, or none for a marker)
 func set_stacks(stacks: Array) -> void:
 	var seen := {}
+	var hurt: Array[Dictionary] = [] # the stacks that lost creatures since the last call
+	var turn := -1
 	for i in stacks.size():
 		var stack: Dictionary = stacks[i]
 		var id: int = stack.get("id", i)
 		seen[id] = true
+		if stack.get("turn", false):
+			turn = id
 		if not _stacks.has(id):
 			_stacks[id] = _new_card(stack)
 			continue
@@ -87,6 +94,8 @@ func set_stacks(stacks: Array) -> void:
 		var before: Dictionary = card["stack"]
 		card["stack"] = stack
 		var alive: bool = stack.get("alive", true)
+		if before.get("alive", true) and stack.get("count", 1) < before.get("count", 1):
+			hurt.append(stack)
 		if before.get("alive", true) and not alive:
 			_play(card, Group.DEATH, false)
 		elif alive and not before.get("alive", true): # raised again
@@ -102,6 +111,24 @@ func set_stacks(stacks: Array) -> void:
 		if not seen.has(id):
 			_stacks[id]["node"].queue_free()
 			_stacks.erase(id)
+	# the bridge has no battle events yet: who struck is the stack whose turn it was, when an enemy of it is hurt (a
+	# retaliation hurts its own side and shows only as the hit)
+	if _stacks.has(_turn):
+		var striker: Dictionary = _stacks[_turn]["stack"]
+		for victim in hurt:
+			if victim.get("side", 0) != striker.get("side", 0):
+				var apart := BattleMath.hex_centre(victim.get("hex", 0)).distance_to(BattleMath.hex_centre(striker.get(
+						"hex", 0)))
+				attack(_turn, apart > 2.5 * BattleMath.PITCH.x) # a neighbour, also of a two-hex stack, is nearer
+				break
+	_turn = turn
+
+
+## The battle is over: no card and no creature's frames are kept for the next one
+func clear() -> void:
+	set_stacks([])
+	_turn = -1
+	creatures.clear()
 
 
 ## Stack `id` strikes (or with `shoot` shoots): its attack plays once (quest/PHASE5.md 5d)
@@ -208,6 +235,8 @@ func _show_frame(card: Dictionary) -> void:
 		(card["marker"] as MeshInstance3D).visible = frames.is_empty()
 		_dress(card)
 	if frames.is_empty():
+		if not card["loop"] and card["group"] != Group.DEATH and card["time"] > 0.5: # a marker's action is over
+			_play(card, Group.HOLDING, true)
 		return
 	var index := int(card["time"] * FPS)
 	if index >= frames.size():

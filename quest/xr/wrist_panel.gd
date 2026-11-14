@@ -19,6 +19,14 @@ const KEYS := [
 	["Quick save (F8)", 138], ["Quick load (F9)", 139],
 	["Table / screen", -1], ["Next hero (H)", 36],
 ]
+## the first page while a battle is on (set_battle): the battle's own keys
+const BATTLE_KEYS := [
+	["Wait (W)", 51], ["Defend (D)", 32],
+	["Spell book (C)", 31], ["Stack info (I)", 37],
+	["Auto-combat (A)", 29], ["End auto (Q)", 45],
+	["Retreat (R)", 46], ["Surrender (S)", 47],
+	["Table / screen", -1], ["Quick spells (T)", 48],
+]
 ## label and the setting's name: its text comes in `values`, its buttons' action is [name, -1 or 1]
 const SETTINGS := [
 	["Table", "height"], ["Board tilt", "tilt"], ["Cards", "cards"], ["Wrist", "wrist"], ["Room", "room"],
@@ -28,7 +36,9 @@ const LIT := Color(0.85, 0.6, 0.15)
 const CHOSEN := Color(0.45, 0.3, 0.12) ## the shown page's tab
 
 var page := 0
+var in_battle := false ## the first page has the battle's keys (set_battle)
 var buttons: Array[Dictionary] = [] ## of the shown page: at, size (Vector2, metres), label, action, mesh, colour
+var _values := {}
 
 
 func _init() -> void:
@@ -39,16 +49,19 @@ func _init() -> void:
 ## Builds page `new_page` (PAGES); `values`: the settings' texts by name
 func show_page(new_page: int, values: Dictionary) -> void:
 	page = clampi(new_page, 0, PAGES.size() - 1)
+	_values = values
 	for child in get_children():
 		remove_child(child)
 		child.queue_free()
 	buttons.clear()
 	for i in PAGES.size():
-		_button(Vector2((i - 0.5) * CELL.x, _row(0)), CELL, PAGES[i], ["page", i], CHOSEN if i == page else IDLE)
+		var tab: String = "Battle" if i == 0 and in_battle else PAGES[i]
+		_button(Vector2((i - 0.5) * CELL.x, _row(0)), CELL, tab, ["page", i], CHOSEN if i == page else IDLE)
 	if page == 0:
-		for i in KEYS.size():
+		var keys := BATTLE_KEYS if in_battle else KEYS
+		for i in keys.size():
 			@warning_ignore("integer_division")
-			_button(Vector2((i % 2 - 0.5) * CELL.x, _row(1 + i / 2)), CELL, KEYS[i][0], KEYS[i][1], IDLE)
+			_button(Vector2((i % 2 - 0.5) * CELL.x, _row(1 + i / 2)), CELL, keys[i][0], keys[i][1], IDLE)
 		return
 	for i in SETTINGS.size():
 		var setting: String = SETTINGS[i][1]
@@ -58,6 +71,13 @@ func show_page(new_page: int, values: Dictionary) -> void:
 		_quad(Vector2(0.0, y), Vector2(2.0 * (CELL.x - STEP_WIDTH), CELL.y), "%s: %s" % [SETTINGS[i][0],
 				values.get(setting, "")], IDLE)
 		_button(Vector2(edge, y), Vector2(STEP_WIDTH, CELL.y), "+", [setting, 1], IDLE)
+
+
+## While a battle is on, the first page has the battle's keys instead of the map's
+func set_battle(on: bool) -> void:
+	if on != in_battle:
+		in_battle = on
+		show_page(page, _values)
 
 
 func set_hover(index: int) -> void:
