@@ -67,7 +67,7 @@ Revised 2026-11-14, after 5b. The first plan drew the creatures with the map's s
 
 ## 4. Open decisions
 
-- **The 2D battle while the table shows it.** It cannot be hidden as the adventure map is (the tabletop window), because the battle window is the top window and its animations time the events. Recommended: leave it running on the screen at the fastest speed (planned in `DATA_BRIDGE.md`), and move the screen aside while the table shows the battle.
+- **The 2D battle while the table shows it (decided 2026-11-15).** It cannot be hidden as the adventure map is (the tabletop window), because the battle window is the top window and its animations time the events. It runs at its fastest speed with its sound effects muted while the table shows the battle (`Bridge.cpp` `updateTableBattle`, built), and stays on the screen over the table: the stack queue, the log, the spell book and the result are only there. Move the screen aside if the headset run shows it in the way.
 - **Field size.** The field fills the page (1.35 x 0.94 m). Smaller would bring the far rows nearer; decide in the headset in 5a's check.
 
 ## 5. Risks
