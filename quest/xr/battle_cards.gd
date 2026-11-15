@@ -9,6 +9,10 @@ extends Node3D
 ## was strikes when an enemy is hurt.
 ## The node's space is the field's: x right, y up, z towards the player.
 
+## stack `stack` (its dictionary from set_stacks) starts `group` (moving, hit, death, attack, shoot) at `at`: its
+## sound (battle_sounds.gd)
+signal acted(stack: Dictionary, group: int, at: Vector3)
+
 ## animation groups, as the game's ECreatureAnimType
 enum Group { MOVING = 0, HOLDING = 2, HIT = 3, DEATH = 5, ATTACK = 12, SHOOT = 15 }
 
@@ -419,6 +423,8 @@ func _place(stack: Dictionary) -> Vector3:
 
 
 func _play(card: Dictionary, group: int, loop: bool) -> void:
+	if group != Group.HOLDING:
+		acted.emit(card["stack"], group, card["node"].position)
 	card["group"] = group
 	card["loop"] = loop
 	card["time"] = 0.0

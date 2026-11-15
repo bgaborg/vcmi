@@ -10,7 +10,7 @@
 #include <stdint.h>
 
 // raise on any change to the structs below; the extension refuses a table with another version
-#define VCMI_BRIDGE_VERSION 21
+#define VCMI_BRIDGE_VERSION 22
 
 typedef struct VcmiBridgeStats
 {
@@ -98,7 +98,8 @@ typedef struct VcmiBattleStack
 	uint8_t side; // 0 attacker, 1 defender
 	uint8_t owner; // player 0-7, 255 neutral
 	uint8_t flags; // VCMI_STACK_*
-	uint8_t pad[3];
+	uint8_t pad;
+	uint16_t creature; // its creature's id, for creatureSounds; 65535 unknown
 	char animation[32]; // the creature's battle animation (an AnimationPath), cut to fit
 	char missile[24]; // a shooter's missile animation, empty for others
 	int16_t x, y; // VCMI_STACK_TURRET: the corner of its 450 x 400 frame on the battlefield, as the 2D battle draws it
@@ -133,7 +134,7 @@ typedef struct VcmiBattle
 	uint8_t shown; // 1 while the game shows a battle
 	uint8_t myTurn; // the local player chooses the active stack's action
 	uint8_t stackCount;
-	uint8_t pad;
+	uint8_t soundVolume; // the game's sound effects volume, 0-100 (general.sound): the table's sounds follow it
 	uint8_t reach[24]; // bit `hex`: the active stack can move there (the local player's turn only)
 	uint8_t blocked[24]; // bit `hex`: an obstacle, a wall or the gate, or not part of this battlefield
 	char picture[48]; // the battlefield's background, a name for imageFile; empty when unknown
@@ -150,6 +151,7 @@ typedef struct VcmiBattle
 	uint8_t actionTargetCount; // of actionTargets
 	uint8_t actionRayCount; // of actionRay: a shot drawn as a ray instead of a missile (CCreature projectileRay)
 	uint8_t actionOnHex; // 1: actionEffect is the spell's `hit` animation, played once on its hex (no hex: the whole field)
+	char actionSound[24]; // a spell's cast sound, a name for soundFile; empty when it has none
 	uint32_t actionTargets[VCMI_ACTION_TARGETS]; // every stack a spell affects (unit ids), in its order; cut to fit
 	uint8_t actionRay[VCMI_RAY_LINES][8]; // each line of the ray: RGBA at the shooter, RGBA at the target
 	VcmiWallPiece walls[VCMI_WALL_PIECES];
@@ -320,4 +322,15 @@ typedef struct VcmiBridgeApi
 	// loaded. Reads the game's files, so call it from a worker thread. `out` points into storage of the calling
 	// thread, valid until its next call
 	uint32_t (*imageFile)(const char * name, const uint8_t ** out);
+	// the same for sound `name` (VcmiBattle.actionSound, creatureSounds): a WAV or an Ogg file as the game's files hold
+	// it. Worker thread
+	uint32_t (*soundFile)(const char * name, const uint8_t ** out);
+	// copies creature `creature`'s battle sounds (VcmiBattleStack.creature), each a name for soundFile or empty, joined
+	// by '|': attack, defend, killed, move, shoot, cast, wince, startMoving, endMoving. Returns the length, 0 for an
+	// unknown creature or no game. Any thread
+	uint32_t (*creatureSounds)(uint16_t creature, char * out, uint32_t capacity);
+	// 1 while the table shows the battle: the 2D battle runs at its fastest speed (battle.speedFactor 18, the player's
+	// own kept in a file and put back after a crash) and the game's sound effects are muted, as Godot plays them on the
+	// table. Run by the next lifecycle tick. Any thread
+	void (*setTableBattle)(uint8_t shown);
 } VcmiBridgeApi;

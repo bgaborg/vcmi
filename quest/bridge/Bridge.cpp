@@ -11,6 +11,8 @@
 #include "../../Global.h"
 
 #include "VcmiBridgeApi.h"
+
+#include <fstream>
 // compiled here, so clientapp/CMakeLists.txt adds one file; the object benchmark compiles it on its own
 #include "ObjectScan.cpp"
 #include "SpriteDecode.cpp"
@@ -50,6 +52,7 @@
 #include "../../lib/StartInfo.h"
 #include "../../lib/TerrainHandler.h"
 #include "../../lib/UnlockGuard.h"
+#include "../../lib/VCMIDirs.h"
 #include "../../lib/battle/AccessibilityInfo.h"
 #include "../../lib/battle/CPlayerBattleCallback.h"
 #include "../../lib/callback/CCallback.h"
@@ -68,6 +71,7 @@
 #include "../../lib/spells/CSpell.h"
 #include "../../lib/texts/CGeneralTextHandler.h"
 #include "../../lib/texts/MetaString.h"
+#include "media/ISoundPlayer.h"
 #include "render/IImage.h"
 
 namespace
@@ -220,6 +224,7 @@ public:
 };
 
 std::atomic<bool> tabletopWanted{false};
+std::atomic<bool> tableBattleWanted{false}; // setTableBattle
 std::atomic<bool> tabletopShown{false};
 
 // a hero step the tabletop shows: the network thread waits (moveConfirmed) until Godot confirms it or the deadline
@@ -458,6 +463,7 @@ struct BattleAction
 	std::vector<uint32_t> targets; // a spell's: every stack it affects
 	bool onHex = false; // the effect is the spell's `hit` animation: once on its hex, not on each target
 	std::vector<RayColor> ray; // a spell's ray from target to target (chain lightning: BattleInterface usesChainRay)
+	std::string sound; // a spell's cast sound
 };
 std::mutex actionMutex;
 BattleAction lastAction;
@@ -508,6 +514,7 @@ public:
 		lastAction.effect.clear();
 		lastAction.targets.clear();
 		lastAction.ray.clear();
+		lastAction.sound.clear();
 	}
 	void battleSpellCast(const BattleID &, const BattleSpellCast * cast) override
 	{
@@ -526,8 +533,10 @@ public:
 		lastAction.effect.clear();
 		lastAction.onHex = false;
 		lastAction.ray.clear();
+		lastAction.sound.clear();
 		if(const CSpell * spell = cast->spellID.toSpell())
 		{
+			lastAction.sound = spell->getCastSound().getOriginalName();
 			if(cast->affectedCres.size() > 1)
 				lastAction.ray = spreadRay(spell->animationInfo.ray, spell->animationInfo.rayWidth);
 			for(const auto * queue : {&spell->animationInfo.affect, &spell->animationInfo.hit})
@@ -690,6 +699,7 @@ void publishBattle()
 		}
 		next.shown = 1;
 		next.myTurn = battle->makingTurn() ? 1 : 0;
+		next.soundVolume = static_cast<uint8_t>(std::clamp<int64_t>(settings["general"]["sound"].Integer(), 0, 100));
 		const CStack * active = battle->stacksController->getActiveStack();
 		const battle::Unit * turn = state->battleActiveUnit();
 		for(const CStack * stack : state->battleGetAllStacks(false))
@@ -714,8 +724,10 @@ void publishBattle()
 			out.owner = static_cast<uint8_t>(stack->unitOwner().getNum());
 			out.flags = (stack->doubleWide() ? VCMI_STACK_WIDE : 0) | (stack->alive() ? VCMI_STACK_ALIVE : 0) | (stack == active ? VCMI_STACK_ACTIVE : 0)
 					  | (turn && turn->unitId() == stack->unitId() ? VCMI_STACK_TURN : 0) | (turret ? VCMI_STACK_TURRET : 0);
+			out.creature = 0xffff;
 			if(const CCreature * type = stack->unitType())
 			{
+				out.creature = static_cast<uint16_t>(type->getId().getNum());
 				const std::string name = type->animDefName.getOriginalName();
 				std::memcpy(out.animation, name.data(), std::min(name.size(), sizeof(out.animation) - 1));
 				const std::string missile = type->animation.projectileImageName.getOriginalName();
@@ -786,6 +798,7 @@ void publishBattle()
 			}
 		}
 		std::memcpy(next.actionEffect, lastAction.effect.data(), std::min(lastAction.effect.size(), sizeof(next.actionEffect) - 1));
+		std::memcpy(next.actionSound, lastAction.sound.data(), std::min(lastAction.sound.size(), sizeof(next.actionSound) - 1));
 	}
 	std::lock_guard lock(battleMutex);
 	next.generation = publishedBattle.generation;
@@ -1076,10 +1089,63 @@ void publishObjectSnapshot()
 }
 
 // on the game GUI thread, with interfaceMutex held
+// the table shows the battle (setTableBattle): the 2D battle at its fastest, its sound effects muted (quest/DATA_BRIDGE.md,
+// "Battles"); the player's speed is kept in a file until the table lets the battle go, so a crash cannot lose it
+// shortcut: a speed the player sets in the 2D options during a table battle (or a replay's, ReplayAbortOverlay) is
+// replaced by the kept one when the battle ends
+void updateTableBattle()
+{
+	static bool applied = false;
+	static bool checked = false;
+	const auto kept = VCMIDirs::get().userConfigPath() / "quest-battle-speed.txt";
+	const bool wanted = tableBattleWanted && adventureInt;
+	if(checked && wanted == applied)
+	{
+		// the chat's sound, the window's focus and the sound option unmute the game: muted again
+		if(applied && ENGINE->sound().getVolume() != 0)
+			ENGINE->sound().setVolume(0);
+		return;
+	}
+	try
+	{
+		const bool keeping = boost::filesystem::exists(kept);
+		if(wanted && !keeping)
+		{
+			std::ofstream file(kept.string());
+			file << settings["battle"]["speedFactor"].Float();
+			file.close();
+			if(!file) // not kept: the player's speed stays
+			{
+				boost::system::error_code ignored;
+				boost::filesystem::remove(kept, ignored);
+				throw std::runtime_error("cannot write " + kept.string());
+			}
+			Settings fastest = settings.write["battle"]["speedFactor"];
+			fastest->Float() = 18; // the fastest the 2D options offer
+		}
+		if(!wanted && keeping) // also at the first tick after a crash during a table battle
+		{
+			double speed = 2;
+			std::ifstream(kept.string()) >> speed;
+			Settings own = settings.write["battle"]["speedFactor"];
+			own->Float() = speed;
+			boost::filesystem::remove(kept);
+		}
+	}
+	catch(const std::exception & e)
+	{
+		logGlobal->warn("Quest bridge: battle speed: %s", e.what());
+	}
+	ENGINE->sound().setVolume(wanted ? 0 : static_cast<ui32>(settings["general"]["sound"].Integer()));
+	applied = wanted;
+	checked = true;
+}
+
 void tick()
 {
 	tickPending = false;
 	ticks++;
+	updateTableBattle();
 	if(!adventureInt)
 	{
 		inGame = false;
@@ -1297,18 +1363,18 @@ void hexInput(uint16_t hex, uint8_t kind)
 		pendingHexClicks.push_back(hex);
 }
 
-uint32_t imageFile(const char * name, const uint8_t ** out)
+// file `name` of type `type` as the game's files hold it, looked for under each of `prefixes`
+uint32_t gameFile(const char * name, EResType type, std::initializer_list<const char *> prefixes, const uint8_t ** out)
 {
 	thread_local std::vector<uint8_t> bytes;
 	bytes.clear();
-	if(name && inGame.load())
+	if(name && *name && inGame.load())
 	{
 		try
 		{
-			// as the game looks for a picture: by its name, among the bitmaps, among the sprites
-			for(const char * prefix : {"", "DATA/", "SPRITES/"})
+			for(const char * prefix : prefixes)
 			{
-				const ResourcePath path(std::string(prefix) + name, EResType::IMAGE);
+				const ResourcePath path(std::string(prefix) + name, type);
 				if(!CResourceHandler::get()->existsResource(path))
 					continue;
 				const auto data = CResourceHandler::get()->load(path)->readAll();
@@ -1318,13 +1384,47 @@ uint32_t imageFile(const char * name, const uint8_t ** out)
 		}
 		catch(const std::exception & e)
 		{
-			logGlobal->warn("Quest bridge: picture %s: %s", name, e.what());
+			logGlobal->warn("Quest bridge: file %s: %s", name, e.what());
 			bytes.clear();
 		}
 	}
 	if(out)
 		*out = bytes.data();
 	return static_cast<uint32_t>(bytes.size());
+}
+
+uint32_t imageFile(const char * name, const uint8_t ** out)
+{
+	// as the game looks for a picture: by its name, among the bitmaps, among the sprites
+	return gameFile(name, EResType::IMAGE, {"", "DATA/", "SPRITES/"}, out);
+}
+
+uint32_t soundFile(const char * name, const uint8_t ** out)
+{
+	return gameFile(name, EResType::SOUND, {"", "SOUNDS/"}, out);
+}
+
+uint32_t creatureSounds(uint16_t creature, char * out, uint32_t capacity)
+{
+	if(!inGame.load() || !LIBRARY || creature >= LIBRARY->creh->size())
+		return 0;
+	const CCreature * type = (*LIBRARY->creh)[CreatureID(creature)];
+	if(!type)
+		return 0;
+	const auto & s = type->sounds;
+	std::string joined;
+	for(const AudioPath * sound : {&s.attack, &s.defend, &s.killed, &s.move, &s.shoot, &s.cast, &s.wince, &s.startMoving, &s.endMoving})
+		joined += sound->getOriginalName() + "|";
+	joined.pop_back();
+	if(!out || capacity <= joined.size())
+		return 0;
+	std::memcpy(out, joined.c_str(), joined.size() + 1);
+	return static_cast<uint32_t>(joined.size());
+}
+
+void setTableBattle(uint8_t shown)
+{
+	tableBattleWanted = shown != 0;
 }
 
 void selectObject(uint32_t id, uint8_t open)
@@ -1528,6 +1628,7 @@ static_assert(sizeof(VcmiPanelHero) == 64, "VcmiPanelHero is part of the bridge 
 static_assert(sizeof(VcmiPanelTown) == 56, "VcmiPanelTown is part of the bridge ABI");
 
 extern "C" __attribute__((visibility("default"))) const VcmiBridgeApi vcmi_bridge_api = {
-	VCMI_BRIDGE_VERSION, start,     stats,    copyTiles,     copyFog,   copyObjects,  copyObjectChanges, copyAnimation, decodeFrames, setTabletop, copyMove,
-	confirmMove,         tileInput, copyPath, tileAnimation, copyPanel, selectObject, copyBattle,        hexInput,      imageFile,
+	VCMI_BRIDGE_VERSION, start,       stats,    copyTiles,   copyFog,   copyObjects,    copyObjectChanges, copyAnimation,
+	decodeFrames,        setTabletop, copyMove, confirmMove, tileInput, copyPath,       tileAnimation,     copyPanel,
+	selectObject,        copyBattle,  hexInput, imageFile,   soundFile, creatureSounds, setTableBattle,
 };

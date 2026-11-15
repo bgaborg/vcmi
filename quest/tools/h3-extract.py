@@ -9,7 +9,8 @@ Usage: h3-extract.py NAME [NAME...]      (e.g. CPKMAN.def CmBkGrMt.pcx; case doe
 An animation becomes quest/out/h3/<NAME>/<group>_<frame>.png (cropped, shadow in the alpha) and frames.json:
 {"frames": [{"group", "frame", "left", "top", "full_size": [w, h], "file"}]}, the layout of VcmiData.decode_animation.
 A picture becomes quest/out/h3/<NAME>.png. raw:NAME writes the file's own bytes to quest/out/h3/raw/<NAME>, as the
-bridge's imageFile hands them to the host.
+bridge's imageFile hands them to the host. snd:NAME writes sound NAME (e.g. PIKEATTK) from the .snd archives to
+quest/out/h3/sound/<NAME>.wav, as the bridge's soundFile hands it.
 """
 
 import json
@@ -40,6 +41,18 @@ def lod_file(name):
                 if entry[0].split(b"\0")[0].decode("latin1").lower() == name.lower():
                     archive.seek(entry[1])
                     return zlib.decompress(archive.read(entry[4])) if entry[4] else archive.read(entry[2])
+    raise FileNotFoundError(name)
+
+
+def snd_file(name):
+    """the bytes of sound `name` (no extension) from the first .snd archive that has it"""
+    for snd in ["H3ab_ahd.snd", "Heroes3.snd"]:
+        with open(DATA / snd, "rb") as archive:
+            count = struct.unpack("<I", archive.read(4))[0]
+            for entry in struct.iter_unpack("<40sII", archive.read(48 * count)):
+                if entry[0].split(b"\0")[0].decode("latin1").lower() == name.lower():
+                    archive.seek(entry[1])
+                    return archive.read(entry[2])
     raise FileNotFoundError(name)
 
 
@@ -127,6 +140,11 @@ def extract_pcx(name, data):
 
 
 for wanted in sys.argv[1:]:
+    if wanted.startswith("snd:"):
+        (OUT / "sound").mkdir(parents=True, exist_ok=True)
+        (OUT / "sound" / (wanted[4:].upper() + ".wav")).write_bytes(snd_file(wanted[4:]))
+        print(wanted, "-> sound")
+        continue
     if wanted.startswith("raw:"):
         (OUT / "raw").mkdir(parents=True, exist_ok=True)
         (OUT / "raw" / wanted[4:].upper().rsplit(".", 1)[0]).write_bytes(lod_file(wanted[4:]))

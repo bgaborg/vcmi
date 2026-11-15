@@ -105,6 +105,7 @@ var battle_sample := false ## the test command `battle`: sample armies on the ta
 ## objects fading in or out on the table as VcmiData reports them (quest/PHASE4.md, "Fades"); also the test command
 ## `fade id 0/1`
 var map_fades: RefCounted = MapFades.new()
+var table_battle := false ## the table shows the game's battle (VcmiData.set_table_battle)
 var table_icons_tried := false ## SMALRES decoded once, found or not
 var pop_cards := true ## the next sprites shown pop their cards up (room.show_sprites): the table came near
 var shown_selection := Vector3i(-2, -2, -2) ## the selected hero's tile the table last followed and marked
@@ -553,6 +554,9 @@ func _process(delta: float) -> void:
 			wrist_panel.set_battle(battle_field.shown)
 			hotkey_hover = -1 # of the buttons before
 		battle_field.visible = tabletop and (battle_field.shown or battle_sample)
+		if (battle_field.visible and battle_field.shown) != table_battle:
+			table_battle = not table_battle # the 2D battle at its fastest, its sounds from the table
+			vcmi_data.set_table_battle(table_battle)
 		if battle_field.visible:
 			battle_field.load_creatures(vcmi_data)
 		if changed & 4 == 0 and not layer.visible: # out of the game (main menu, loading): always the screen

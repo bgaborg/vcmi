@@ -9,6 +9,7 @@ enum State { NONE, REACH, ACTIVE, HOVER, TARGET, BLOCKED }
 
 const BattleMath := preload("res://battle_math.gd")
 const BattleCards := preload("res://battle_cards.gd")
+const BattleSounds := preload("res://battle_sounds.gd")
 const AREA := Vector2(1.5, 0.94) ## metres: room.gd MINIMAP_AREA
 const LIFT := 0.0015 ## metres over the page
 const FIELD_SHADER := """shader_type spatial;
@@ -73,6 +74,7 @@ var hover := BattleMath.NO_HEX ## the hex under the player's ray (set_hover): sh
 var shown := false ## the game shows a battle (poll)
 var flashes := {} ## hex: seconds left of a spell's flash (State.TARGET over its own state)
 var cards: Node3D = BattleCards.new() ## the stacks
+var sounds: Node3D = BattleSounds.new() ## the battle's sounds, from the cards' places
 var _spell := 0 ## the sequence of the last spell event flashed
 var _picture := "" ## the background and walls a worker reads or has read: its name, a space, the walls' list
 var _asked := {} ## the creature animations a worker decodes or has decoded
@@ -95,6 +97,8 @@ func _init() -> void:
 	_field.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(_field)
 	add_child(cards)
+	cards.add_child(sounds)
+	cards.acted.connect(_on_acted)
 	set_states(PackedByteArray())
 
 
@@ -204,6 +208,14 @@ func set_battle(data: Dictionary) -> void:
 	if data.get("action_kind", 0) == 3 and data.get("action", 0) != _spell:
 		_spell = data.get("action", 0)
 		flashes[data.get("action_hex", -1)] = 0.7
+		# its cast sound on its first target, else on its hex, else over the field's middle
+		var target: Dictionary = cards.card(data.get("action_target", -1))
+		var hex: int = data.get("action_hex", -1)
+		var heard := hex_position(hex) if hex >= 0 else Vector3.ZERO
+		if not target.is_empty():
+			heard = target["node"].position
+		if visible: # off the table the game plays its own sounds
+			sounds.play(data.get("action_sound", ""), heard)
 		var struck: Array = Array(data.get("action_targets", PackedInt64Array())) + [data.get("action_target", -1)]
 		for stack: Dictionary in data.get("stacks", []):
 			if stack.get("id", -2) in struck and not stack.has("turret"):
@@ -222,6 +234,8 @@ func poll(data: RefCounted, card_lean: float) -> bool:
 	if not shown:
 		clear()
 		return before
+	sounds.data = data
+	sounds.volume = battle.get("sound_volume", 1.0)
 	cards.set_card_lean(card_lean)
 	set_battle(battle)
 	# the background, and in a siege the walls as they stand now, laid over it: read again when a wall falls
@@ -259,6 +273,7 @@ func load_creatures(data: RefCounted) -> void:
 
 ## At exit: the workers still use the game's data
 func wait_for_workers() -> void:
+	sounds.wait_for_workers()
 	for task in _tasks:
 		WorkerThreadPool.wait_for_task_completion(task)
 	_tasks.clear()
@@ -268,11 +283,21 @@ func wait_for_workers() -> void:
 func clear() -> void:
 	wait_for_workers() # long over, but for a battle that ended at once
 	cards.clear()
+	sounds.clear()
 	flashes.clear()
 	_spell = 0
 	_asked.clear()
 	_picture = ""
 	set_picture(null)
+
+
+## A stack started an animation group: its creature's sound for it
+func _on_acted(stack: Dictionary, group: int, at: Vector3) -> void:
+	var kind: int = {BattleCards.Group.MOVING: BattleSounds.Kind.MOVE, BattleCards.Group.HIT: BattleSounds.Kind.WINCE,
+			BattleCards.Group.DEATH: BattleSounds.Kind.KILLED, BattleCards.Group.ATTACK: BattleSounds.Kind.ATTACK,
+			BattleCards.Group.SHOOT: BattleSounds.Kind.SHOOT}.get(group, -1)
+	if kind >= 0 and visible: # off the table the game plays its own sounds
+		sounds.creature_sound(stack, kind, at)
 
 
 ## A worker has read the background and walls `picture`: shown when it is still the battle's

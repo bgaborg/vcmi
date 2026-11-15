@@ -96,6 +96,9 @@ protected:
 		ClassDB::bind_method(D_METHOD("select_object", "id", "open"), &VcmiData::select_object);
 		ClassDB::bind_method(D_METHOD("battle"), &VcmiData::battle);
 		ClassDB::bind_method(D_METHOD("image_file", "name"), &VcmiData::image_file);
+		ClassDB::bind_method(D_METHOD("sound_file", "name"), &VcmiData::sound_file);
+		ClassDB::bind_method(D_METHOD("creature_sounds", "creature"), &VcmiData::creature_sounds);
+		ClassDB::bind_method(D_METHOD("set_table_battle", "shown"), &VcmiData::set_table_battle);
 		ClassDB::bind_method(D_METHOD("hex_input", "hex", "click"), &VcmiData::hex_input);
 	}
 
@@ -1451,6 +1454,7 @@ public:
 		seenBattle = data->generation;
 		result["shown"] = data->shown != 0;
 		result["my_turn"] = data->myTurn != 0;
+		result["sound_volume"] = data->soundVolume / 100.0; // the game's effects volume: the table's sounds follow it
 		result["picture"] = String::utf8(data->picture, strnlen(data->picture, sizeof(data->picture)));
 		// the last attack (kind 1), shot (2) or spell (3): its sequence (0: none yet), the acting stack's and the first
 		// hurt stack's id (-1: a hero, none), a spell's target hex (-1: none)
@@ -1475,6 +1479,7 @@ public:
 		result["action_effect"] = String::utf8(data->actionEffect, strnlen(data->actionEffect, sizeof(data->actionEffect)));
 		result["action_side"] = data->actionSide < 2 ? int64_t(data->actionSide) : int64_t(-1);
 		result["action_on_hex"] = data->actionOnHex != 0; // the effect plays once on the hex, or over the whole field
+		result["action_sound"] = String::utf8(data->actionSound, strnlen(data->actionSound, sizeof(data->actionSound)));
 		// a spell's every target (unit ids), and a ray shot's lines: [colour at the shooter, colour at the target]
 		PackedInt64Array targets;
 		for(int i = 0; i < std::min<int>(data->actionTargetCount, VCMI_ACTION_TARGETS); i++)
@@ -1520,6 +1525,7 @@ public:
 			stack["turn"] = (s.flags & VCMI_STACK_TURN) != 0;
 			stack["animation"] = String::utf8(s.animation, strnlen(s.animation, sizeof(s.animation)));
 			stack["missile"] = String::utf8(s.missile, strnlen(s.missile, sizeof(s.missile)));
+			stack["creature"] = s.creature == 0xffff ? int64_t(-1) : int64_t(s.creature);
 			if(s.flags & VCMI_STACK_TURRET) // a tower's shooter: its frame's corner on the battlefield, no hex
 				stack["turret"] = Vector2i(s.x, s.y);
 			stacks.push_back(stack);
@@ -1543,6 +1549,37 @@ public:
 			std::memcpy(result.ptrw(), bytes, size);
 		}
 		return result;
+	}
+
+	/// the bytes of sound `name` (VcmiBridgeApi.soundFile): a WAV or an Ogg file; empty when missing. From a worker
+	PackedByteArray sound_file(const String & name) const
+	{
+		PackedByteArray result;
+		const uint8_t * bytes = nullptr;
+		const uint32_t size = api ? api->soundFile(name.utf8().get_data(), &bytes) : 0;
+		if(size && bytes)
+		{
+			result.resize(size);
+			std::memcpy(result.ptrw(), bytes, size);
+		}
+		return result;
+	}
+
+	/// creature `creature`'s battle sounds (a stack's "creature"), names for sound_file, empty for none: attack, defend,
+	/// killed, move, shoot, cast, wince, startMoving, endMoving; empty for an unknown creature
+	PackedStringArray creature_sounds(int64_t creature) const
+	{
+		char joined[512];
+		if(!api || creature < 0 || creature >= 0xffff || api->creatureSounds(uint16_t(creature), joined, sizeof(joined)) == 0)
+			return PackedStringArray();
+		return String::utf8(joined).split("|");
+	}
+
+	/// true while the table shows the battle: the 2D battle runs at its fastest and its sound effects are muted
+	void set_table_battle(bool shown)
+	{
+		if(api)
+			api->setTableBattle(shown ? 1 : 0);
 	}
 
 	/// the table's ray on battlefield hex `hex`: a hover, or with `click` a click, as the 2D battlefield's
