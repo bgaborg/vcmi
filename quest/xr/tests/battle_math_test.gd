@@ -167,6 +167,29 @@ func _initialize() -> void:
 			0.002).length())], [true, true])
 	cards._process(1.0)
 	_expect("and ends with its last frame", cards._effects.size(), 0)
+	# a mass spell: its animation on every stack it affects, and they all flash
+	field.set_battle({"stacks": stacks, "action": 3, "action_kind": 3, "action_stack": -1, "action_target": 1,
+			"action_targets": PackedInt64Array([1, 3, 99]), "action_hex": -1, "action_side": -1, "action_effect": "BOLT"})
+	_expect("a mass spell plays on each stack it affects", [cards._effects.size(), field.flashes.has(41),
+			field.flashes.has(50)], [2, true, true])
+	cards._process(2.0)
+	# a spell whose animation is its `hit`, without a hex (Armageddon): a grid over the field, not one per stack
+	field.set_battle({"stacks": stacks, "action": 4, "action_kind": 3, "action_stack": -1, "action_target": 1,
+			"action_targets": PackedInt64Array([1, 3]), "action_hex": -1, "action_side": -1, "action_effect": "BOLT",
+			"action_on_hex": true})
+	_expect("over the whole field", cards._effects.size(), 12)
+	cards._process(2.0)
+	# a ray: one mesh of its lines, drawn after the shot's delay, then fading
+	field.set_battle({"stacks": stacks, "action": 5, "action_kind": 2, "action_stack": 3, "action_target": 1,
+			"action_ray": [[Color.YELLOW, Color(1, 1, 0, 0.25)], [Color.GREEN, Color.GREEN], [Color.YELLOW,
+			Color(1, 1, 0, 0.25)]]})
+	_expect("a ray instead of a missile", [cards._rays.size(), cards._shots.size(),
+			cards._rays[0]["node"].mesh.surface_get_array_len(0)], [1, 0, 18])
+	cards._process(cards.SHOT_DELAY + cards.RAY / 2.0)
+	_expect("it fades", [cards._rays[0]["node"].visible, absf(cards._rays[0]["node"].material_override.albedo_color.a
+			- 0.5) < 0.05], [true, true])
+	cards._process(cards.RAY)
+	_expect("and is gone", cards._rays.size(), 0)
 	field._process(1.0)
 	_expect("and the flash ends", field.flashes.size(), 0)
 	cards.clear()

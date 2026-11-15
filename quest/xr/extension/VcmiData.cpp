@@ -1390,6 +1390,22 @@ public:
 		// a spell: its own animation (empty: none) and, cast by a hero, the hero's side (else -1)
 		result["action_effect"] = String::utf8(data->actionEffect, strnlen(data->actionEffect, sizeof(data->actionEffect)));
 		result["action_side"] = data->actionSide < 2 ? int64_t(data->actionSide) : int64_t(-1);
+		result["action_on_hex"] = data->actionOnHex != 0; // the effect plays once on the hex, or over the whole field
+		// a spell's every target (unit ids), and a ray shot's lines: [colour at the shooter, colour at the target]
+		PackedInt64Array targets;
+		for(int i = 0; i < std::min<int>(data->actionTargetCount, VCMI_ACTION_TARGETS); i++)
+			targets.push_back(data->actionTargets[i]);
+		result["action_targets"] = targets;
+		Array ray;
+		for(int i = 0; i < std::min<int>(data->actionRayCount, VCMI_RAY_LINES); i++)
+		{
+			const uint8_t * c = data->actionRay[i];
+			Array line;
+			line.push_back(Color::from_rgba8(c[0], c[1], c[2], c[3]));
+			line.push_back(Color::from_rgba8(c[4], c[5], c[6], c[7]));
+			ray.push_back(line);
+		}
+		result["action_ray"] = ray;
 		result["action_stack"] = data->actionStack == VCMI_NONE ? int64_t(-1) : int64_t(data->actionStack);
 		result["action_target"] = data->actionTarget == VCMI_NONE ? int64_t(-1) : int64_t(data->actionTarget);
 		result["action_hex"] = data->actionHex < VCMI_BATTLE_HEXES ? int64_t(data->actionHex) : int64_t(-1);

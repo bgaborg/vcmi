@@ -455,6 +455,8 @@ struct BattleAction
 	uint8_t kind = 0;
 	uint8_t side = 255;
 	std::string effect;
+	std::vector<uint32_t> targets; // a spell's: every stack it affects
+	bool onHex = false; // the effect is the spell's `hit` animation: once on its hex, not on each target
 };
 std::mutex actionMutex;
 BattleAction lastAction;
@@ -482,6 +484,7 @@ public:
 		lastAction.hex = 0xffff;
 		lastAction.side = 255;
 		lastAction.effect.clear();
+		lastAction.targets.clear();
 	}
 	void battleSpellCast(const BattleID &, const BattleSpellCast * cast) override
 	{
@@ -492,15 +495,21 @@ public:
 		lastAction.kind = VCMI_ACTION_SPELL;
 		lastAction.stack = cast->casterStack >= 0 ? static_cast<uint32_t>(cast->casterStack) : VCMI_NONE;
 		lastAction.target = cast->affectedCres.empty() ? VCMI_NONE : cast->affectedCres.front();
+		lastAction.targets = cast->affectedCres;
 		lastAction.hex = cast->tile.isValid() ? static_cast<uint16_t>(cast->tile.toInt()) : 0xffff;
 		lastAction.side = cast->castByHero && cast->casterStack < 0 ? (cast->side == BattleSide::DEFENDER ? 1 : 0) : 255;
 		// the first picture the 2D battle plays on what the spell affects, else on the hex it hits
+		// as BattleInterface: `affect` plays on each stack it affects, `hit` once on the target hex or over the field
 		lastAction.effect.clear();
+		lastAction.onHex = false;
 		if(const CSpell * spell = cast->spellID.toSpell())
 			for(const auto * queue : {&spell->animationInfo.affect, &spell->animationInfo.hit})
 				for(const auto & item : *queue)
 					if(lastAction.effect.empty() && !item.resourceName.empty())
+					{
 						lastAction.effect = item.resourceName.getOriginalName();
+						lastAction.onHex = queue == &spell->animationInfo.hit;
+					}
 	}
 };
 
@@ -731,6 +740,23 @@ void publishBattle()
 		next.actionHex = lastAction.hex;
 		next.actionKind = lastAction.kind;
 		next.actionSide = lastAction.side;
+		next.actionOnHex = lastAction.onHex ? 1 : 0;
+		next.actionTargetCount = static_cast<uint8_t>(std::min<size_t>(lastAction.targets.size(), VCMI_ACTION_TARGETS));
+		std::copy_n(lastAction.targets.begin(), next.actionTargetCount, next.actionTargets);
+		// a shot by a creature that shoots a ray: its lines' colours (BattleProjectileController draws them)
+		const CStack * shooter = next.actionKind == VCMI_ACTION_SHOT && state ? state->battleGetStackByID(lastAction.stack, false) : nullptr;
+		if(shooter && shooter->unitType())
+		{
+			const auto & ray = shooter->unitType()->animation.projectileRay;
+			next.actionRayCount = static_cast<uint8_t>(std::min<size_t>(ray.size(), VCMI_RAY_LINES));
+			for(int i = 0; i < next.actionRayCount; i++)
+			{
+				const uint8_t line[8] = {
+					ray[i].start.r, ray[i].start.g, ray[i].start.b, ray[i].start.a, ray[i].end.r, ray[i].end.g, ray[i].end.b, ray[i].end.a
+				};
+				std::memcpy(next.actionRay[i], line, sizeof(line));
+			}
+		}
 		std::memcpy(next.actionEffect, lastAction.effect.data(), std::min(lastAction.effect.size(), sizeof(next.actionEffect) - 1));
 	}
 	std::lock_guard lock(battleMutex);

@@ -40,12 +40,16 @@ uniform float lean = 1.22; // radians from the table, cards.json
 uniform bool cards_pass = false; // the second pass: the standing cards only; the first: all else, and cards' shadows
 uniform float atlas_scale = 1.0; // texels per 2D map pixel in the pages, for a frame table without its own scales
 uniform float PAGE = 1024.0; // texels a page side (SpriteAtlas::PAGE), from the texture (set_sprites)
+// an alpha per object id while objects fade in or out (map_fades.gd); off: all whole, nothing read
+uniform sampler2D fades : filter_nearest;
+uniform bool fading = false;
 varying vec2 panel_xz;
 varying flat float shadow_only;
 varying vec3 page_uv;
 varying flat int owner;
 varying flat float lost;
 varying flat float card;
+varying flat float fade;
 vec4 texel(int i) {
 	return texelFetch(frames, ivec2(i % 512, i / 512), 0);
 }
@@ -74,6 +78,13 @@ void vertex() {
 	owner = int(INSTANCE_CUSTOM.z + 0.5);
 	if (owner == 11) {
 		VERTEX = vec3(0.0); // no fog tiles: what is not seen is the blank page (quest/VISUALS.md)
+	}
+	fade = 1.0;
+	if (fading && owner < 10 && id >= 0 && id < 65536) { // an object: its id is the fade table's texel
+		fade = texelFetch(fades, ivec2(id % 256, id / 256), 0).r;
+		if (fade <= 0.0) {
+			VERTEX = vec3(0.0);
+		}
 	}
 	card = 0.0;
 	if (owner < 10 && packed < 4096) { // an object, not flat (VcmiData.update_sprites)
@@ -129,7 +140,7 @@ void fragment() {
 	if (c.a < 0.004) {
 		discard;
 	}
-	c *= paint;
+	c *= paint * fade;
 	if (owner < 9) {
 		c.rgb = mix(c.rgb, owner_colours[owner].rgb * c.a, texture(masks, page_uv).r);
 	}

@@ -34,6 +34,9 @@ const FPS := 10.0 ## frames a second, about the 2D battle's at its default speed
 const SLIDE := 0.45 ## seconds a stack takes to a new hex
 const FLIGHT := 0.35 ## seconds a shot flies
 const SHOT_DELAY := 0.4 ## seconds from the shooter's first frame to the shot's leaving
+const RAY := 0.5 ## seconds a ray fades in after it is drawn
+## a grid of field pixels a spell that covers the whole field plays its animation on (Armageddon: SCREEN_FILL)
+const FILL_STEP := Vector2(200.0, 160.0)
 
 ## animation name: {group: [{image, texture (made from the image when the frame first shows), rect (of the frame's
 ## pixels in the 450 x 400 frame)}]}
@@ -44,6 +47,7 @@ var _turn := -1 ## the id of the stack whose turn it was at the last set_stacks
 var _action := 0 ## the sequence of the last battle event shown (set_action); 0: none came, attacks are guessed
 var _shots: Array[Dictionary] = [] ## flying: {node, from, to, time, missile (its animation, or none for a dart)}
 var _effects: Array[Dictionary] = [] ## playing once: {node, name (the animation), at, time, waited}
+var _rays: Array[Dictionary] = [] ## shown: {node, time}
 var _dart := BoxMesh.new()
 var _unit := QuadMesh.new()
 
@@ -89,6 +93,14 @@ func _process(delta: float) -> void:
 			node.material_override = _art(frame)
 			node.basis = Basis(across * frame["rect"].size.x * PIXEL, side.cross(across) * frame["rect"].size.y * PIXEL,
 					side)
+	for ray in _rays.duplicate():
+		ray["time"] += delta
+		var shown: float = 1.0 - clampf((ray["time"] - SHOT_DELAY) / RAY, 0.0, 1.0)
+		(ray["node"] as MeshInstance3D).visible = ray["time"] >= SHOT_DELAY
+		((ray["node"] as MeshInstance3D).material_override as StandardMaterial3D).albedo_color.a = shown
+		if shown <= 0.0:
+			ray["node"].queue_free()
+			_rays.erase(ray)
 	for effect in _effects.duplicate():
 		var frames: Array = creatures.get(effect["name"], {}).get(0, [])
 		var node: MeshInstance3D = effect["node"]
@@ -131,9 +143,10 @@ func set_creature(name_: String, decoded: Dictionary) -> void:
 		if not groups.has(int(frame["group"])):
 			groups[int(frame["group"])] = []
 		var zoom: float = frame.get("scale", 1)
+		var full: Variant = frame.get("full_size", Vector2i(450, 400)) # a Vector2i, or [w, h] from a JSON file
 		groups[int(frame["group"])].append({"image": image, "texture": null, "rect": Rect2(frame["left"] / zoom,
 				frame["top"] / zoom, image.get_width() / zoom, image.get_height() / zoom),
-				"full": Vector2(frame.get("full_size", Vector2i(450, 400))) / zoom})
+				"full": Vector2(full[0], full[1]) / zoom})
 	creatures[name_] = groups
 
 
@@ -223,17 +236,32 @@ func set_action(data: Dictionary) -> void:
 		var caster: int = HERO_ID - int(data.get("action_side", -1))
 		if data.get("action_side", -1) >= 0 and _stacks.has(caster):
 			_play(_stacks[caster], Group.ATTACK, false)
-		var struck: int = data.get("action_target", -1)
+		# as the 2D battle: an `affect` animation on every stack it affects (a mass spell: all of them); a `hit` one
+		# (action_on_hex) once on its hex, or without a hex over the whole field (Armageddon)
 		var effect: String = data.get("action_effect", "")
-		if effect != "" and _stacks.has(struck):
-			play_effect(effect, _place(_stacks[struck]["stack"]))
-		elif effect != "" and data.get("action_hex", -1) >= 0:
-			play_effect(effect, _place({"hex": data["action_hex"]}))
+		var struck: Array = Array(data.get("action_targets", PackedInt64Array())).filter(func(t): return _stacks.has(t))
+		if struck.is_empty() and _stacks.has(data.get("action_target", -1)):
+			struck = [data["action_target"]]
+		if data.get("action_on_hex", false):
+			struck = []
+		if effect != "":
+			for target: int in struck:
+				play_effect(effect, _place(_stacks[target]["stack"]))
+			if struck.is_empty() and data.get("action_hex", -1) >= 0:
+				play_effect(effect, _place({"hex": data["action_hex"]}))
+			elif struck.is_empty():
+				for x in range(int(FILL_STEP.x / 2.0), int(BattleMath.FIELD.x), int(FILL_STEP.x)):
+					for y in range(int(FILL_STEP.y), int(BattleMath.FIELD.y) + 1, int(FILL_STEP.y)):
+						var at := BattleMath.field_to_page(Vector2(x, y), AREA)
+						play_effect(effect, Vector3(at.x, LIFT, at.y))
 	if sequence == 0 or not _stacks.has(id):
 		return
 	attack(id, kind == 2)
 	var target: int = data.get("action_target", -1)
-	if kind == 2 and _stacks.has(target):
+	var lines: Array = data.get("action_ray", [])
+	if kind == 2 and _stacks.has(target) and not lines.is_empty():
+		play_ray(_stacks[id]["node"].position, _stacks[target]["node"].position, lines)
+	elif kind == 2 and _stacks.has(target):
 		var dart := MeshInstance3D.new()
 		dart.mesh = _dart
 		dart.visible = false
@@ -241,6 +269,48 @@ func set_action(data: Dictionary) -> void:
 		var chest := Vector3(0.0, 0.05, 0.0)
 		_shots.append({"node": dart, "time": 0.0, "from": _stacks[id]["node"].position + chest,
 				"to": _stacks[target]["node"].position + chest, "missile": _stacks[id]["stack"].get("missile", "")})
+
+
+## A ray from `from` to `to` (stack places), as BattleProjectileController draws one: each of `lines` ([colour at the
+## shooter, colour at the target]) a field pixel wide, side by side, at chest height. One mesh, drawn once, fading
+func play_ray(from: Vector3, to: Vector3, lines: Array) -> void:
+	var chest := Vector3(0.0, 0.05, 0.0)
+	var start := from + chest
+	var along := to + chest - start
+	if along.length_squared() < 0.000001:
+		return
+	# across the flight, in the plane that faces up: seen from above and from the chair
+	var across := along.cross(Vector3.UP).normalized() * PIXEL
+	if across.length_squared() < 0.0000001:
+		across = Vector3.RIGHT * PIXEL
+	var vertices := PackedVector3Array()
+	var colours := PackedColorArray()
+	for i in lines.size():
+		var side := across * (i - lines.size() / 2.0)
+		var near_colour: Color = lines[i][0]
+		var far_colour: Color = lines[i][1]
+		for corner in [[side, near_colour], [side + across, near_colour], [side + along, far_colour],
+				[side + across, near_colour], [side + across + along, far_colour], [side + along, far_colour]]:
+			vertices.append(start + corner[0])
+			colours.append(corner[1])
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_COLOR] = colours
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	var material := StandardMaterial3D.new()
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.vertex_color_use_as_albedo = true
+	material.vertex_color_is_srgb = true # the game's colours
+	var node := MeshInstance3D.new()
+	node.mesh = mesh
+	node.material_override = material
+	node.visible = false
+	add_child(node)
+	_rays.append({"node": node, "time": 0.0})
 
 
 ## Animation `effect` (a spell's own, read like a creature's) plays once, standing at `at` (as _place gives it)
@@ -258,10 +328,11 @@ func clear() -> void:
 	set_stacks([])
 	_turn = -1
 	_action = 0
-	for flying in _shots + _effects:
+	for flying in _shots + _effects + _rays:
 		flying["node"].queue_free()
 	_shots.clear()
 	_effects.clear()
+	_rays.clear()
 	creatures.clear()
 
 

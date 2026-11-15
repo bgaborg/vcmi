@@ -51,7 +51,9 @@ Not closed yet:
    2. **5b, the battle's state and input** through the bridge: written and built, never run.
    3. **5c to 5f:** the creatures as cards, the actions, the battle's keys, the battlefield's picture: written, tested on the PC with the game's own art (`quest/tools/h3-extract.py`), built, never run ([`PHASE5.md`](PHASE5.md)).
    4. **Also written:** battle events from the game (attacks, shots with the creature's own missile, spells with their own animation and a flash, the hero's cast), a siege's walls, towers and moat, the heroes at the field's ends, 2x creature art for the standing and moving frames.
-   5. **Left in phase 5:** rays, effects on every target of a mass spell, and the first run on the headset.
+   5. **Rays and mass spells:** designed, built and shown on the PC (proof of concept, [`PHASE5.md`](PHASE5.md)): a ray shooter's own coloured lines, a spell's animation on every unit it affects, a grid over the field for spells without a target.
+   6. **Left in phase 5:** chain lightning's bolts between targets, the size of tall spell effects, and the first run on the headset.
+   7. **Map fades (phase 4):** designed, the GPU half built and shown on the PC (proof of concept, [`PHASE4.md`, "Fades"](PHASE4.md)): an alpha per object id in a small texture the sprite shader reads. Left: the extension reports appearing and vanishing objects and keeps a vanished one's sprites until its fade ends (about 60 lines in `VcmiData.cpp`).
 3. **Phase 6 parts done on the PC:** in passthrough the map and its panels show without the room, on the player's real table at the wrist panel's height; a grip on the hourglass turned over ends the turn. Left: spatial audio (the game's sound goes to the system mixer, not to Godot), table snapping to a scanned surface, the town screen as a diorama, shared anchors.
 4. **Everything written since 2026-11-12 is untested on the headset.** [`HEADSET_CHECKLIST.md`](HEADSET_CHECKLIST.md) lists what to check, in order, before the release.
 

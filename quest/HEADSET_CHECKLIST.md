@@ -25,6 +25,7 @@ Build and install: `quest/tools/make-apk.sh` (WSL), then `quest/tools/quest.sh i
 | 2.8 | A teleport (monolith, town portal) | the hero is at the exit at once | `Bridge.cpp` `onAfterHeroTeleported` |
 | 2.9 | An enemy hero walking in view | its flag moves with it | `VcmiData.cpp` `animate_move` |
 | 2.10 | Passthrough (wrist "Room"), then tabletop mode | only the book with the map and its panels, lit evenly, at the table's height: set "Table" so that it lies on your real table. Out of tabletop mode nothing of the room shows | `main.gd` `_show_room`, `room.gd` `show_table_only` |
+| 2.10a | Test command `fade <id> 0`, then `fade <id> 1` on an object in view (its id: `test bridge`, or `sprites_check`) | it fades out over half a second, then back in | `map_fades.gd`, `table_shaders.gd` SPRITE (`fades`) |
 | 2.11 | Point at the hourglass, hold the grip, turn the hand over | the hourglass flips and the turn ends (the trigger on it still does too) | `main.gd` `hourglass_grab`, `TableMath.turned_over` |
 
 ## 3. The battle (phase 5)
@@ -44,6 +45,8 @@ Build and install: `quest/tools/make-apk.sh` (WSL), then `quest/tools/quest.sh i
 | 3.9 | Cast a spell | open the book (wrist) and pick the spell on the screen; then try the target on the table (a hex click runs the 2D battle's own action for that hex, which should cast), else on the screen | `publishBattle` (the input part) |
 | 3.10 | A two-hex creature, on both sides | stands over its two hexes | `battle_cards.gd` `WIDE` |
 | 3.11 | The battle ends | the result window on the screen; after it the map is back on the table; no crash | `publishBattle` (the `try` around `getBattle`) |
+| 3.9b | A mass spell (Slow, Haste for all) and Armageddon | the spell's animation on every unit it affects; Armageddon's over the whole field | `publishBattle` (`actionTargets`), `battle_cards.gd` `set_action` |
+| 3.6b | A ray shooter shoots | coloured lines from it to the target, fading | `publishBattle` (`actionRay`), `battle_cards.gd` `play_ray` |
 | 3.9a | A spell lands | the casting hero raises its hand; the spell's own animation plays on the first stack it touches (or on its hex), which also flashes red | `Bridge.cpp` `battleSpellCast` (`actionEffect`, `actionSide`), `battle_cards.gd` `play_effect`, `battle_field.gd` `flashes` |
 | 3.12 | A siege | the walls, towers and moat are drawn on the field; a wall the catapult breaks changes to its broken picture; the gate opens; wall hexes are dark | `Bridge.cpp` `wallPieces` (a copy of `BattleSiegeController`'s private rules), `battle_field.gd` `poll`, `compose_picture` |
 | 3.12b | A siege against a town with towers | a shooter stands on each tower's top in the picture, and shoots | `publishBattle` (`VCMI_STACK_TURRET`), `battle_cards.gd` `_place` |
@@ -55,7 +58,8 @@ Build and install: `quest/tools/make-apk.sh` (WSL), then `quest/tools/quest.sh i
 
 - Only the standing and moving frames of the creatures are upscaled; attacks and deaths are the game's 1x art.
 - The table follows the 2D battle by up to a tenth of a second. A spell's animation plays on its first target only (a mass spell too), and effects that fill the 2D screen (Armageddon) are not shown.
-- A shooter's ray (the mage's, the lich's cloud) is a plain dart.
+- Chain lightning shows on each target without the bolts between them.
+- Objects on the map still appear and vanish at once: only the fade's GPU half is built (`fade` test command).
 - Two attacks within a tenth of a second show as one.
 - A melee attack always comes from the attacker's side; another side cannot be chosen from the table.
 - The 2D battle's own hex highlight is off at the two side columns, and its status text can vanish when a new stack becomes active.

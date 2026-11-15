@@ -17,6 +17,7 @@ const TableMath := preload("res://table_math.gd")
 const TablePanel := preload("res://table_panel.gd")
 const WristPanel := preload("res://wrist_panel.gd")
 const BattleField := preload("res://battle_field.gd")
+const MapFades := preload("res://map_fades.gd")
 ## the view switch's place in tabletop mode, from the map's middle: over the resource bar on the shelf, where the
 ## seated player looks (the table's near corners are outside the headset's view)
 const SWITCH_AT := Vector3(0.0, TablePanel.SHELF + 0.16, TablePanel.FAR_EDGE)
@@ -101,6 +102,9 @@ var table_panel: Node3D
 ## the battle on the table (quest/PHASE5.md): shown in tabletop mode instead of the map while the game shows a battle
 var battle_field: Node3D = BattleField.new()
 var battle_sample := false ## the test command `battle`: sample armies on the table
+## objects fading in or out on the table (quest/PHASE4.md, "Fades"); the test command `fade id 0/1` drives it until
+## VcmiData reports appearing and vanishing objects
+var map_fades: RefCounted = MapFades.new()
 var table_icons_tried := false ## SMALRES decoded once, found or not
 var pop_cards := true ## the next sprites shown pop their cards up (room.show_sprites): the table came near
 var shown_selection := Vector3i(-2, -2, -2) ## the selected hero's tile the table last followed and marked
@@ -524,6 +528,9 @@ func _process(delta: float) -> void:
 		if changed & 4 and tracked != null and not sprites_held:
 			_update_sprite_view((origin.transform * (tracked as Transform3D)).origin)
 		_update_table(changed)
+		if map_fades.active():
+			map_fades.advance(delta)
+			map_fades.apply(room.sprite_multimesh(), map_fades.needed())
 		if battle_field.poll(vcmi_data, card_lean):
 			wrist_panel.set_battle(battle_field.shown)
 			hotkey_hover = -1 # of the buttons before
@@ -1370,6 +1377,13 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 		# table; 0: back
 		"tabletop":
 			_set_tabletop(a > 0.0)
+		# fade a, b: object a fades in (b 1) or out (b 0) on the table, as an object that appears or is taken
+		"fade":
+			if b > 0.0:
+				map_fades.fade_in(int(a))
+			else:
+				map_fades.fade_out(int(a))
+			map_fades.apply(room.sprite_multimesh(), true)
 		# 1: a sample battle on the table instead of the map (battle_field.gd), for its look and the hexes' picking
 		"battle":
 			battle_sample = a > 0.0

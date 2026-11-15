@@ -10,7 +10,7 @@
 #include <stdint.h>
 
 // raise on any change to the structs below; the extension refuses a table with another version
-#define VCMI_BRIDGE_VERSION 20
+#define VCMI_BRIDGE_VERSION 21
 
 typedef struct VcmiBridgeStats
 {
@@ -112,6 +112,8 @@ typedef struct VcmiBattleStack
 #define VCMI_ACTION_ATTACK 1
 #define VCMI_ACTION_SHOT 2
 #define VCMI_ACTION_SPELL 3
+#define VCMI_ACTION_TARGETS 16
+#define VCMI_RAY_LINES 8
 
 // a piece of a besieged town's walls as the 2D battle draws it now: the picture named by the background's name with
 // its last four letters ("BACK") replaced by `name`, its corner at x, y of the battlefield
@@ -145,7 +147,11 @@ typedef struct VcmiBattle
 	char heroes[2][32]; // the attacker's and the defender's hero: its battle animation, empty without a hero
 	char actionEffect[32]; // a spell's own animation, played on what it affects; empty when it has none
 	uint8_t actionSide; // a spell cast by a hero: its side (0 attacker, 1 defender); else 255
-	uint8_t pad2[3];
+	uint8_t actionTargetCount; // of actionTargets
+	uint8_t actionRayCount; // of actionRay: a shot drawn as a ray instead of a missile (CCreature projectileRay)
+	uint8_t actionOnHex; // 1: actionEffect is the spell's `hit` animation, played once on its hex (no hex: the whole field)
+	uint32_t actionTargets[VCMI_ACTION_TARGETS]; // every stack a spell affects (unit ids), in its order; cut to fit
+	uint8_t actionRay[VCMI_RAY_LINES][8]; // each line of the ray: RGBA at the shooter, RGBA at the target
 	VcmiWallPiece walls[VCMI_WALL_PIECES];
 	VcmiBattleStack stacks[VCMI_BATTLE_STACKS];
 } VcmiBattle;

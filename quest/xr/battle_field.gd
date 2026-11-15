@@ -200,12 +200,13 @@ func set_battle(data: Dictionary) -> void:
 			shown[hex] = State.ACTIVE
 	cards.set_action(data) # first: with an event, set_stacks guesses no attack
 	cards.set_stacks(cards.with_heroes(data.get("stacks", []), data.get("heroes", PackedStringArray())))
-	# a spell: its target hex and the first stack it touched flash
+	# a spell: its target hex and every stack it touched flash
 	if data.get("action_kind", 0) == 3 and data.get("action", 0) != _spell:
 		_spell = data.get("action", 0)
 		flashes[data.get("action_hex", -1)] = 0.7
+		var struck: Array = Array(data.get("action_targets", PackedInt64Array())) + [data.get("action_target", -1)]
 		for stack: Dictionary in data.get("stacks", []):
-			if stack.get("id", -2) == data.get("action_target", -1):
+			if stack.get("id", -2) in struck and not stack.has("turret"):
 				flashes[stack.get("hex", -1)] = 0.7
 	set_states(shown)
 

@@ -37,6 +37,7 @@ void fragment() {
 }
 """
 
+var preview_fade := -1.0 ## `-- sprites fade=a`: objects near the zoom tile at alpha a, as halfway through a fade
 var zoom_tile := Vector2(19.0, 13.0) ## the tile the view `sprites-zoom` looks at; `-- sprites zoom=x,y` sets it
 var play_zoom := 1.0 ## the table's zoom and centre in the views named "play" (_load_sprites)
 var play_centre := Vector2(0.5, 0.5)
@@ -74,6 +75,8 @@ func _ready() -> void:
 		if arg.begins_with("table_zoom="): # table_zoom=factor,u,v: the minimap's own zoom (room.set_zoom)
 			var v := arg.get_slice("=", 1).split(",")
 			table_zoom = [float(v[0]), Vector2(float(v[1]), float(v[2]))]
+		if arg.begins_with("fade="): # fade=alpha: the objects near the zoom tile at that alpha (map_fades.gd)
+			preview_fade = float(arg.get_slice("=", 1))
 		if arg == "tableonly": # as main.gd outside the war room: only the book and its panels, in main.gd's light
 			room.show_table_only(true)
 			world.environment = Environment.new()
@@ -161,6 +164,9 @@ func _add_battle(room: Node3D) -> void:
 	_minimap_view(room, "sprites-battle-top", Vector3(0.0, 1.0, 0.01), Vector3(0.0, 0.0, 0.0))
 	field.show_sample()
 	field.set_hover(5 * 17 + 9)
+	# `-- sprites battle action`: a ray shot across the field and a mass spell on the defenders, frozen mid-way (the
+	# ray's colours are tower.json's; the spell's animation is extracted as below)
+	var action := "action" in OS.get_cmdline_user_args()
 	# the creatures' own frames and the battlefield's picture, when quest/tools/h3-extract.py has put them in
 	# quest/out/h3 (the player's game art, not in git): `h3-extract.py CPKMAN.def CGRIFF.def CSKELE.def CBDRGN.def
 	# CMBKGRMT.pcx`. `-- sprites battle bare` leaves them out
@@ -190,6 +196,22 @@ func _add_battle(room: Node3D) -> void:
 			background.generate_mipmaps()
 			field.set_picture(ImageTexture.create_from_image(background))
 		return
+	if action:
+		var ray := [[Color8(160, 192, 0), Color8(160, 192, 0, 64)], [Color8(128, 224, 128), Color8(128, 224, 128, 128)],
+				[Color8(32, 176, 32), Color8(32, 176, 32)], [Color8(128, 224, 128), Color8(128, 224, 128, 128)],
+				[Color8(160, 192, 0), Color8(160, 192, 0, 64)]]
+		field.cards.set_action({"action": 1, "action_kind": 2, "action_stack": 4, "action_target": 7, "action_ray": ray})
+		field.cards.set_action({"action": 2, "action_kind": 3, "action_stack": -1, "action_targets":
+				PackedInt64Array([3, 5, 9]), "action_effect": "C10SPW", "action_side": -1})
+		for creature: String in field.cards.missing_creatures():
+			var folder := ProjectSettings.globalize_path(H3.path_join(creature))
+			var listed: Variant = JSON.parse_string(FileAccess.get_file_as_string(folder.path_join("frames.json")))
+			if listed is Dictionary:
+				for frame: Dictionary in listed["frames"]:
+					frame["image"] = Image.load_from_file(folder.path_join(frame["file"])) if frame["file"] != "" else null
+				field.cards.set_creature(creature, listed)
+		field.cards._process(field.cards.SHOT_DELAY + 0.05)
+		field.cards.set_process(false) # held at this moment for the pictures
 	var picture := ProjectSettings.globalize_path(H3.path_join("CMBKGRMT.png"))
 	if FileAccess.file_exists(picture):
 		var image := Image.load_from_file(picture)
@@ -318,6 +340,21 @@ func _load_sprites(room: Node3D) -> void:
 			multimesh.instance_count = 1
 			multimesh.buffer = (data.buffer as PackedFloat32Array).slice(i * 20, i * 20 + 20)
 			break
+	if preview_fade >= 0.0:
+		var fades: RefCounted = preload("res://map_fades.gd").new()
+		var faded := 0
+		for i in names.size():
+			var anchor := names[i].get_slice(" ", 1).split(",")
+			if absf(float(anchor[0]) - zoom_tile.x) <= 3.0 and absf(float(anchor[1]) - zoom_tile.y) <= 3.0:
+				fades.fade_out(int(data.buffer[i * 20 + 19])) # the id, as the shader reads it
+				faded += 1
+		fades._fading.clear()
+		for id in range(fades.SIDE * fades.SIDE):
+			if fades.alpha(id) < 1.0:
+				fades._write(id, preview_fade)
+		fades.texture.update(fades._image)
+		fades.apply(room.sprite_multimesh(), true)
+		print("room preview: ", faded, " objects at alpha ", preview_fade)
 	# what is drawn near the zoom tile, by anchor: animation, anchor, group
 	for name: String in data.get("names", PackedStringArray()):
 		var anchor := name.get_slice(" ", 1).split(",")
