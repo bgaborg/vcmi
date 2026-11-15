@@ -14,6 +14,7 @@ const SCREEN_SPEED := 0.8 ## metres per second at full left thumbstick
 const SETTINGS_PATH := "user://screen.cfg"
 const SURFACE_SIZE := Vector2i(2560, 1440) ## pixels of the game window
 const TableMath := preload("res://table_math.gd")
+const TableAnchor := preload("res://table_anchor.gd")
 const TablePanel := preload("res://table_panel.gd")
 const WristPanel := preload("res://wrist_panel.gd")
 const BattleField := preload("res://battle_field.gd")
@@ -88,6 +89,8 @@ var table_drop := 0.45
 var table_tilt := 0.0 ## degrees (room.gd set_tilt); the wrist panel changes it (saved)
 var card_lean := 82.0 ## degrees from the table; cards.json's, then the wrist panel's (saved)
 var seated := false ## in tabletop mode, the player's place moved to the lord's chair (_seat)
+var scene_manager: Node ## the Meta scene's anchors: the player's real table (table_anchor.gd)
+var real_tables := 0 ## of them, at the last seat
 var standing_screen := Transform3D() ## the screen's place before seating: the seat puts the screen before the chair
 var table_tile := TableMath.NO_TILE ## the tile under the active ray on the table, sent to the game as a hover
 var table_popup := false ## a still grip opened a tile's popup from the table: its release closes it
@@ -195,6 +198,7 @@ func _ready() -> void:
 	room.add_table_panel(table_panel)
 	battle_field.visible = false
 	room.add_table_panel(battle_field)
+	scene_manager = TableAnchor.make_manager(origin)
 	view_switch.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	view_switch.font_size = 64
 	view_switch.outline_size = 16
@@ -490,6 +494,9 @@ func _process(delta: float) -> void:
 			_end_test_head()
 	if test_head != null and tracked != null:
 		origin.transform = test_head * tracked.affine_inverse()
+	elif (tracked != null and seated and environment_name == "passthrough"
+			and get_tree().get_node_count_in_group("real_tables") != real_tables):
+		origin.transform = _seat(tracked) # a real table came: onto it
 	elif tracked != null and tabletop != seated and screen_placed:
 		seated = tabletop
 		origin.transform = _seat(tracked) if seated else Transform3D()
@@ -708,6 +715,10 @@ func _seat(tracked: Transform3D) -> Transform3D:
 	# the map lies table_drop under the eyes, wherever the head is: a player sitting on a real chair looks down on it
 	# as one standing does (the virtual floor is then not the real one)
 	var eyes_over_map: float = room.SEAT.y - room.TABLE_TOP - room.MAP_LIFT
+	real_tables = get_tree().get_node_count_in_group("real_tables")
+	var real: Array = TableAnchor.find(origin) if environment_name == "passthrough" else []
+	if not real.is_empty(): # passthrough: the map lies on the player's real table, the eyes where they are
+		return TableMath.on_real_table(room.minimap_centre(), seat.origin, real[0], real[1], real[2], tracked.origin)
 	return Transform3D(turn, Vector3(at.x, at.y + table_drop - eyes_over_map, at.z))
 
 
@@ -754,6 +765,11 @@ func _set_environment(choice: Variant) -> void:
 	get_viewport().transparent_bg = passthrough
 	environment.background_mode = Environment.BG_CLEAR_COLOR if passthrough else Environment.BG_COLOR
 	environment_name = choice
+	if passthrough:
+		TableAnchor.ask_permission(scene_manager)
+	var head: Variant = _tracked_head()
+	if seated and head != null and test_head == null: # onto the real table, or back to the chair
+		origin.transform = _seat(head)
 	_show_room()
 	print("VCMI XR: environment ", choice)
 

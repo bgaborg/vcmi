@@ -69,6 +69,22 @@ func _initialize() -> void:
 	if turned != [false, true]:
 		failures += 1
 		print("table_math_test: FAIL a hand turned a quarter and nearly over: got ", turned)
+
+	# a real table 2 m to the right and 1 m behind the tracking origin, its edges along x, the player at its far (-z)
+	# side: its top's middle comes to the map's middle, and the player's side to the chair's
+	var placed := TableMath.on_real_table(Vector3(0.0, 0.84, 0.0), Vector3(0.0, 1.29, 0.82), Vector3(2.0, 0.75, 1.0),
+			Vector3.RIGHT, Vector2(1.0, 1.0), Vector3(2.0, 1.2, 0.2))
+	var head_at := placed * Vector3(2.0, 1.2, 0.2)
+	_expect("a real table's top under the map", (placed * Vector3(2.0, 0.75, 1.0)).distance_to(Vector3(0.0, 0.84, 0.0))
+			< 0.0001, true)
+	_expect("its player's side at the chair's, the floor level", [head_at.z > 0.7, absf(head_at.x) < 0.0001,
+			placed.basis.y.is_equal_approx(Vector3.UP)], [true, true, true])
+	# a long table (2 x 0.6 m along x): a player at its long side near one end sits at that long side
+	placed = TableMath.on_real_table(Vector3(0.0, 0.84, 0.0), Vector3(0.0, 1.29, 0.82), Vector3.ZERO, Vector3.RIGHT,
+			Vector2(2.0, 0.6), Vector3(0.7, 1.2, 0.5))
+	var at_seat := placed * Vector3(0.7, 1.2, 0.5)
+	_expect("a long table's long side faces the player near its end", [at_seat.z > 0.4, absf(at_seat.x - 0.7)
+			< 0.0001], [true, true])
 	print("table_math_test: ", "PASS" if failures == 0 else "FAIL (%d)" % failures)
 	quit(1 if failures else 0)
 

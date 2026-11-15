@@ -70,3 +70,28 @@ static func drag(centre: Vector2, from: Vector2, to: Vector2, zoom: float, aspec
 static func zoom_about(centre: Vector2, zoom: float, new_zoom: float, pivot: Vector2, aspect := 1.0) -> Vector2:
 	var offset := (pivot - Vector2(0.5, 0.5)) * Vector2(1.0, aspect)
 	return centre + offset / zoom - offset / new_zoom
+
+
+## The origin (tracking space to world) that lays the war table's map on a real table (passthrough, the Meta scene's
+## TABLE): the map's middle `map` (world) on the real top's middle `top` (tracking space), the map's near edge towards
+## the player (`seat`, world) along the side of the real table nearest to the head `head` (tracking space). The real
+## table's edges run along `edge` (tracking space, horizontal), `size` long along it and across. Turned about the
+## vertical only: the floor stays level
+static func on_real_table(map: Vector3, seat: Vector3, top: Vector3, edge: Vector3, size: Vector2,
+		head: Vector3) -> Transform3D:
+	var along := Vector2(edge.x, edge.z).normalized()
+	var to_head := Vector2(head.x - top.x, head.z - top.z)
+	# in halves of the table's sides: the nearest side is the largest along its own axis, whatever the table's shape
+	var across := along.orthogonal()
+	var scaled := Vector2(to_head.dot(along) / maxf(size.x, 0.01), to_head.dot(across) / maxf(size.y, 0.01))
+	var real_yaw := 0.0
+	var nearest := -INF
+	for side in 4: # the four sides of the real table: the one that faces the head is the player's
+		var yaw := atan2(edge.x, edge.z) + side * PI / 2.0
+		var facing: float = [scaled.x, scaled.y, -scaled.x, -scaled.y][side] # side 1 lies along orthogonal()
+		if facing > nearest:
+			nearest = facing
+			real_yaw = yaw
+	var towards_seat := Vector2(seat.x - map.x, seat.z - map.z)
+	var map_yaw := atan2(towards_seat.x, towards_seat.y)
+	return Transform3D(Basis(Vector3.UP, map_yaw), map) * Transform3D(Basis(Vector3.UP, real_yaw), top).affine_inverse()

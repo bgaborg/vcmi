@@ -54,7 +54,7 @@ Not closed yet:
    5. **Rays and mass spells:** designed, built and shown on the PC (proof of concept, [`PHASE5.md`](PHASE5.md)): a ray shooter's own coloured lines, a spell's animation on every unit it affects, a grid over the field for spells without a target.
    6. **Chain lightning and tall effects:** built on the PC: chain lightning's bolt from target to target in its own colours (`out/visuals/26-pc-battle-chain-lightning.png`); a spell's frames stand at most 300 field pixels (0.5 m). Left in phase 5: the first run on the headset.
    7. **Map fades (phase 4):** built ([`PHASE4.md`, "Fades"](PHASE4.md)): an alpha per object id in a small texture the sprite shader reads; the extension reports appearing and vanishing objects and keeps a vanished one's sprites until its fade ends. Shown on the PC; in play only on the headset.
-3. **Phase 6 parts done on the PC:** in passthrough the map and its panels show without the room, on the player's real table at the wrist panel's height; a grip on the hourglass turned over ends the turn. In a table battle the sounds come from the stacks on the table (`battle_sounds.gd`: the creatures' and the spells' own sounds, the game's muted meanwhile, the 2D battle at its fastest speed). Left: table snapping to a scanned surface, the town screen as a diorama, shared anchors.
+3. **Phase 6 parts done on the PC:** in passthrough the map and its panels show without the room, on the player's real table: on the scanned room's table (Meta scene API, `table_anchor.gd`, built), else at the wrist panel's height; a grip on the hourglass turned over ends the turn. In a table battle the sounds come from the stacks on the table (`battle_sounds.gd`: the creatures' and the spells' own sounds, the game's muted meanwhile, the 2D battle at its fastest speed). Left: table snapping to a scanned surface, the town screen as a diorama, shared anchors.
 4. **Everything written since 2026-11-12 is untested on the headset.** [`HEADSET_CHECKLIST.md`](HEADSET_CHECKLIST.md) lists what to check, in order, before the release.
 
 Each milestone records its numbers in `DATA_BRIDGE.md` and is optimised before the next one starts.
@@ -261,19 +261,19 @@ python3 serve_https.py 8443   # Quest Browser: https://<lan-ip>:8443, ?mode=scre
 
 ### HD pack builder (parallel track)
 
-- PC tool in `hdpack/` (Python, `uv`): reads the user's H3 data, upscales sprites and images, writes a VCMI HD mod with `-shadow` and `-overlay` images.
+- Not before the release (section 8, 2026-11-15). Plan for after: a PC tool in `hdpack/` (Python, `uv`) that reads the user's H3 data, upscales sprites and images, writes a VCMI HD mod with `-shadow` and `-overlay` images.
 - Reject results with visible artifacts; compare with HD Edition art where it exists.
 - **Exit:** a full HD mod for SoD that loads on Quest with no xBRZ fallback for map objects and creatures.
 
 ### Phase 6 - Immersion
 
-- Spatial audio on the table (`AudioStreamPlayer3D`; sound events through the bridge).
-- MR: snap the board to a real table (Meta scene and anchors).
-- Gestures: flip the hourglass to end a turn. Town screen as a diorama or wide panel. Co-located multiplayer with shared anchors.
+- Spatial audio on the table (`AudioStreamPlayer3D`; sound events through the bridge): built for battles ([`DATA_BRIDGE.md`](DATA_BRIDGE.md), `battle_sounds.gd`); the map's sounds stay the game's.
+- MR: snap the board to a real table (Meta scene and anchors): built (`table_anchor.gd`).
+- Gestures: flip the hourglass to end a turn: built. Town screen: the game screen (section 8). Co-located multiplayer with shared anchors: after the release.
 
 ### Phase 7 - Release
 
-- Performance pass (frame time, thermal, memory with 4x HD); store or sideload decision; GPL check; data import on the headset; build guide and settings docs.
+- Performance pass (frame time, thermal, memory with 4x HD); store or sideload decision; GPL check; data import on the headset; build guide and settings docs. Decided and written on the PC: [`RELEASE.md`](RELEASE.md) (sideload, the licence table, the release steps) and the player guide [`README.md`](README.md); on the headset: the performance pass and the data import.
 
 After the roadmap: hand tracking (ray from the hand, pinch = click).
 
@@ -296,8 +296,7 @@ Data bridge risks: [`DATA_BRIDGE.md` section 6](DATA_BRIDGE.md#6-risks).
 
 ## 8. Open decisions
 
-1. **HD pack builder upscaler:** AI model (quality, model licence) or xBRZ + sharpen (fast, no licence issue).
-2. **Upstream strategy:** which hooks to propose to VCMI. The contributor opens the PRs ([`AGENTS.md`](../AGENTS.md)).
+1. **Upstream strategy:** which hooks to propose to VCMI. The contributor opens the PRs ([`AGENTS.md`](../AGENTS.md)).
 
 Decided:
 - 2026-11-06: Godot hosts the XR part; the game keeps its own renderer.
@@ -305,3 +304,10 @@ Decided:
 - 2026-11-06: data bridge option C, an in-client bridge plus a thin Godot extension ([`DATA_BRIDGE.md`](DATA_BRIDGE.md#2-options)).
 - 2026-11-07: xBRZ `none` by default on Quest, set by the Quest Java side in `settings.json` (no upstream change); a player can still pick a concrete xBRZ filter.
 - Separate package ID `is.xyz.vcmi.quest`, installs next to the normal Android build.
+- 2026-11-15, the roadmap's remaining items, decided without the headset:
+  - **HD pack builder: not before the release.** The table already draws the best art the game has: an installed HD mod's frames (`hd-remastered`, [`MILESTONE_3B.md`](MILESTONE_3B.md)) and otherwise the game's own xBRZ at 2x or 4x in the atlas (map objects) and 2x on the battle cards. A builder with xBRZ would bake the same filter offline; an AI upscaler needs a model licence check and a person to reject artifacts frame by frame. Revisit when the headset's look review asks for sharper art.
+  - **Town screen: the game screen.** Towns open on the curved screen above the table, as every dialog does (the "wide panel" option); a town diorama after the release.
+  - **Army gestures (grab, drop, split stacks): the game screen's own drag and drop**, with the ray as the mouse. Gestures after the release, with hand tracking.
+  - **Co-located multiplayer with shared anchors: after the release.** It needs two headsets to build and test; VCMI's own network multiplayer already works with each player on their own table.
+  - **Card metadata from mods** stays the APK's `cards.json` (`shortcut:` in [`PHASE4.md`](PHASE4.md)) until a mod needs it.
+  - **Release: sideload first** ([`RELEASE.md`](RELEASE.md)).

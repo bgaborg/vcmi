@@ -30,6 +30,11 @@
 		android:name="com.oculus.feature.PASSTHROUGH"
 		android:required="false" />
 
+	<!-- the scanned room (XR_FB_scene, XR_FB_spatial_entity): in passthrough the map lies on the player's real table
+		 (quest/xr/table_anchor.gd); USE_SCENE is asked for when passthrough is chosen -->
+	<uses-permission android:name="com.oculus.permission.USE_SCENE" />
+	<uses-permission android:name="com.oculus.permission.USE_ANCHOR_API" />
+
 	<application>
 		<!-- Horizon OS shows assets/vr_splash.png from the immersive launch until the Godot host's first frame; without it
 			 the headset is black for seconds after Play in the launcher -->

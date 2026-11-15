@@ -28,6 +28,8 @@ Build and install: `quest/tools/make-apk.sh` (WSL), then `quest/tools/quest.sh i
 | 2.10a | Test command `fade <id> 0`, then `fade <id> 1` on an object in view (its id: `test bridge`, or `sprites_check`) | it fades out over half a second and shows again (it is still on the map), then fades in | `map_fades.gd`, `table_shaders.gd` SPRITE (`fades`) |
 | 2.10b | Pick up a resource, beat a wandering monster | it fades out over half a second, then is gone; nothing flashes | `VcmiData.cpp` `fade_changes`, `drop_ghosts`; `main.gd` `_update_fades` |
 | 2.11 | Point at the hourglass, hold the grip, turn the hand over | the hourglass flips and the turn ends (the trigger on it still does too) | `main.gd` `hourglass_grab`, `TableMath.turned_over` |
+| 2.12 | With a room scanned (a desk marked as a table), choose passthrough from a chair at the desk | one system dialog asks to share the room; allowed, the map lies on the desk's top, its near edge on your side; log line "a real table" | `table_anchor.gd`, `TableMath.on_real_table` |
+| 2.12a | Passthrough without a scanned room, or the permission denied | the map at the wrist panel's height, as before | `table_anchor.gd` |
 
 ## 3. The battle (phase 5)
 

@@ -26,6 +26,9 @@ openxr/enabled=true
 openxr/reference_space=2
 openxr/extensions/meta/render_model=true
 openxr/extensions/meta/passthrough=true
+; the scanned room's table, on which passthrough lays the map (table_anchor.gd); asked for when passthrough is chosen
+openxr/extensions/meta/scene_api=true
+openxr/extensions/meta/anchor_api=true
 ; fixed foveated rendering, high: 9.1 -> 6.9 ms app GPU time in the war room (quest/XR_PERFORMANCE.md); the game layer is not
 ; foveated. Not dynamic: the runtime then keeps level 0 until the GPU is nearly full, which leaves the saving unused.
 ; Mobile renderer: needs the viewport's vrs_mode XR (main.gd) and no glow, which would add a separate tonemap pass.
