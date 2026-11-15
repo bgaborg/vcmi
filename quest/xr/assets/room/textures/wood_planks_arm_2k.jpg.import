@@ -2,9 +2,9 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cb5uirrnmevcd"
-path.s3tc="res://.godot/imported/castle_wall_slates_nor_gl_2k.jpg-a0b520b0ad0985984b8699d00075b14e.s3tc.ctex"
-path.etc2="res://.godot/imported/castle_wall_slates_nor_gl_2k.jpg-a0b520b0ad0985984b8699d00075b14e.etc2.ctex"
+uid="uid://c6e213ka7yfhk"
+path.s3tc="res://.godot/imported/wood_planks_arm_2k.jpg-27b23232e01c1e1ed90665d328e1f342.s3tc.ctex"
+path.etc2="res://.godot/imported/wood_planks_arm_2k.jpg-27b23232e01c1e1ed90665d328e1f342.etc2.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
@@ -12,8 +12,8 @@ metadata={
 
 [deps]
 
-source_file="res://assets/room/textures/castle_wall_slates_nor_gl_2k.jpg"
-dest_files=["res://.godot/imported/castle_wall_slates_nor_gl_2k.jpg-a0b520b0ad0985984b8699d00075b14e.s3tc.ctex", "res://.godot/imported/castle_wall_slates_nor_gl_2k.jpg-a0b520b0ad0985984b8699d00075b14e.etc2.ctex"]
+source_file="res://assets/room/textures/wood_planks_arm_2k.jpg"
+dest_files=["res://.godot/imported/wood_planks_arm_2k.jpg-27b23232e01c1e1ed90665d328e1f342.s3tc.ctex", "res://.godot/imported/wood_planks_arm_2k.jpg-27b23232e01c1e1ed90665d328e1f342.etc2.ctex"]
 
 [params]
 
@@ -23,7 +23,7 @@ compress/lossy_quality=0.7
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0
 compress/hdr_compression=1
-compress/normal_map=1
+compress/normal_map=0
 compress/channel_pack=0
 mipmaps/generate=true
 mipmaps/limit=-1
@@ -38,5 +38,5 @@ process/premult_alpha=false
 process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
-process/size_limit=0
+process/size_limit=1024
 detect_3d/compress_to=0

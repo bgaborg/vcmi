@@ -16,6 +16,7 @@ the same on every machine, so the committed lightmap fits them. Both are needed 
 | `dark_wooden_planks_*_2k.jpg` | Dark Wooden Planks | https://polyhaven.com/a/dark_wooden_planks | Amal Kumar | CC0 | none |
 | `medieval_wood_*_2k.jpg` | Medieval Wood | https://polyhaven.com/a/medieval_wood | Rob Tuytel | CC0 | none |
 | `quatrefoil_jacquard_fabric_grey_1k.jpg`, `quatrefoil_jacquard_fabric_nor_gl_1k.jpg` | Quatrefoil Jacquard Fabric | https://polyhaven.com/a/quatrefoil_jacquard_fabric | colormass, Rico Cilliers | CC0 | diffuse turned to grey, so the banners take the player colours |
+| `wood_planks_diff_2k.jpg`, `wood_planks_arm_2k.jpg` | Wood Planks | https://polyhaven.com/a/wood_planks | Poly Haven | CC0 | none (no normal map: the wall panels' baked light has no direction) |
 | `Carpet015_1K-JPG_*.jpg` | Carpet 015 | https://ambientcg.com/view?id=Carpet015 | ambientCG (Lennart Demes) | CC0 (https://docs.ambientcg.com/license/) | none |
 
 ## Models

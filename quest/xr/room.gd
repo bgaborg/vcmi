@@ -22,17 +22,19 @@ const DECOR := 8
 const LIGHTMAP := "res://assets/room/room.lmbake"
 const ROOM := "res://assets/room/"
 const TEX := ROOM + "textures/"
-## albedo, normal, ORM (ambient occlusion, roughness, metallic; "" = flat), height ("" = none)
+## albedo, normal (SURFACE_SHADER reads none: the lightmap has no direction; the fabric's lines the book's leather),
+## ORM (ambient occlusion, roughness, metallic; "" = flat), height ("" = none)
 const SETS := {
-	"stone": ["castle_wall_slates_diff_2k.jpg", "castle_wall_slates_nor_gl_2k.jpg", "castle_wall_slates_arm_2k.jpg",
+	"stone": ["castle_wall_slates_diff_2k.jpg", "", "castle_wall_slates_arm_2k.jpg",
 			"castle_wall_slates_disp_2k.jpg"],
-	"floor": ["monastery_stone_floor_diff_2k.jpg", "monastery_stone_floor_nor_gl_2k.jpg",
+	"floor": ["monastery_stone_floor_diff_2k.jpg", "",
 			"monastery_stone_floor_arm_2k.jpg", "monastery_stone_floor_disp_2k.jpg"],
-	"planks": ["dark_wooden_planks_diff_2k.jpg", "dark_wooden_planks_nor_gl_2k.jpg", "dark_wooden_planks_arm_2k.jpg",
+	"planks": ["dark_wooden_planks_diff_2k.jpg", "", "dark_wooden_planks_arm_2k.jpg",
 			""],
-	"beam": ["medieval_wood_diff_2k.jpg", "medieval_wood_nor_gl_2k.jpg", "medieval_wood_arm_2k.jpg", ""],
+	"beam": ["medieval_wood_diff_2k.jpg", "", "medieval_wood_arm_2k.jpg", ""],
+	"panel": ["wood_planks_diff_2k.jpg", "", "wood_planks_arm_2k.jpg", ""],
 	"fabric": ["quatrefoil_jacquard_fabric_grey_1k.jpg", "quatrefoil_jacquard_fabric_nor_gl_1k.jpg", "", ""],
-	"carpet": ["Carpet015_1K-JPG_Color.jpg", "Carpet015_1K-JPG_NormalGL.jpg", "", ""],
+	"carpet": ["Carpet015_1K-JPG_Color.jpg", "", "", ""],
 }
 ## the eight player colours: red, blue, tan, green, orange, purple, teal, pink (linear, times the grey fabric)
 const PLAYER_COLOURS := [Color(0.6, 0.03, 0.02), Color(0.03, 0.09, 0.55), Color(0.55, 0.38, 0.18), Color(0.04, 0.3,
@@ -87,6 +89,96 @@ void fragment() {
 	float flicker = 0.85 + 0.15 * noise(vec2(TIME * 6.0, seed.x * 31.0));
 	ALBEDO = colour * body * seed.y * flicker;
 	ALPHA = 0.0; // adds light, leaves the eye buffer alpha alone: the game layer behind stays visible
+}
+"""
+## The room's walls, floor, ceiling and woodwork (_material): the texture set under the baked light, its tiling broken
+## by the dirt over the lightmap UVs and a slow tint over the texture's own UVs, the fire's and torches' flicker in the
+## light near them (`fires`), and on wood a finer grain near the eye. No normal map: the lightmap has no direction, so
+## a normal map would change nothing on these surfaces. TRIPLANAR (prepended by _material): mapped in object space.
+const SURFACE_SHADER := """shader_type spatial;
+uniform sampler2D albedo_map : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D orm_map : hint_default_white, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D height_map : hint_default_black, filter_linear_mipmap, repeat_enable;
+uniform sampler2D dirt_map : source_color, filter_linear_mipmap, repeat_enable;
+uniform vec4 tint : source_color = vec4(1.0);
+uniform vec2 uv_scale = vec2(1.0);
+uniform vec2 uv_offset = vec2(0.0);
+uniform bool use_orm = false;
+uniform float flat_roughness = 0.85;
+uniform bool use_height = false;
+uniform float height_scale = 1.5;
+uniform bool use_dirt = true;
+uniform float grain = 0.0; // wood: the grain again at 3.1 times near the eye
+uniform vec4 fires[8]; // xyz, w: how far its flicker reaches in metres (0: none)
+uniform float flicker = 1.0;
+uniform bool use_vertex_color = false; // the banners: their player colour
+varying vec3 world;
+#ifdef TRIPLANAR
+varying vec3 tri_pos;
+varying vec3 tri_weight;
+vec4 tri(sampler2D map, vec3 p, vec3 w) {
+	return texture(map, p.zy) * w.x + texture(map, p.xz) * w.y + texture(map, p.xy) * w.z;
+}
+#endif
+float hash(float x) { return fract(sin(x * 127.1) * 43758.5453); }
+float wave(float x) {
+	float i = floor(x);
+	float f = fract(x);
+	return mix(hash(i), hash(i + 1.0), f * f * (3.0 - 2.0 * f));
+}
+void vertex() {
+	world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+#ifdef TRIPLANAR
+	tri_weight = pow(abs(NORMAL), vec3(4.0));
+	tri_weight /= dot(tri_weight, vec3(1.0));
+	tri_pos = VERTEX * uv_scale.x;
+#endif
+}
+void fragment() {
+#ifdef TRIPLANAR
+	vec3 albedo = tri(albedo_map, tri_pos, tri_weight).rgb;
+	vec3 orm = use_orm ? tri(orm_map, tri_pos, tri_weight).rgb : vec3(1.0, flat_roughness, 0.0);
+	vec2 uv = tri_pos.xz;
+#else
+	vec2 uv = UV * uv_scale + uv_offset;
+	if (use_height) { // plain parallax, one sample
+		vec3 view_dir = normalize(normalize(-VERTEX) * mat3(TANGENT, -BINORMAL, NORMAL));
+		uv -= view_dir.xy * (1.0 - texture(height_map, uv).r) * height_scale * 0.01;
+	}
+	vec3 albedo = texture(albedo_map, uv).rgb;
+	vec3 orm = use_orm ? texture(orm_map, uv).rgb : vec3(1.0, flat_roughness, 0.0);
+	if (grain > 0.0) { // near the eye: the grain at a finer scale, against the texture's average
+		float near = 1.0 - smoothstep(0.5, 1.8, length(VERTEX));
+		if (near > 0.0) {
+			float fine = dot(texture(albedo_map, uv * 3.1).rgb, vec3(0.333));
+			float average = dot(textureLod(albedo_map, uv, 11.0).rgb, vec3(0.333));
+			albedo *= mix(1.0, clamp(fine / max(average, 0.02), 0.6, 1.5), grain * near);
+		}
+	}
+#endif
+	float dirt = 1.0;
+	if (use_dirt) {
+		dirt = texture(dirt_map, UV2).r;
+		albedo *= mix(0.5, 1.0, dirt) * vec3(1.0, 0.97, 0.94) + vec3(0.0, 0.03, 0.06) * dirt;
+		float tone = texture(dirt_map, uv * 0.11).r; // the texture's repeats each a little warmer or cooler
+		albedo *= mix(vec3(0.93, 0.95, 1.0), vec3(1.05, 1.0, 0.94), tone);
+	}
+	float glow = 0.0;
+	for (int i = 0; i < 8; i++) {
+		if (fires[i].w <= 0.0) {
+			break;
+		}
+		float near_fire = 1.0 - smoothstep(0.0, fires[i].w, distance(world, fires[i].xyz));
+		float f = wave(TIME * 7.0 + float(i) * 13.1) * 0.6 + wave(TIME * 17.0 + float(i) * 5.3) * 0.4;
+		glow += (f - 0.5) * near_fire;
+	}
+	if (use_vertex_color) {
+		albedo *= COLOR.rgb;
+	}
+	ALBEDO = albedo * tint.rgb * (1.0 + glow * 0.45 * flicker);
+	AO = orm.r;
+	ROUGHNESS = clamp(orm.g * mix(1.1, 0.9, dirt), 0.0, 1.0);
+	METALLIC = orm.b;
 }
 """
 ## the night sky behind the windows, at infinity (by the view direction in room space): stars, a moon, mountain ridges
@@ -190,6 +282,7 @@ var map_cells := Vector2i.ZERO ## tiles of the terrain image: width * levels, he
 
 var _spark_texture: GradientTexture2D ## made by _spark on first use
 var _dirt_texture: NoiseTexture2D ## made by _dirt on first use
+var _surface_shaders := {} ## "plain", "triplanar": SURFACE_SHADER (_material)
 var _flames := [] ## [base position, width, height, brightness]
 var _table_light := Vector3.ZERO ## where the candles on the war table light the map from
 var _materials := [] ## the tiled surface materials, for set_feature
@@ -210,17 +303,19 @@ var _shell_hidden: Array[Node3D] = [] ## what show_table_only hid
 
 
 ## Test command `gfx <feature> <0|1>` (main.gd): switches one costly part off or on, to measure its GPU time on the
-## headset
-## with `quest.sh sample`. 0 glow (off by default), 1 parallax, 2 normal maps, 3 dirt detail, 4 probe reflections on the
-## walls and floor too (off by default), 6 reflection probe, 7 decor props, 8 effects (particles, flames, shafts)
+## headset with `quest.sh sample`. 0 glow (off by default), 1 parallax, 2 wood grain, 3 dirt and tint, 4 probe
+## reflections on the walls and floor too (off by default), 6 reflection probe, 7 decor props, 8 effects (particles,
+## flames, shafts), 9 the fire's flicker on the walls
 func set_feature(feature: int, on: bool) -> void:
 	match feature:
 		0: environment.glow_enabled = on
-		1, 2, 3:
-			var flag: int = [BaseMaterial3D.FEATURE_HEIGHT_MAPPING, BaseMaterial3D.FEATURE_NORMAL_MAPPING,
-					BaseMaterial3D.FEATURE_DETAIL][feature - 1]
-			for material in _materials:
-				material.set_feature(flag, on)
+		1, 2, 3, 9:
+			for material: ShaderMaterial in _materials:
+				match feature:
+					1: material.set_shader_parameter("use_height", on and material.get_shader_parameter("height_map"))
+					2: material.set_shader_parameter("grain", material.get_meta("grain") if on else 0.0)
+					3: material.set_shader_parameter("use_dirt", on and material.get_meta("dirt"))
+					9: material.set_shader_parameter("flicker", 1.0 if on else 0.0)
 		4: get_node("Reflections").reflection_mask = LAYER | DECOR if on else DECOR
 		6: get_node("Reflections").visible = on
 		7:
@@ -291,6 +386,8 @@ func _ready() -> void:
 	_minimap.visible = false
 	_add(_minimap, "Minimap")
 	_build_book()
+	_set_fires() # after the last _material
+	set_notify_transform(true) # main.gd moves the room with the screen: the fires move with it
 	var marker_shader := Shader.new()
 	marker_shader.code = TableShaders.MARKER
 	var marker_material := ShaderMaterial.new()
@@ -699,6 +796,11 @@ func _make_environment() -> Environment:
 	e.reflected_light_source = Environment.REFLECTION_SOURCE_DISABLED
 	e.tonemap_mode = Environment.TONE_MAPPER_AGX
 	e.tonemap_exposure = 1.0
+	# a faint warm haze of the fire's smoke: the far walls recede (computed in the scene shader, no extra pass)
+	e.fog_enabled = true
+	e.fog_light_color = Color(0.16, 0.09, 0.05)
+	e.fog_density = 0.035
+	e.fog_sky_affect = 0.0
 	# no glow: on the Quest it moves tonemapping into its own full-screen pass, which also turns foveation off
 	return e
 
@@ -731,12 +833,12 @@ func _build_shell() -> void:
 		_panel("WallBack%d" % i, Vector3(piece.position.x, piece.position.y, BACK), Vector3.RIGHT, piece.size, "stone",
 				3.2, Vector2(piece.position.x + HALF, piece.position.y))
 	# dark oak panelling to 1.1 m with a rail, on the walls around the head
-	var wood := Color(0.75, 0.6, 0.5)
-	_panel("PanelLeft", Vector3(-HALF + 0.02, 0.0, FRONT), Vector3.FORWARD, Vector2(SIZE.z, 1.1), "beam", 1.4,
+	var wood := Color(0.72, 0.66, 0.62)
+	_panel("PanelLeft", Vector3(-HALF + 0.02, 0.0, FRONT), Vector3.FORWARD, Vector2(SIZE.z, 1.1), "panel", 1.4,
 			Vector2.ZERO, wood)
-	_panel("PanelRight", Vector3(HALF - 0.02, 0.0, BACK), Vector3.BACK, Vector2(SIZE.z, 1.1), "beam", 1.4, Vector2.ZERO,
+	_panel("PanelRight", Vector3(HALF - 0.02, 0.0, BACK), Vector3.BACK, Vector2(SIZE.z, 1.1), "panel", 1.4, Vector2.ZERO,
 			wood)
-	_panel("PanelFront", Vector3(HALF, 0.0, FRONT - 0.02), Vector3.LEFT, Vector2(SIZE.x, 1.1), "beam", 1.4,
+	_panel("PanelFront", Vector3(HALF, 0.0, FRONT - 0.02), Vector3.LEFT, Vector2(SIZE.x, 1.1), "panel", 1.4,
 			Vector2.ZERO, wood)
 	# a course of dressed stones where the back wall meets the floor
 	_box("Plinth", Vector3(SIZE.x, 0.28, 0.1), Vector3(0.0, 0.14, BACK + 0.05), _material("stone", Vector2.ONE * 0.5,
@@ -923,7 +1025,7 @@ func _build_banners() -> void:
 	var mesh := cloth.commit()
 	mesh.lightmap_size_hint = Vector2i(384, 384)
 	var fabric := _material("fabric", Vector2.ONE)
-	fabric.vertex_color_use_as_albedo = true
+	fabric.set_shader_parameter("use_vertex_color", true)
 	_mesh("Banners", mesh, Transform3D(), fabric)
 	var metal := StandardMaterial3D.new()
 	metal.vertex_color_use_as_albedo = true
@@ -1325,6 +1427,11 @@ func _light(name_: String, at: Vector3, colour: Color, energy: float, range_: fl
 
 
 ## All flames in one mesh, one draw call: four vertices at each flame base, spread by the flame shader
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_TRANSFORM_CHANGED and not _materials.is_empty():
+		_set_fires()
+
+
 func _add_flames() -> void:
 	var surface := SurfaceTool.new()
 	surface.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -1414,37 +1521,55 @@ func _prop(name_: String, path: String, at: Vector3, basis: Basis, scale_ := 1.0
 	return _add(prop, name_)
 
 
-## A tiling PBR material; `triplanar` maps it in object space at `uv_scale.x` repeats per metre.
-## Large surfaces get a faint dirt variation over their lightmap UVs, so the tiling does not show.
+## A tiling material of `texture_set` (SURFACE_SHADER); `triplanar` maps it in object space at `uv_scale.x` repeats per
+## metre. Plain ones get a faint dirt over their lightmap UVs and a slow tint, so the tiling does not show; wood a finer
+## grain near the eye. The fire's flicker comes with the fires (_set_fires)
 func _material(texture_set: String, uv_scale: Vector2, uv_offset := Vector2.ZERO, tint := Color.WHITE,
-		triplanar := false) -> BaseMaterial3D:
+		triplanar := false) -> ShaderMaterial:
 	var maps: Array = SETS[texture_set]
-	# an ORM material without its texture would read occlusion 0: black under baked light
-	var material: BaseMaterial3D = ORMMaterial3D.new() if maps[2] != "" else StandardMaterial3D.new()
-	material.albedo_texture = load(TEX + maps[0])
-	material.albedo_color = tint
-	material.normal_enabled = true
-	material.normal_texture = load(TEX + maps[1])
+	var key := "triplanar" if triplanar else "plain"
+	if not _surface_shaders.has(key):
+		_surface_shaders[key] = Shader.new()
+		var define := "#define TRIPLANAR" + String.chr(10) if triplanar else ""
+		_surface_shaders[key].code = define + SURFACE_SHADER
+	var material := ShaderMaterial.new()
+	material.shader = _surface_shaders[key]
+	material.set_shader_parameter("albedo_map", load(TEX + maps[0]))
+	material.set_shader_parameter("tint", tint)
+	material.set_shader_parameter("uv_scale", uv_scale)
+	material.set_shader_parameter("uv_offset", uv_offset)
 	if maps[2] != "":
-		material.orm_texture = load(TEX + maps[2])
-	else:
-		material.roughness = 0.85
+		material.set_shader_parameter("orm_map", load(TEX + maps[2]))
+		material.set_shader_parameter("use_orm", true)
 	if maps[3] != "" and not triplanar:
-		material.heightmap_enabled = true # plain parallax, one extra sample: no deep parallax on the Quest
-		material.heightmap_texture = load(TEX + maps[3])
-		material.heightmap_scale = 1.5
-	if triplanar:
-		material.uv1_triplanar = true
-		material.uv1_scale = Vector3.ONE * uv_scale.x
-	else:
-		material.uv1_scale = Vector3(uv_scale.x, uv_scale.y, 1.0)
-		material.uv1_offset = Vector3(uv_offset.x, uv_offset.y, 0.0)
-		material.detail_enabled = true
-		material.detail_uv_layer = BaseMaterial3D.DETAIL_UV_2
-		material.detail_blend_mode = BaseMaterial3D.BLEND_MODE_MUL
-		material.detail_albedo = _dirt()
+		material.set_shader_parameter("height_map", load(TEX + maps[3]))
+		material.set_shader_parameter("use_height", true)
+	material.set_shader_parameter("use_dirt", not triplanar)
+	material.set_shader_parameter("dirt_map", _dirt())
+	var grain := 0.8 if texture_set in ["beam", "panel", "planks"] and not triplanar else 0.0
+	material.set_shader_parameter("grain", grain)
+	material.set_meta("grain", grain) # what set_feature switches back on
+	material.set_meta("dirt", not triplanar)
 	_materials.append(material)
 	return material
+
+
+## The flames' flicker in the light of the walls, floor and wood near them: the fireplace's, the torches' and the
+## candles', each flame within 0.5 m of a stronger one counted with it, at most eight. In the shader's world space:
+## again whenever the room moves (_notification)
+func _set_fires() -> void:
+	var fires: Array[Vector4] = []
+	var by_size := _flames.duplicate()
+	by_size.sort_custom(func(a: Array, b: Array) -> bool: return a[2] > b[2])
+	for flame: Array in by_size:
+		var at: Vector3 = transform * (flame[0] as Vector3) # the room's parent is the world
+		if fires.size() < 8 and fires.all(func(fire: Vector4) -> bool:
+				return Vector3(fire.x, fire.y, fire.z).distance_to(at) > 0.5):
+			fires.append(Vector4(at.x, at.y, at.z, clampf(flame[2] * 9.0, 0.8, 3.0)))
+	while fires.size() < 8:
+		fires.append(Vector4.ZERO)
+	for material: ShaderMaterial in _materials:
+		material.set_shader_parameter("fires", fires)
 
 
 func _dirt() -> NoiseTexture2D:

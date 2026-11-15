@@ -28,6 +28,8 @@ Build and install: `quest/tools/make-apk.sh` (WSL), then `quest/tools/quest.sh i
 | 2.10a | Test command `fade <id> 0`, then `fade <id> 1` on an object in view (its id: `test bridge`, or `sprites_check`) | it fades out over half a second and shows again (it is still on the map), then fades in | `map_fades.gd`, `table_shaders.gd` SPRITE (`fades`) |
 | 2.10b | Pick up a resource, beat a wandering monster | it fades out over half a second, then is gone; nothing flashes | `VcmiData.cpp` `fade_changes`, `drop_ghosts`; `main.gd` `_update_fades` |
 | 2.11 | Point at the hourglass, hold the grip, turn the hand over | the hourglass flips and the turn ends (the trigger on it still does too) | `main.gd` `hourglass_grab`, `TableMath.turned_over` |
+| 2.13 | Look around the war room for a minute | the walls, floor and panels near the fireplace, the torches and the candles breathe with their flames; the wall panels show boards; a faint warm haze deepens the far walls; still 72 Hz (`test gfx 9 0` turns the flicker off to compare) | `room.gd` `SURFACE_SHADER`, `_set_fires` |
+| 1.0a | Press Play in the launcher | the VCMI shield and "Loading..." until the war room appears, no Godot logo | `vr_splash.png`, `project.godot` `boot_splash` |
 | 2.12 | With a room scanned (a desk marked as a table), choose passthrough from a chair at the desk | one system dialog asks to share the room; allowed, the map lies on the desk's top, its near edge on your side; log line "a real table" | `table_anchor.gd`, `TableMath.on_real_table` |
 | 2.12a | Passthrough without a scanned room, or the permission denied | the map at the wrist panel's height, as before | `table_anchor.gd` |
 

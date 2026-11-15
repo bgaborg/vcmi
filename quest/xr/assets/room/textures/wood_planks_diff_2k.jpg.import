@@ -2,9 +2,9 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://d4egnecmhc5vq"
-path.s3tc="res://.godot/imported/monastery_stone_floor_nor_gl_2k.jpg-7fa00e1fa5776912b01c74699d33d5e0.s3tc.ctex"
-path.etc2="res://.godot/imported/monastery_stone_floor_nor_gl_2k.jpg-7fa00e1fa5776912b01c74699d33d5e0.etc2.ctex"
+uid="uid://b57xshu743xk2"
+path.s3tc="res://.godot/imported/wood_planks_diff_2k.jpg-96749ff96eca3e05ffd4d6b2d94919a0.s3tc.ctex"
+path.etc2="res://.godot/imported/wood_planks_diff_2k.jpg-96749ff96eca3e05ffd4d6b2d94919a0.etc2.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
@@ -12,8 +12,8 @@ metadata={
 
 [deps]
 
-source_file="res://assets/room/textures/monastery_stone_floor_nor_gl_2k.jpg"
-dest_files=["res://.godot/imported/monastery_stone_floor_nor_gl_2k.jpg-7fa00e1fa5776912b01c74699d33d5e0.s3tc.ctex", "res://.godot/imported/monastery_stone_floor_nor_gl_2k.jpg-7fa00e1fa5776912b01c74699d33d5e0.etc2.ctex"]
+source_file="res://assets/room/textures/wood_planks_diff_2k.jpg"
+dest_files=["res://.godot/imported/wood_planks_diff_2k.jpg-96749ff96eca3e05ffd4d6b2d94919a0.s3tc.ctex", "res://.godot/imported/wood_planks_diff_2k.jpg-96749ff96eca3e05ffd4d6b2d94919a0.etc2.ctex"]
 
 [params]
 
@@ -23,7 +23,7 @@ compress/lossy_quality=0.7
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0
 compress/hdr_compression=1
-compress/normal_map=1
+compress/normal_map=0
 compress/channel_pack=0
 mipmaps/generate=true
 mipmaps/limit=-1

@@ -41,6 +41,7 @@ Single toggles from the first room (each against 12.1 ms; ±0.3 ms noise between
 **5. Cheaper surface shading (the remaining ~3 ms). Partly done.**
 - `rendering/lightmapping/lightmap_gi/use_bicubic_filter=false` (done): one lightmap fetch instead of the four of bicubic. Non-directional lightmaps (the default) need one sample, directional four.
 - Baked albedo: lighting times albedo baked into one unlit UV2 texture for walls, floor and ceiling (`render_mode unshaded`), the classic mobile VR approach (reportedly Batman Arkham Shadow). Largest remaining lever, loses view-dependent specular and needs a detail texture for close-up detail.
+- Done 2026-11-15 (`room.gd` `SURFACE_SHADER`, never measured): the walls, floor, ceiling and woodwork drop their normal maps, which change nothing under a lightmap without direction; the read saved pays for the fire's flicker in their light (math only), a second dirt read that tints the texture's repeats, and the wood's finer grain near the eye. Distance fog in the scene shader (no extra pass). Measure with `test gfx 2|3|9 0`.
 - Smaller: no parallax and no triplanar on large surfaces (triplanar is three times the fetches), `specular_mode = SPECULAR_DISABLED` on matte materials, half-size ORM maps, drop the dirt detail (0.4 ms measured).
 - Source: [Arkham Shadow analysis](https://foro3d.com/en/2026/mayo/pipeline-grafico-de-arkham-shadow-optimizacion-para-vr-en-quest-3.html) (secondary).
 
