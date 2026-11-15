@@ -324,6 +324,11 @@ func _new_card(stack: Dictionary) -> Dictionary:
 
 ## Where a stack's card stands: its hex's middle, at the feet's line
 func _place(stack: Dictionary) -> Vector3:
+	if stack.has("turret"):
+		# a tower's shooter, where the 2D battle draws its frame (it faces left: mirrored): on the tower's top in the
+		# battlefield's picture
+		var top := BattleMath.field_to_page(Vector2(stack["turret"]) + Vector2(450.0 - ANCHOR.x, FEET), AREA)
+		return Vector3(top.x, LIFT, top.y)
 	if stack.get("hero", false):
 		var corner := Vector2(HERO_AT.x if stack.get("side", 0) == 0 else BattleMath.FIELD.x - HERO_AT.x, HERO_AT.y)
 		var feet := BattleMath.field_to_page(corner, AREA)
@@ -354,7 +359,7 @@ func _dress(card: Dictionary) -> void:
 	var has_art: bool = not creatures.get(stack.get("animation", ""), {}).is_empty()
 	(card["node"] as Node3D).rotation.x = _lean - PI / 2.0 if alive or has_art else -PI / 2.0
 	(card["count"] as Label3D).text = str(stack.get("count", 1))
-	(card["count"] as Label3D).visible = alive and not stack.get("hero", false)
+	(card["count"] as Label3D).visible = alive and not stack.get("hero", false) and not stack.has("turret")
 	# beside the feet, on the side the stack faces, as the 2D battle's count box
 	(card["count"] as Label3D).position.x = (1.0 if side == 0 else -1.0) * 0.6 * BattleMath.PITCH.x * PIXEL
 	if card["slide"] >= 1.0:

@@ -659,16 +659,24 @@ void publishBattle()
 		{
 			if(next.stackCount == VCMI_BATTLE_STACKS)
 				break;
-			if(!stack || stack->isGhost() || !stack->getPosition().isValid())
+			// a tower's shooter stands on no hex: the siege controller knows its place (getStackPositionAtHex)
+			const bool turret = stack && stack->initialPosition < 0 && battle->siegeController;
+			if(!stack || stack->isGhost() || (!turret && !stack->getPosition().isValid()))
 				continue;
 			VcmiBattleStack & out = next.stacks[next.stackCount++];
+			if(turret)
+			{
+				const Point at = battle->siegeController->getTurretCreaturePosition(stack->initialPosition);
+				out.x = static_cast<int16_t>(at.x);
+				out.y = static_cast<int16_t>(at.y);
+			}
 			out.id = stack->unitId();
 			out.count = static_cast<uint32_t>(std::max(stack->getCount(), 0));
-			out.hex = static_cast<uint16_t>(stack->getPosition().toInt());
+			out.hex = turret ? 0 : static_cast<uint16_t>(stack->getPosition().toInt());
 			out.side = stack->unitSide() == BattleSide::DEFENDER ? 1 : 0;
 			out.owner = static_cast<uint8_t>(stack->unitOwner().getNum());
 			out.flags = (stack->doubleWide() ? VCMI_STACK_WIDE : 0) | (stack->alive() ? VCMI_STACK_ALIVE : 0) | (stack == active ? VCMI_STACK_ACTIVE : 0)
-					  | (turn && turn->unitId() == stack->unitId() ? VCMI_STACK_TURN : 0);
+					  | (turn && turn->unitId() == stack->unitId() ? VCMI_STACK_TURN : 0) | (turret ? VCMI_STACK_TURRET : 0);
 			if(const CCreature * type = stack->unitType())
 			{
 				const std::string name = type->animDefName.getOriginalName();
@@ -1460,7 +1468,7 @@ uint32_t decodeFrames(const char * name, VcmiAnimationData * out)
 static_assert(sizeof(VcmiFrame) == 36, "VcmiFrame is part of the bridge ABI");
 static_assert(sizeof(VcmiMove) == 20, "VcmiMove is part of the bridge ABI");
 static_assert(sizeof(VcmiObject) == 20, "VcmiObject is part of the bridge ABI");
-static_assert(sizeof(VcmiBattleStack) == 72, "VcmiBattleStack is part of the bridge ABI");
+static_assert(sizeof(VcmiBattleStack) == 76, "VcmiBattleStack is part of the bridge ABI");
 static_assert(sizeof(VcmiPathNode) == 8, "VcmiPathNode is part of the bridge ABI");
 static_assert(sizeof(VcmiPanelHero) == 64, "VcmiPanelHero is part of the bridge ABI");
 static_assert(sizeof(VcmiPanelTown) == 56, "VcmiPanelTown is part of the bridge ABI");

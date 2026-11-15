@@ -46,6 +46,7 @@ Build and install: `quest/tools/make-apk.sh` (WSL), then `quest/tools/quest.sh i
 | 3.11 | The battle ends | the result window on the screen; after it the map is back on the table; no crash | `publishBattle` (the `try` around `getBattle`) |
 | 3.9a | A spell lands | the casting hero raises its hand; the spell's own animation plays on the first stack it touches (or on its hex), which also flashes red | `Bridge.cpp` `battleSpellCast` (`actionEffect`, `actionSide`), `battle_cards.gd` `play_effect`, `battle_field.gd` `flashes` |
 | 3.12 | A siege | the walls, towers and moat are drawn on the field; a wall the catapult breaks changes to its broken picture; the gate opens; wall hexes are dark | `Bridge.cpp` `wallPieces` (a copy of `BattleSiegeController`'s private rules), `battle_field.gd` `poll`, `compose_picture` |
+| 3.12b | A siege against a town with towers | a shooter stands on each tower's top in the picture, and shoots | `publishBattle` (`VCMI_STACK_TURRET`), `battle_cards.gd` `_place` |
 | 3.12a | The creatures up close | standing and walking frames are sharper (2x) than the attack frames | `VcmiData::decode_animation_hd`, `battle_field.gd` `load_creatures` |
 | 3.13 | Quick combat, and an enemy's battle against another enemy | nothing on the table, no crash | `battleInt` is null |
 | 3.14 | Frame rate and memory with seven stacks a side | 72 fps; `quest.sh sample` | a draw call per card; frames are textures of their own (`battle_cards.gd`) |
@@ -54,7 +55,7 @@ Build and install: `quest/tools/make-apk.sh` (WSL), then `quest/tools/quest.sh i
 
 - Only the standing and moving frames of the creatures are upscaled; attacks and deaths are the game's 1x art.
 - The table follows the 2D battle by up to a tenth of a second. A spell's animation plays on its first target only (a mass spell too), and effects that fill the 2D screen (Armageddon) are not shown.
-- A shooter's ray (the mage's, the lich's cloud) is a plain dart. The towers' shooters are not shown.
+- A shooter's ray (the mage's, the lich's cloud) is a plain dart.
 - Two attacks within a tenth of a second show as one.
 - A melee attack always comes from the attacker's side; another side cannot be chosen from the table.
 - The 2D battle's own hex highlight is off at the two side columns, and its status text can vanish when a new stack becomes active.

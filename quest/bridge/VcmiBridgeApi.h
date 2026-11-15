@@ -10,7 +10,7 @@
 #include <stdint.h>
 
 // raise on any change to the structs below; the extension refuses a table with another version
-#define VCMI_BRIDGE_VERSION 19
+#define VCMI_BRIDGE_VERSION 20
 
 typedef struct VcmiBridgeStats
 {
@@ -101,10 +101,12 @@ typedef struct VcmiBattleStack
 	uint8_t pad[3];
 	char animation[32]; // the creature's battle animation (an AnimationPath), cut to fit
 	char missile[24]; // a shooter's missile animation, empty for others
-} VcmiBattleStack; // 72 bytes
+	int16_t x, y; // VCMI_STACK_TURRET: the corner of its 450 x 400 frame on the battlefield, as the 2D battle draws it
+} VcmiBattleStack; // 76 bytes
 #define VCMI_STACK_WIDE 1 // two hexes: the other one is behind it, towards its side's edge
 #define VCMI_STACK_ALIVE 2
 #define VCMI_STACK_ACTIVE 4 // the stack the local player chooses an action for
+#define VCMI_STACK_TURRET 16 // the shooter in a besieged town's tower: it stands on no hex (hex is 0), at x, y
 #define VCMI_STACK_TURN 8 // the stack whose turn it is, any player's (battleActiveUnit)
 
 #define VCMI_ACTION_ATTACK 1

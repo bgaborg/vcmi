@@ -1420,6 +1420,8 @@ public:
 			stack["turn"] = (s.flags & VCMI_STACK_TURN) != 0;
 			stack["animation"] = String::utf8(s.animation, strnlen(s.animation, sizeof(s.animation)));
 			stack["missile"] = String::utf8(s.missile, strnlen(s.missile, sizeof(s.missile)));
+			if(s.flags & VCMI_STACK_TURRET) // a tower's shooter: its frame's corner on the battlefield, no hex
+				stack["turret"] = Vector2i(s.x, s.y);
 			stacks.push_back(stack);
 		}
 		result["stacks"] = stacks;

@@ -133,6 +133,13 @@ func _initialize() -> void:
 			true)
 	cards.set_stacks(stacks)
 
+	# a tower's shooter: on the place of its frame in the picture, mirrored, without a count
+	cards.set_stacks(stacks + [{"id": 30, "side": 1, "turret": Vector2i(342, -187), "count": 5}])
+	var archer: Dictionary = cards.card(30)
+	_expect("a tower's shooter", [archer["count"].visible, archer["node"].position.is_equal_approx(Vector3((342.0
+			+ 254.0 - 400.0) * cards.PIXEL, cards.LIFT, (-187.0 + 263.0 - 278.0) * cards.PIXEL))], [false, true])
+	cards.set_stacks(stacks)
+
 	# the game's battle events: who shoots whom, and a spell's flash
 	stacks[0] = stacks[0].merged({"alive": true, "count": 4}, true)
 	cards.set_stacks(stacks)
