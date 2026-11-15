@@ -102,8 +102,8 @@ var table_panel: Node3D
 ## the battle on the table (quest/PHASE5.md): shown in tabletop mode instead of the map while the game shows a battle
 var battle_field: Node3D = BattleField.new()
 var battle_sample := false ## the test command `battle`: sample armies on the table
-## objects fading in or out on the table (quest/PHASE4.md, "Fades"); the test command `fade id 0/1` drives it until
-## VcmiData reports appearing and vanishing objects
+## objects fading in or out on the table as VcmiData reports them (quest/PHASE4.md, "Fades"); also the test command
+## `fade id 0/1`
 var map_fades: RefCounted = MapFades.new()
 var table_icons_tried := false ## SMALRES decoded once, found or not
 var pop_cards := true ## the next sprites shown pop their cards up (room.show_sprites): the table came near
@@ -369,6 +369,23 @@ func _save_sprites(path: String) -> void:
 	print("VCMI XR: sprites saved to ", path, ", ", file.get_length(), " bytes")
 
 
+## Each frame: the objects that appeared or vanished start their fade; a fade out that ended takes its sprites away
+func _update_fades(delta: float) -> void:
+	var changes: Dictionary = vcmi_data.fade_changes() if vcmi_data else {}
+	for id: int in changes.get("appeared", PackedInt32Array()):
+		map_fades.fade_in(id)
+	for id: int in changes.get("vanished", PackedInt32Array()):
+		map_fades.fade_out(id)
+	if not map_fades.needed():
+		return
+	var gone: PackedInt32Array = map_fades.advance(delta)
+	# not dropped yet: they stay clear until the rebuild (end_fade_outs)
+	if not gone.is_empty() and (not vcmi_data or vcmi_data.drop_ghosts(room.sprite_multimesh(), gone)):
+		for id in gone:
+			map_fades.forget(id)
+	map_fades.apply(room.sprite_multimesh(), map_fades.needed())
+
+
 ## Sprites or markers on the minimap by the size of a tile on screen (MILESTONE_3B.md section 5, LOD); the atlas
 ## follows the tiles the zoomed minimap shows, and the sprites are rebuilt once it has loaded them; between views only
 ## the changed objects' sprites are updated (plan step 6).
@@ -424,6 +441,9 @@ func _update_sprite_view(head: Vector3) -> void:
 			vcmi_data.update_sprites(room.sprite_multimesh(), sprite_rect, sprite_level)
 			room.set_sprites(vcmi_data.atlas_textures(), vcmi_data.sprite_table(), _atlas_scale(), false)
 			sprites_pending = false
+			# the rebuild dropped the fading-out objects' sprites (VcmiData ghosts); new ones go on fading in
+			map_fades.end_fade_outs()
+			map_fades.apply(room.sprite_multimesh(), map_fades.needed())
 			if vcmi_data.atlas_stats().get("view_overflowed", false) and not vcmi_data.atlas_stats().get("planned", true):
 				# the atlas now knows every animation's size: the same view again, the largest at a lower scale
 				vcmi_data.atlas_view(sprite_rect, sprite_level, _atlas_scale())
@@ -528,9 +548,7 @@ func _process(delta: float) -> void:
 		if changed & 4 and tracked != null and not sprites_held:
 			_update_sprite_view((origin.transform * (tracked as Transform3D)).origin)
 		_update_table(changed)
-		if map_fades.active():
-			map_fades.advance(delta)
-			map_fades.apply(room.sprite_multimesh(), map_fades.needed())
+		_update_fades(delta)
 		if battle_field.poll(vcmi_data, card_lean):
 			wrist_panel.set_battle(battle_field.shown)
 			hotkey_hover = -1 # of the buttons before
@@ -1377,7 +1395,8 @@ func _on_test_command(command: String, a: float, b: float, c: float) -> void:
 		# table; 0: back
 		"tabletop":
 			_set_tabletop(a > 0.0)
-		# fade a, b: object a fades in (b 1) or out (b 0) on the table, as an object that appears or is taken
+		# fade a, b: object a fades in (b 1) or out (b 0) on the table, as an object that appears or is taken; one
+		# still on the map shows again once faded out
 		"fade":
 			if b > 0.0:
 				map_fades.fade_in(int(a))

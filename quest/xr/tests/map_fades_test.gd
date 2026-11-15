@@ -30,9 +30,19 @@ func _initialize() -> void:
 	fades.advance(MapFades.SECONDS / 2.0)
 	fades.fade_in(5) # it came back halfway: from where it is, not from clear
 	_expect("a fade turned back starts where it was", absf(fades.alpha(5) - 0.5) < 0.01, true)
+	fades.fade_out(7)
+	fades.fade_out(8)
+	fades.advance(MapFades.SECONDS) # 7 and 8 faded out
+	fades.fade_out(6) # fading out
+	fades.fade_in(9) # coming in
+	fades.end_fade_outs() # a sprite rebuild: the faded-out sprites are gone, the fade in goes on
+	_expect("a rebuild ends the fades out, not the fades in", [fades.alpha(6), fades.alpha(8), fades.alpha(9),
+			fades.active(), fades.needed()], [1.0, 1.0, 0.0, true, true])
+	fades.advance(MapFades.SECONDS)
+	_expect("then nothing is needed", fades.needed(), false)
 	fades.fade_out(-1)
 	fades.fade_out(70000)
-	_expect("ids outside the table are ignored", fades.active(), true)
+	_expect("ids outside the table are ignored", fades.active(), false)
 	fades.reset()
 	_expect("reset: all whole", [fades.alpha(5), fades.alpha(64742), fades.active()], [1.0, 1.0, false])
 	print("map_fades_test: ", "PASS" if failures == 0 else "FAIL (%d)" % failures)

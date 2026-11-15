@@ -38,6 +38,20 @@ func reset() -> void:
 	_changed = false
 
 
+## The faded-out and fading-out objects' sprites are gone (a sprite rebuild): their texels whole again; the fades
+## in go on
+func end_fade_outs() -> void:
+	for id: int in _fading.keys():
+		if _fading[id]["to"] == 0.0:
+			_fading.erase(id)
+			_hidden[id] = true
+	for id: int in _hidden.keys():
+		forget(id)
+	if _changed:
+		texture.update(_image)
+		_changed = false
+
+
 func alpha(id: int) -> float:
 	return _image.get_pixel(id % SIDE, id / SIDE).r if id >= 0 and id < SIDE * SIDE else 1.0
 

@@ -25,7 +25,8 @@ Build and install: `quest/tools/make-apk.sh` (WSL), then `quest/tools/quest.sh i
 | 2.8 | A teleport (monolith, town portal) | the hero is at the exit at once | `Bridge.cpp` `onAfterHeroTeleported` |
 | 2.9 | An enemy hero walking in view | its flag moves with it | `VcmiData.cpp` `animate_move` |
 | 2.10 | Passthrough (wrist "Room"), then tabletop mode | only the book with the map and its panels, lit evenly, at the table's height: set "Table" so that it lies on your real table. Out of tabletop mode nothing of the room shows | `main.gd` `_show_room`, `room.gd` `show_table_only` |
-| 2.10a | Test command `fade <id> 0`, then `fade <id> 1` on an object in view (its id: `test bridge`, or `sprites_check`) | it fades out over half a second, then back in | `map_fades.gd`, `table_shaders.gd` SPRITE (`fades`) |
+| 2.10a | Test command `fade <id> 0`, then `fade <id> 1` on an object in view (its id: `test bridge`, or `sprites_check`) | it fades out over half a second and shows again (it is still on the map), then fades in | `map_fades.gd`, `table_shaders.gd` SPRITE (`fades`) |
+| 2.10b | Pick up a resource, beat a wandering monster | it fades out over half a second, then is gone; nothing flashes | `VcmiData.cpp` `fade_changes`, `drop_ghosts`; `main.gd` `_update_fades` |
 | 2.11 | Point at the hourglass, hold the grip, turn the hand over | the hourglass flips and the turn ends (the trigger on it still does too) | `main.gd` `hourglass_grab`, `TableMath.turned_over` |
 
 ## 3. The battle (phase 5)
@@ -59,7 +60,7 @@ Build and install: `quest/tools/make-apk.sh` (WSL), then `quest/tools/quest.sh i
 - Only the standing and moving frames of the creatures are upscaled; attacks and deaths are the game's 1x art.
 - The table follows the 2D battle by up to a tenth of a second. A spell's animation plays on its first target only (a mass spell too), and effects that fill the 2D screen (Armageddon) are not shown.
 - Chain lightning shows on each target without the bolts between them.
-- Objects on the map still appear and vanish at once: only the fade's GPU half is built (`fade` test command).
+- An object that vanishes during a pan (a sprite rebuild) goes at once, without its fade.
 - Two attacks within a tenth of a second show as one.
 - A melee attack always comes from the attacker's side; another side cannot be chosen from the table.
 - The 2D battle's own hex highlight is off at the two side columns, and its status text can vanish when a new stack becomes active.

@@ -68,6 +68,8 @@ protected:
 		ClassDB::bind_method(D_METHOD("atlas_textures"), &VcmiData::atlas_textures);
 		ClassDB::bind_method(D_METHOD("update_sprites", "multimesh", "tiles", "level", "with_names"), &VcmiData::update_sprites, DEFVAL(false));
 		ClassDB::bind_method(D_METHOD("update_sprite_changes", "multimesh"), &VcmiData::update_sprite_changes);
+		ClassDB::bind_method(D_METHOD("fade_changes"), &VcmiData::fade_changes);
+		ClassDB::bind_method(D_METHOD("drop_ghosts", "multimesh", "ids"), &VcmiData::drop_ghosts);
 		ClassDB::bind_method(D_METHOD("set_flat_cards", "prefixes"), &VcmiData::set_flat_cards);
 		ClassDB::bind_method(D_METHOD("set_tabletop", "shown"), &VcmiData::set_tabletop);
 		ClassDB::bind_method(D_METHOD("tile_input", "tile", "kind"), &VcmiData::tile_input);
@@ -154,6 +156,10 @@ protected:
 	Rect2i spriteAnchors; // of the last update_sprites: the anchor tiles of the objects drawn
 	int spriteLevel = -1;
 	std::vector<uint32_t> spriteChanges; // object ids changed since the last sprite update
+	// the fades (quest/PHASE4.md, "Fades"): objects drawn again or no longer since the last fade_changes, and the
+	// vanished ones whose sprites stay until their fade out ends (drop_ghosts)
+	std::vector<uint32_t> appeared, vanished;
+	std::vector<uint32_t> ghosts;
 	bool spritesStale = true; // a new list or map, or too many changes: update_sprite_changes asks for update_sprites
 	int64_t spriteMicros = 0, changeMicros = 0, maxChangeMicros = 0, bufferMicros = 0; // main thread: the last update_sprites and change update
 	// object ids by anchor tile, BUCKET x BUCKET tiles a bucket, per map level: a view visits only its buckets, not
@@ -435,6 +441,8 @@ public:
 		changedIds.clear();
 		spritesStale = true;
 		spriteChanges.clear();
+		appeared.clear(); // a new list is shown at once (main.gd resets the fades with the rebuild)
+		vanished.clear();
 		buckets.clear();
 		return true;
 	}
@@ -463,6 +471,15 @@ public:
 				if(record.flags & VCMI_OBJECT_PRESENT)
 					buckets[bucketOf(record)].push_back(record.id);
 			}
+			const bool was = drawn(objects[record.id]);
+			if(was != drawn(record))
+			{
+				(was ? vanished : appeared).push_back(record.id);
+				if(was)
+					ghosts.push_back(record.id);
+				else
+					ghosts.erase(std::remove(ghosts.begin(), ghosts.end(), record.id), ghosts.end());
+			}
 			objects[record.id] = record;
 			changedIds.push_back(record.id);
 			spriteChanges.push_back(record.id);
@@ -471,6 +488,12 @@ public:
 		{
 			spritesStale = true;
 			spriteChanges.clear();
+		}
+		if(appeared.size() + vanished.size() > 4096) // nobody asks (no sprites shown): they would only grow
+		{
+			appeared.clear();
+			vanished.clear();
+			spritesStale = true; // the rebuild drops the ghosts
 		}
 		wantedAnimations = changes.animations;
 		seenSequence = changes.sequence;
@@ -1154,6 +1177,9 @@ public:
 		table.clear();
 		groups.clear();
 		spriteChanges.clear();
+		// shortcut: a rebuild during a fade drops the faded-out objects at once (main.gd resets the fades), fine
+		// for half a second
+		ghosts.clear();
 		bool missing = false;
 		forObjectsIn(
 			spriteAnchors,
@@ -1220,7 +1246,11 @@ public:
 				sprites.end(),
 				[this](const Sprite & sprite)
 				{
-					return (fogStale && sprite.layer == FOG_LAYER) || std::binary_search(spriteChanges.begin(), spriteChanges.end(), sprite.id);
+					if(fogStale && sprite.layer == FOG_LAYER)
+						return true;
+					// a vanished object's sprites stay while it fades out (no new ones: spritesOf skips it)
+					return std::binary_search(spriteChanges.begin(), spriteChanges.end(), sprite.id)
+						&& std::find(ghosts.begin(), ghosts.end(), sprite.id) == ghosts.end();
 				}
 			),
 			sprites.end()
@@ -1257,6 +1287,60 @@ public:
 		changeMicros = microsSince(from);
 		maxChangeMicros = std::max(maxChangeMicros, changeMicros);
 		return newFrames ? 3 : 1;
+	}
+
+	/// the objects the 2D map started or stopped drawing since the last call (a beaten monster, a picked-up
+	/// resource, a hero in a boat), for the fades (map_fades.gd): {appeared, vanished} as PackedInt32Array of ids, or
+	/// an empty Dictionary. A vanished object's sprites stay (a ghost) until drop_ghosts.
+	Dictionary fade_changes()
+	{
+		Dictionary result;
+		if(appeared.empty() && vanished.empty())
+			return result;
+		const auto ids = [](std::vector<uint32_t> & from)
+		{
+			PackedInt32Array out;
+			for(uint32_t id : from)
+				out.push_back(int32_t(id));
+			from.clear();
+			return out;
+		};
+		result["appeared"] = ids(appeared);
+		result["vanished"] = ids(vanished);
+		return result;
+	}
+
+	/// the faded-out objects `ids` go from the table: their sprites are taken out of `multimesh` now. False: the
+	/// instances wait for a rebuild (update_sprites), which drops them; until then they must stay faded out
+	bool drop_ghosts(const Ref<MultiMesh> & multimesh, const PackedInt32Array & ids)
+	{
+		const size_t count = sprites.size();
+		for(int32_t id : ids)
+		{
+			ghosts.erase(std::remove(ghosts.begin(), ghosts.end(), uint32_t(id)), ghosts.end());
+			// drawn again meanwhile: its sprites are its own, not a ghost's
+			if(uint32_t(id) < objects.size() && drawn(objects[id]))
+				continue;
+			sprites.erase(
+				std::remove_if(
+					sprites.begin(),
+					sprites.end(),
+					[id](const Sprite & sprite)
+					{
+						return sprite.id == uint32_t(id);
+					}
+				),
+				sprites.end()
+			);
+		}
+		if(multimesh.is_null() || multimesh->get_instance_count() != int64_t(count))
+			return false; // the instances are not the sprites (a change waits for a rebuild, a refill): it drops them
+		if(sprites.size() != count)
+		{
+			writeSprites(multimesh);
+			animate_move(multimesh); // the rewrite put a sliding hero at its step's end
+		}
+		return true;
 	}
 
 	/// true: the game shows the map on the tabletop (VcmiBridgeApi.setTabletop): the 2D map stops drawing and animating,
@@ -1543,6 +1627,9 @@ public:
 		// the step comes before the object's new record: until then its sprites are still at the start
 		if(move.object >= objects.size() || objects[move.object].x != move.toX || objects[move.object].y != move.toY)
 			return true;
+		if(!drawn(objects[move.object]))
+			return false; // into a boat: its sprites are a ghost at the old tile, fading there
+
 		const float elapsed = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - moveStart).count();
 		const float left = move.fromZ == move.toZ ? std::max(0.0f, 1.0f - elapsed / std::max<float>(move.durationMs, 1.0f)) : 0.0f;
 		const float sx = 1.0f / (32.0f * float(map.width) * map.levels);
@@ -1654,6 +1741,12 @@ public:
 			}
 		}
 		changedIds.clear();
+	}
+
+	/// the 2D map draws it (spritesOf's test, without the view)
+	static bool drawn(const VcmiObject & o)
+	{
+		return (o.flags & VCMI_OBJECT_PRESENT) && !(o.flags & VCMI_OBJECT_HIDDEN);
 	}
 
 	bool isMarker(const VcmiObject & o) const
