@@ -13,6 +13,7 @@ const SCREEN_MAX_ANGLE := 2.0
 const SCREEN_SPEED := 0.8 ## metres per second at full left thumbstick
 const SETTINGS_PATH := "user://screen.cfg"
 const SURFACE_SIZE := Vector2i(2560, 1440) ## pixels of the game window
+const LOADING_BAR := Vector2(0.8, 0.03) ## metres, 2 m before the eyes under "Loading...", while the room is built
 const TableMath := preload("res://table_math.gd")
 const TableAnchor := preload("res://table_anchor.gd")
 const TablePanel := preload("res://table_panel.gd")
@@ -175,8 +176,30 @@ func _ready() -> void:
 	loading.font_size = 96
 	loading.outline_size = 0
 	loading.pixel_size = 0.002
+	loading.modulate = Color(0.9, 0.76, 0.45) # the gold of the launch splash (vr_splash.png)
 	loading.position = Vector3(0.0, 0.0, -2.0)
 	camera.add_child(loading)
+	# under it a bar the room's parts fill (room.gd building): a dark track and a gold fill growing from its left
+	var bars: Array[MeshInstance3D] = [] # the track, the fill
+	for part in [[Color(0.15, 0.12, 0.08), 0], [Color(0.85, 0.66, 0.3), 1]]:
+		var quad := QuadMesh.new()
+		quad.size = Vector2(LOADING_BAR.x, LOADING_BAR.y)
+		var paint := StandardMaterial3D.new()
+		paint.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		paint.albedo_color = part[0]
+		paint.render_priority = part[1]
+		paint.no_depth_test = true
+		quad.material = paint
+		var bar := MeshInstance3D.new()
+		bar.mesh = quad
+		bar.position = Vector3(0.0, -0.34, -2.0)
+		camera.add_child(bar)
+		bars.append(bar)
+	var fill := bars[1]
+	var show_done := func(done: float) -> void:
+		fill.scale.x = maxf(done, 0.001)
+		fill.position.x = -LOADING_BAR.x * (1.0 - done) / 2.0 # its left end stays at the track's
+	show_done.call(0.0)
 	var shown := [false]
 	xr.session_visible.connect(func(): shown[0] = true, CONNECT_ONE_SHOT)
 	for _frame in 400: # at most about 5 s: without a headset session the room still gets built
@@ -192,7 +215,11 @@ func _ready() -> void:
 	light.light_cull_mask = 1 # not the room (room.gd LAYER), which has baked light
 	add_child(light)
 	room = preload("res://room.gd").new()
+	room.staged = true
+	room.building.connect(show_done)
 	add_child(room)
+	await room.built
+	show_done.call(1.0)
 	table_panel = TablePanel.new()
 	table_panel.visible = false
 	room.add_table_panel(table_panel)
@@ -331,6 +358,8 @@ void fragment() {
 		dot.mesh = sphere
 		pointer_dot.add_child(dot)
 	loading.queue_free()
+	for bar in bars:
+		bar.queue_free()
 	set_process(true)
 
 

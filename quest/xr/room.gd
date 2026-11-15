@@ -7,6 +7,11 @@ extends Node3D
 ## After changing anything that does not move, rebake: quest/tools/bake-room.sh. Every node has a fixed name, as the
 ## lightmap finds its meshes by node path. Assets and licences: assets/room/LICENSES.md.
 
+## with `staged`: the share of the room built so far (0 to 1), a frame apart, for main.gd's loading bar
+signal building(done: float)
+## the room is whole (at once without `staged`)
+signal built
+
 const TableMath := preload("res://table_math.gd")
 const TablePanel := preload("res://table_panel.gd")
 const TableShaders := preload("res://table_shaders.gd")
@@ -272,6 +277,8 @@ const SHELF_SIZE := Vector3(1.84, 0.12, 0.2)
 const SHELF_Z := -0.63
 const MAT_SIZE := Vector2(1.84, 1.34) ## the desk mat, to the table's edges
 
+## set before adding: the room builds a part a frame (building), so a loading bar moves; else all at once in _ready
+var staged := false
 var environment := _make_environment() ## main.gd shows the room with this environment
 var zoom := 1.0 ## the minimap shows 1 / zoom of the map's width (set_zoom)
 ## and view_aspect / zoom of its height: the panel keeps the table's shape, the tiles stay square (set_minimap)
@@ -330,18 +337,17 @@ func set_feature(feature: int, on: bool) -> void:
 
 
 func _ready() -> void:
-	_build_shell()
-	_build_windows()
-	_build_fireplace()
-	_build_banners()
-	_build_props()
-	_build_lights()
-	_build_books()
-	_build_paintings()
-	_build_effects()
-	_add_flames()
+	var parts := [_build_shell, _build_windows, _build_fireplace, _build_banners, _build_props, _build_lights,
+			_build_books, _build_paintings, _build_effects, _add_flames]
+	visible = not staged # not seen half built behind the loading text
+	for i in parts.size():
+		parts[i].call()
+		if staged: # the rest of _ready (the lightmap, the table) is the last share
+			building.emit(float(i + 1) / (parts.size() + 1))
+			await get_tree().process_frame
 	for node in find_children("*", "GeometryInstance3D", true, false):
 		node.layers = DECOR if node.gi_mode == GeometryInstance3D.GI_MODE_DYNAMIC else LAYER
+	visible = true # before the probe, which captures the room once as it enters
 	var probe := ReflectionProbe.new()
 	probe.size = SIZE
 	probe.position = Vector3(0.0, SIZE.y / 2.0, MIDDLE)
@@ -388,6 +394,7 @@ func _ready() -> void:
 	_build_book()
 	_set_fires() # after the last _material
 	set_notify_transform(true) # main.gd moves the room with the screen: the fires move with it
+	built.emit.call_deferred() # after the rest of _ready; deferred, so a caller can connect after add_child
 	var marker_shader := Shader.new()
 	marker_shader.code = TableShaders.MARKER
 	var marker_material := ShaderMaterial.new()
