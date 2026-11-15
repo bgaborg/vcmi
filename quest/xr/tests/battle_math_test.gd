@@ -161,10 +161,12 @@ func _initialize() -> void:
 			556), "image": Image.create(30, 456, false, Image.FORMAT_RGBA8)}]})
 	cards._process(0.01)
 	var bolt: MeshInstance3D = cards._effects[0]["node"]
-	# its middle is 228 pixels up the leaning card (half its 456), 2 left of the hex's middle
-	_expect("the effect stands on its target: its lower edge on the ground", [bolt.visible, is_equal_approx(
-			bolt.position.distance_to(cards._effects[0]["at"]), Vector3(-2.0 * cards.PIXEL, 228.0 * cards.PIXEL,
-			0.002).length())], [true, true])
+	# its middle is 228 pixels up the leaning card (half its 456), 2 left of the hex's middle; as tall as the field, it
+	# is scaled to EFFECT_TALL
+	var tall: float = cards.PIXEL * cards.EFFECT_TALL / 556.0
+	_expect("the effect stands on its target: its lower edge on the ground, scaled", [bolt.visible, is_equal_approx(
+			bolt.position.distance_to(cards._effects[0]["at"]), Vector3(-2.0 * tall, 228.0 * tall, 0.002).length()),
+			is_equal_approx(bolt.scale.y, 456.0 * tall)], [true, true, true])
 	cards._process(1.0)
 	_expect("and ends with its last frame", cards._effects.size(), 0)
 	# a mass spell: its animation on every stack it affects, and they all flash
@@ -190,6 +192,12 @@ func _initialize() -> void:
 			- 0.5) < 0.05], [true, true])
 	cards._process(cards.RAY)
 	_expect("and is gone", cards._rays.size(), 0)
+	# chain lightning: its ray from target to target, the stacks not on the field left out
+	field.set_battle({"stacks": stacks, "action": 6, "action_kind": 3, "action_stack": -1, "action_target": 3,
+			"action_targets": PackedInt64Array([3, 99, 1]), "action_hex": -1, "action_side": -1,
+			"action_effect": "BOLT", "action_ray": [[Color.WHITE, Color.CYAN]]})
+	_expect("a bolt between the targets", [cards._rays.size(), cards._effects.size()], [1, 2])
+	cards._process(2.0)
 	field._process(1.0)
 	_expect("and the flash ends", field.flashes.size(), 0)
 	cards.clear()

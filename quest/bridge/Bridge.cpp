@@ -457,9 +457,31 @@ struct BattleAction
 	std::string effect;
 	std::vector<uint32_t> targets; // a spell's: every stack it affects
 	bool onHex = false; // the effect is the spell's `hit` animation: once on its hex, not on each target
+	std::vector<RayColor> ray; // a spell's ray from target to target (chain lightning: BattleInterface usesChainRay)
 };
 std::mutex actionMutex;
 BattleAction lastAction;
+
+// a spell's ray colours from the outer lines to the middle, spread over its width as BattleProjectileController
+// expandRayColors does (it is file-local there)
+// shortcut: at most VCMI_RAY_LINES lines, half chain lightning's 16; widen the array if it looks thin
+std::vector<RayColor> spreadRay(const std::vector<RayColor> & keys, int width)
+{
+	width = std::min(width, VCMI_RAY_LINES);
+	if(keys.empty() || width <= static_cast<int>(keys.size()))
+		return keys;
+	std::vector<RayColor> out(width);
+	const float centre = (width - 1) / 2.f;
+	for(int k = 0; k < width; ++k)
+	{
+		const float at = (1.f - std::abs(k - centre) / centre) * (keys.size() - 1);
+		const int i0 = static_cast<int>(at);
+		const int i1 = std::min<int>(i0 + 1, keys.size() - 1);
+		out[k].start = vstd::lerp(keys[i0].start, keys[i1].start, at - i0);
+		out[k].end = vstd::lerp(keys[i0].end, keys[i1].end, at - i0);
+	}
+	return out;
+}
 
 // The game gives battle events to extra receivers after the 2D battle interface (NetPacksClient.cpp
 // callOnlyThatBattleInterface). Only what the published state cannot tell is kept: who struck whom, and spells.
@@ -485,6 +507,7 @@ public:
 		lastAction.side = 255;
 		lastAction.effect.clear();
 		lastAction.targets.clear();
+		lastAction.ray.clear();
 	}
 	void battleSpellCast(const BattleID &, const BattleSpellCast * cast) override
 	{
@@ -502,7 +525,11 @@ public:
 		// as BattleInterface: `affect` plays on each stack it affects, `hit` once on the target hex or over the field
 		lastAction.effect.clear();
 		lastAction.onHex = false;
+		lastAction.ray.clear();
 		if(const CSpell * spell = cast->spellID.toSpell())
+		{
+			if(cast->affectedCres.size() > 1)
+				lastAction.ray = spreadRay(spell->animationInfo.ray, spell->animationInfo.rayWidth);
 			for(const auto * queue : {&spell->animationInfo.affect, &spell->animationInfo.hit})
 				for(const auto & item : *queue)
 					if(lastAction.effect.empty() && !item.resourceName.empty())
@@ -510,6 +537,7 @@ public:
 						lastAction.effect = item.resourceName.getOriginalName();
 						lastAction.onHex = queue == &spell->animationInfo.hit;
 					}
+		}
 	}
 };
 
@@ -743,11 +771,11 @@ void publishBattle()
 		next.actionOnHex = lastAction.onHex ? 1 : 0;
 		next.actionTargetCount = static_cast<uint8_t>(std::min<size_t>(lastAction.targets.size(), VCMI_ACTION_TARGETS));
 		std::copy_n(lastAction.targets.begin(), next.actionTargetCount, next.actionTargets);
-		// a shot by a creature that shoots a ray: its lines' colours (BattleProjectileController draws them)
+		// a shot by a creature that shoots a ray, or a spell's ray: its lines' colours (BattleProjectileController
+		// draws them)
 		const CStack * shooter = next.actionKind == VCMI_ACTION_SHOT && state ? state->battleGetStackByID(lastAction.stack, false) : nullptr;
-		if(shooter && shooter->unitType())
+		const auto & ray = shooter && shooter->unitType() ? shooter->unitType()->animation.projectileRay : lastAction.ray;
 		{
-			const auto & ray = shooter->unitType()->animation.projectileRay;
 			next.actionRayCount = static_cast<uint8_t>(std::min<size_t>(ray.size(), VCMI_RAY_LINES));
 			for(int i = 0; i < next.actionRayCount; i++)
 			{

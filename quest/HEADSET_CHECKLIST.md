@@ -59,7 +59,7 @@ Build and install: `quest/tools/make-apk.sh` (WSL), then `quest/tools/quest.sh i
 
 - Only the standing and moving frames of the creatures are upscaled; attacks and deaths are the game's 1x art.
 - The table follows the 2D battle by up to a tenth of a second. A spell's animation plays on its first target only (a mass spell too), and effects that fill the 2D screen (Armageddon) are not shown.
-- Chain lightning shows on each target without the bolts between them.
+- Chain lightning's bolt is straight and appears at once (the 2D one is jagged and jumps hop by hop), and every target plays the full effect.
 - An object that vanishes during a pan (a sprite rebuild) goes at once, without its fade.
 - Two attacks within a tenth of a second show as one.
 - A melee attack always comes from the attacker's side; another side cannot be chosen from the table.

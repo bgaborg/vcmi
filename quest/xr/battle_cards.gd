@@ -37,6 +37,9 @@ const SHOT_DELAY := 0.4 ## seconds from the shooter's first frame to the shot's 
 const RAY := 0.5 ## seconds a ray fades in after it is drawn
 ## a grid of field pixels a spell that covers the whole field plays its animation on (Armageddon: SCREEN_FILL)
 const FILL_STEP := Vector2(200.0, 160.0)
+## field pixels a spell's frame may stand at most (0.5 m): the tallest creature's frame stands about 260 above its feet;
+## an effect as tall as the 2D battlefield (556) would stand 0.94 m over the table, so it is scaled down
+const EFFECT_TALL := 300.0
 
 ## animation name: {group: [{image, texture (made from the image when the frame first shows), rect (of the frame's
 ## pixels in the 450 x 400 frame)}]}
@@ -119,9 +122,11 @@ func _process(delta: float) -> void:
 			var full: Vector2 = frame["full"]
 			node.visible = true
 			node.material_override = _art(frame)
-			node.scale = Vector3(rect.size.x * PIXEL, rect.size.y * PIXEL, 1.0)
+			# the screen's height on the 2D battlefield is a wall on the table: no taller than EFFECT_TALL
+			var pixel := PIXEL * minf(1.0, EFFECT_TALL / maxf(full.y, 1.0))
+			node.scale = Vector3(rect.size.x * pixel, rect.size.y * pixel, 1.0)
 			node.position = (effect["at"] as Vector3) + node.basis.orthonormalized() * Vector3((rect.get_center().x
-					- full.x / 2.0) * PIXEL, (full.y - rect.get_center().y) * PIXEL, 0.002) # along the leaning card
+					- full.x / 2.0) * pixel, (full.y - rect.get_center().y) * pixel, 0.002) # along the leaning card
 	for card: Dictionary in _stacks.values():
 		card["time"] += delta
 		if card["slide"] < 1.0:
@@ -242,6 +247,11 @@ func set_action(data: Dictionary) -> void:
 		var struck: Array = Array(data.get("action_targets", PackedInt64Array())).filter(func(t): return _stacks.has(t))
 		if struck.is_empty() and _stacks.has(data.get("action_target", -1)):
 			struck = [data["action_target"]]
+		# a spell's ray (chain lightning): from target to target in the order it jumps
+		# shortcut: all hops at once, the 2D battle shows one after another (rayHopDelay)
+		var bolt: Array = data.get("action_ray", [])
+		for hop in range(1, struck.size() if not bolt.is_empty() else 0):
+			play_ray(_stacks[struck[hop - 1]]["node"].position, _stacks[struck[hop]]["node"].position, bolt)
 		if data.get("action_on_hex", false):
 			struck = []
 		if effect != "":

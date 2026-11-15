@@ -203,6 +203,12 @@ func _add_battle(room: Node3D) -> void:
 		field.cards.set_action({"action": 1, "action_kind": 2, "action_stack": 4, "action_target": 7, "action_ray": ray})
 		field.cards.set_action({"action": 2, "action_kind": 3, "action_stack": -1, "action_targets":
 				PackedInt64Array([3, 5, 9]), "action_effect": "C10SPW", "action_side": -1})
+		# chain lightning's bolt from target to target (config/spells/offensive.json, its colours spread as the bridge
+		# spreads them)
+		var blue := [Color8(100, 140, 255, 96), Color8(100, 140, 255, 48)]
+		field.cards.set_action({"action": 3, "action_kind": 3, "action_stack": -1, "action_targets":
+				PackedInt64Array([7, 9, 3]), "action_side": -1, "action_ray": [blue, blue, blue,
+				[Color.WHITE, Color8(255, 255, 255, 224)], [Color.WHITE, Color8(255, 255, 255, 224)], blue, blue, blue]})
 		for creature: String in field.cards.missing_creatures():
 			var folder := ProjectSettings.globalize_path(H3.path_join(creature))
 			var listed: Variant = JSON.parse_string(FileAccess.get_file_as_string(folder.path_join("frames.json")))
