@@ -1,0 +1,12 @@
+# The game in Meta XR Simulator (quest/tools/xrsim.sh quest/tools/xrsim-game.txt, after quest/tools/make-pc.sh): from
+# the main menu into the first scenario (All for One), its map on the table. Each shot also saves the game's frame
+# (<name>-game.png, 2560x1440). Taps are game pixels.
+12 shot menu
+13 tap 1766 270
+15 tap 1773 256
+17 shot lobby
+18 tap 1504 1229
+35 shot map
+36 tabletop 1
+45 shot table
+46 quit

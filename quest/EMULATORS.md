@@ -1,7 +1,8 @@
 # Testing without the headset: Meta XR Simulator only
 
-Read this before any emulator or simulator work. The headset stays the only place where the whole game runs in VR
-([`HEADSET_CHECKLIST.md`](HEADSET_CHECKLIST.md)).
+Read this before any emulator or simulator work. On the PC the room, the table and the game run together in Meta XR
+Simulator (section 3); the APK on the headset stays the target and the check for each milestone: its performance, the
+Android side, the real controllers and comfort ([`HEADSET_CHECKLIST.md`](HEADSET_CHECKLIST.md)).
 
 ## 1. Forbidden: 2D emulators
 
@@ -31,16 +32,33 @@ Meta's command-line tool installs Meta's tools and searches Meta's documentation
 never switches the system's active OpenXR runtime (`metavr xrsim runtime activate` asks for UAC and changes it for
 every app).
 
-- The game does not run there yet: its bridge is the Android plugin, and `quest/xr/pc_bridge.gd` stands in, so the
-  game screen stays black. The table's contents come from the VcmiData extension, built for Android only: the table
-  is an empty desk on the PC.
-- **Scripted tests**: `quest/tools/xrsim-smoke.txt` lists test commands with times (the same commands `quest.sh test`
-  sends to the headset), plus `shot <name>` and `quit`. The run fails on a script error, on not reaching `quit`, or
-  when a shot differs from the baseline (`BASELINE=1 quest/tools/xrsim.sh` keeps one in `quest/out/xrsim-baseline`).
+- **The game runs inside the host**, as on the headset, once `quest/tools/make-pc.sh` has built it (about 20 minutes
+  the first time; prerequisites in its header: Visual Studio 2019 with the C++ workload, Conan 2, VCMI's prebuilt
+  Windows dependencies, a Heroes 3 install):
+  - `VCMI_client.dll` is the unchanged client as a library with the bridge (`clientapp/CMakeLists.txt`,
+    `VCMI_QUEST_PC`), in `~/vcmi-build/win/build/bin/Release`, its data folders linked to the Heroes 3 install.
+  - The VcmiData extension, built for Windows into `quest/xr/bin/` (`vcmi_xr_pc.gdextension`, not exported to the
+    APK), loads that library and runs the client's `wmain` on a thread (`pc_start`).
+  - The game draws with SDL's offscreen video driver and software renderer; the bridge's PC part
+    (`quest/bridge/PcHost.cpp`) resizes its window to the headset's 2560x1440 (the offscreen desktop is 1024x768),
+    copies each frame on the game thread, and pushes the pointer and the keys as SDL events.
+  - `pc_bridge.gd` has the same methods as the Android plugin: its frames fill a viewport that `main.gd` puts on the
+    screen's cylinder layer, and the table gets the game's data from the bridge as on the headset.
+  - VCMI's settings, logs and saves go to `~/vcmi-build/win/userdata` (`dirs.json` next to the Godot executable, as
+    VCMI looks for it beside the process's executable), not to Documents.
+  - Not on the PC yet: the gamepad (A / B / X / Y, the right stick; `pc_bridge.gd` shortcut); Ctrl, Shift and Alt as
+    modifiers and typing text (pushed key events change neither SDL's keyboard state nor its text input; `PcHost.cpp`
+    shortcut). Quitting the game from its menu ends the host, as the app ends on the headset.
+- **Scripted tests**: a script lists test commands with times (the same commands `quest.sh test` sends to the
+  headset), plus `shot <name>`, `tap <x> <y>` (a click at a game pixel) and `quit`. `xrsim-smoke.txt` runs the
+  host's modes, `xrsim-game.txt` goes from the main menu into a scenario and onto the table. The run fails on a script
+  error, on not reaching `quit`, or when a shot differs from the script's baseline (`BASELINE=1 quest/tools/xrsim.sh
+  [script]` keeps one in `quest/out/xrsim-baseline/<script>`).
 - **Screenshots**: the host renders each one itself, from the headset's pose into a 1280x720 image
   (`pc_bridge.gd`), so nothing of the desktop is ever captured. Godot cannot read the XR eye images back (they render
   into the runtime's swapchain), and a copy of the host's window goes stale while another window covers it (tried
-  2026-11-15/16 with PrintWindow). The game screen, a composition layer, is not in the shots.
+  2026-11-15/16 with PrintWindow). The game screen, a composition layer, is not in them: each shot also saves the
+  game's own frame as `<name>-game.png`.
 - The simulator's window shows "XR Simulator runtime disabled" and no view while it is not the system runtime; that
   is expected with the per-process setup.
 - `metavr xrsim record` (the compositor to MP4) fails against v207.1: "its build doesn't include the recording

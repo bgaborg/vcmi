@@ -1,7 +1,7 @@
 /*
  * VcmiBridgeApi.h, Meta Quest build: the C ABI between the game (quest/bridge, compiled into
  * libvcmiclient) and the Godot extension (quest/xr/extension). Plain C, so the two sides share no C++ types.
- * The extension finds the table with dlsym("vcmi_bridge_api"). See quest/DATA_BRIDGE.md.
+ * The extension finds the table with dlsym("vcmi_bridge_api") (GetProcAddress on the PC). See quest/DATA_BRIDGE.md.
  *
  * License: GNU General Public License v2.0 or later
  */
@@ -10,7 +10,7 @@
 #include <stdint.h>
 
 // raise on any change to the structs below; the extension refuses a table with another version
-#define VCMI_BRIDGE_VERSION 22
+#define VCMI_BRIDGE_VERSION 23
 
 typedef struct VcmiBridgeStats
 {
@@ -333,4 +333,19 @@ typedef struct VcmiBridgeApi
 	// own kept in a file and put back after a crash) and the game's sound effects are muted, as Godot plays them on the
 	// table. Run by the next lifecycle tick. Any thread
 	void (*setTableBattle)(uint8_t shown);
+
+	// The PC build only (quest/bridge/PcHost.cpp; null on Android, where the game's own activity runs it): the Godot
+	// host loads the game library itself and runs the game offscreen, as the Android plugin runs it on a virtual display.
+	// Runs the game on the calling thread until it quits (the client's main) and returns its exit code; its window gets
+	// width x height pixels
+	int (*pcMain)(int argc, char ** argv, uint32_t width, uint32_t height);
+	// copies the game window's last frame as RGBA bytes into out (width * height * 4, nothing when capacity is smaller)
+	// and returns 1, 0 while there is none yet; sets width and height in either case. Asks the game thread for the next
+	// one. Any thread
+	uint8_t (*pcFrame)(uint8_t * out, uint32_t capacity, uint32_t * width, uint32_t * height);
+	// the pointer at window pixel x, y; button 0 only moves it, 1 (left) or 2 (right, as MotionEvent's buttons) also
+	// presses or releases. Any thread
+	void (*pcMouse)(float x, float y, uint8_t button, uint8_t pressed);
+	// an Android key code (as VcmiBridge.key takes) pressed or released. Any thread
+	void (*pcKey)(int32_t androidKeycode, uint8_t pressed);
 } VcmiBridgeApi;

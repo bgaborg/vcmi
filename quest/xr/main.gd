@@ -259,11 +259,16 @@ void fragment() {
 	add_child(world)
 
 	layer = OpenXRCompositionLayerCylinder.new()
-	# the game's plugin on the headset; a stand-in on the PC (Meta XR Simulator, quest/tools/xrsim.sh)
-	bridge = (Engine.get_singleton("VcmiBridge") if OS.has_feature("android")
-			else preload("res://pc_bridge.gd").new())
-	layer.use_android_surface = true
-	layer.android_surface_size = SURFACE_SIZE
+	# the game's plugin on the headset; on the PC the Windows build in this process (Meta XR Simulator,
+	# quest/tools/xrsim.sh), whose frames fill a viewport
+	if OS.has_feature("android"):
+		bridge = Engine.get_singleton("VcmiBridge")
+		layer.use_android_surface = true
+		layer.android_surface_size = SURFACE_SIZE
+	else:
+		bridge = preload("res://pc_bridge.gd").new()
+		bridge.viewport.size = SURFACE_SIZE
+		layer.layer_viewport = bridge.viewport
 	bridge.connect("test_command", _on_test_command)
 	room.view_reach = TABLE_FOCUS.y - 0.5
 	var cards: Variant = JSON.parse_string(FileAccess.get_file_as_string("res://cards.json"))
@@ -570,7 +575,7 @@ func _process(delta: float) -> void:
 	var hole_punch := layer.get_child(0, true) as MeshInstance3D if layer.get_child_count(true) > 0 else null
 	if hole_punch != null and hole_punch.material_override != screen_occluder:
 		hole_punch.material_override = screen_occluder
-	if surface_pending and layer.get_android_surface() != null:
+	if surface_pending and (layer.get_android_surface() != null or not OS.has_feature("android")):
 		surface_pending = false
 		if game_started:
 			bridge.setSurface(layer.get_android_surface())

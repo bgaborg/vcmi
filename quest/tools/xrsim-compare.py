@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Compares the shots of a Meta XR Simulator run (quest/tools/xrsim.sh) with a baseline run's: a shot fails when more
 than 2 % of its pixels differ by more than 24 levels of brightness (the flames and the flicker move; the room does
-not). Writes <name>-diff.png next to a failing shot: the shot with its differing pixels painted red.
+not). The game's own frames (<name>-game.png) are not compared: its map animates. Writes <name>-diff.png next to a
+failing shot: the shot with its differing pixels painted red.
 
 Usage: xrsim-compare.py BASELINE_DIR RUN_DIR
 """
@@ -18,7 +19,7 @@ SHARE = 0.02  # the share of changed pixels that fails a shot
 def main(base: Path, run: Path) -> int:
     failed = 0
     for reference in sorted(base.glob("*.png")):
-        if reference.stem.endswith("-diff"):
+        if reference.stem.endswith(("-diff", "-game")):
             continue
         shot = run / reference.name
         if not shot.exists():

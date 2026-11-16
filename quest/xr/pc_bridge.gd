@@ -1,18 +1,27 @@
 extends RefCounted
 # gdlint: disable=function-name
-## The game's bridge (the Android plugin VcmiBridge) where there is none: the PC, with Meta XR Simulator as the OpenXR
-## runtime (quest/tools/xrsim.sh). The war room, the table and the controllers run; the game does not, so its input
-## goes nowhere and its screen stays empty.
+## The game's bridge (the Android plugin VcmiBridge) on the PC, with Meta XR Simulator as the OpenXR runtime
+## (quest/tools/xrsim.sh): the VcmiData extension loads the Windows build of the game (quest/tools/make-pc.sh) into this
+## process and runs it offscreen, as the plugin runs it on a virtual display. Its frames fill `viewport`, which main.gd
+## shows on the screen's composition layer; the pointer and the keys go to it as SDL events. Without the extension or
+## the game (VCMI_PC_GAME, default the build in ~/vcmi-build) the room runs alone and the screen stays empty.
 ## With VCMI_XR_SCRIPT (a file of lines `<seconds> <command> [a] [b] [c]`, `#` comments), it plays the test commands
-## the headset gets over adb (main.gd _on_test_command) at those times after start, plus `shot <name>` and `quit`.
+## the headset gets over adb (main.gd _on_test_command) at those times after start, plus `shot <name>`, `tap <x> <y>`
+## (a left click at a game pixel) and `quit`.
 ## A shot renders the scene once from the headset's pose into $VCMI_XR_SHOTS/<name>.png: the eyes render into the
 ## runtime's swapchain, which Godot cannot read back, and the window's own image goes stale while it is covered.
-## Composition layers (the game screen) are not in it.
+## Composition layers are not in it, so the game's own frame goes into <name>-game.png beside it.
 
 signal test_command(command: String, a: float, b: float, c: float)
 
+var viewport := SubViewport.new() ## the game's frames, for the screen's composition layer
+var _data: Object = ClassDB.instantiate("VcmiData") if ClassDB.class_exists("VcmiData") else null
+var _frame := TextureRect.new()
+var _pointer := Vector2.ZERO
+
 
 func _init() -> void:
+	viewport.add_child(_frame)
 	var script := OS.get_environment("VCMI_XR_SCRIPT")
 	if script == "" or not FileAccess.file_exists(script):
 		return
@@ -36,6 +45,11 @@ func _play(command: String, numbers: Array, shot: String) -> void:
 			_shot(tree, shot)
 		"quit":
 			tree.quit()
+		"tap": # a left click at game pixel a, b, through the methods main.gd calls
+			pointerMove(numbers[0], numbers[1])
+			pointerButton(1, true)
+			await tree.create_timer(0.1).timeout
+			pointerButton(1, false)
 		_:
 			test_command.emit(command, numbers[0], numbers[1], numbers[2])
 
@@ -57,28 +71,58 @@ func _shot(tree: SceneTree, name: String) -> void:
 	await RenderingServer.frame_post_draw
 	view.get_texture().get_image().save_png(OS.get_environment("VCMI_XR_SHOTS").path_join(name + ".png"))
 	view.queue_free()
+	if _frame.texture != null:
+		_frame.texture.get_image().save_png(OS.get_environment("VCMI_XR_SHOTS").path_join(name + "-game.png"))
 
 
-func startGame(_surface: Variant, _width: int, _height: int) -> void:
-	pass
+func startGame(_surface: Variant, width: int, height: int) -> void:
+	viewport.size = Vector2i(width, height)
+	var dll := OS.get_environment("VCMI_PC_GAME")
+	if dll == "":
+		dll = OS.get_environment("USERPROFILE").path_join("vcmi-build/win/build/bin/Release/VCMI_client.dll")
+	if _data == null or not FileAccess.file_exists(dll) or not _data.pc_start(dll, viewport.size):
+		push_warning("VCMI XR: no game on the PC (", dll, "): quest/tools/make-pc.sh builds it")
+		return
+	var tree := Engine.get_main_loop() as SceneTree
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	tree.root.add_child(viewport)
+	tree.process_frame.connect(_show_frame)
+
+
+## the newest frame on the screen
+func _show_frame() -> void:
+	var image: Image = _data.pc_frame()
+	if image == null:
+		return
+	if _frame.texture == null or Vector2i(_frame.texture.get_size()) != image.get_size():
+		_frame.texture = ImageTexture.create_from_image(image)
+		_frame.size = viewport.size
+	else:
+		(_frame.texture as ImageTexture).update(image)
 
 
 func setSurface(_surface: Variant) -> void:
 	pass
 
 
-func pointerMove(_x: float, _y: float) -> void:
-	pass
+func pointerMove(x: float, y: float) -> void:
+	_pointer = Vector2(x, y)
+	if _data != null:
+		_data.pc_mouse(x, y, 0, false)
 
 
-func pointerButton(_button: int, _pressed: bool) -> void:
-	pass
+func pointerButton(button: int, pressed: bool) -> void:
+	if _data != null:
+		_data.pc_mouse(_pointer.x, _pointer.y, button, pressed)
 
 
-func key(_code: int, _pressed: bool) -> void:
-	pass
+func key(code: int, pressed: bool) -> void:
+	if _data != null:
+		_data.pc_key(code, pressed)
 
 
+# shortcut: no gamepad on the PC yet (A / B / X / Y, the right stick); the headset's QuestGamepad has them. An SDL
+# virtual gamepad in PcHost.cpp would add them
 func gamepadButton(_button: int, _pressed: bool) -> void:
 	pass
 

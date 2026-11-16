@@ -1,0 +1,12 @@
+; The Godot extension (quest/xr/extension) on the PC: game data from the bridge, and the game itself, which the
+; extension loads (pc_bridge.gd). Built by quest/tools/make-pc.sh into bin/ (not in git). Not exported: on Android the
+; game's plugin registers the extension (android/vcmi-app/src/quest/assets/vcmi_xr.gdextension).
+
+[configuration]
+
+entry_symbol = "vcmi_xr_init"
+compatibility_minimum = "4.5"
+
+[libraries]
+
+windows.x86_64 = "res://bin/vcmi_xr.dll"

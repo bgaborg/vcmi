@@ -10,7 +10,16 @@
 #include <cstring>
 #include <vector>
 
-#include <dlfcn.h>
+#ifdef _WIN32
+#	ifndef NOMINMAX
+#		define NOMINMAX
+#	endif
+#	define WIN32_LEAN_AND_MEAN
+#	include <thread>
+#	include <windows.h>
+#else
+#	include <dlfcn.h>
+#endif
 #include <map>
 #include <memory>
 #include <string>
@@ -100,6 +109,12 @@ protected:
 		ClassDB::bind_method(D_METHOD("creature_sounds", "creature"), &VcmiData::creature_sounds);
 		ClassDB::bind_method(D_METHOD("set_table_battle", "shown"), &VcmiData::set_table_battle);
 		ClassDB::bind_method(D_METHOD("hex_input", "hex", "click"), &VcmiData::hex_input);
+#ifdef _WIN32
+		ClassDB::bind_method(D_METHOD("pc_start", "dll", "size"), &VcmiData::pc_start);
+		ClassDB::bind_method(D_METHOD("pc_frame"), &VcmiData::pc_frame);
+		ClassDB::bind_method(D_METHOD("pc_mouse", "x", "y", "button", "pressed"), &VcmiData::pc_mouse);
+		ClassDB::bind_method(D_METHOD("pc_key", "keycode", "pressed"), &VcmiData::pc_key);
+#endif
 	}
 
 	uint32_t seenTiles = 0;
@@ -248,6 +263,89 @@ public:
 		TILE_POPUP_END = VCMI_TILE_POPUP_END
 	};
 
+	/// false while the game library is not loaded; else true, with its table in `table` (null when it has none). Only
+	/// a library already loaded (by the game activity on Android, pc_start on the PC); the handle is kept, as the library is
+	static bool game_table(const VcmiBridgeApi *& table)
+	{
+#ifdef _WIN32
+		HMODULE game = GetModuleHandleW(L"VCMI_client.dll");
+		if(!game)
+			return false;
+		table = reinterpret_cast<const VcmiBridgeApi *>(GetProcAddress(game, "vcmi_bridge_api"));
+#else
+		void * game = dlopen("libvcmiclient_arm64-v8a.so", RTLD_NOW | RTLD_NOLOAD);
+		if(!game)
+			return false;
+		table = static_cast<const VcmiBridgeApi *>(dlsym(game, "vcmi_bridge_api"));
+#endif
+		return true;
+	}
+
+#ifdef _WIN32
+	/// The PC (pc_bridge.gd): loads the game library from `dll` (VCMI_client.dll in the Windows build's folder, its
+	/// data beside it) and runs the game offscreen on a thread of its own, in a window of `size`. False when it cannot
+	/// be loaded
+	bool pc_start(const String & dll, const Vector2i & size)
+	{
+		// the game's DLLs (SDL, boost, ffmpeg) are next to it; that search takes backslashes only
+		const String native = dll.replace("/", "\\");
+		const std::wstring path(reinterpret_cast<const wchar_t *>(native.utf16().get_data()));
+		HMODULE game = LoadLibraryExW(path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+		const auto * table = game ? reinterpret_cast<const VcmiBridgeApi *>(GetProcAddress(game, "vcmi_bridge_api")) : nullptr;
+		if(!table || table->version != VCMI_BRIDGE_VERSION || !table->pcMain)
+		{
+			UtilityFunctions::push_error(
+				"VCMI bridge: cannot start the game from ",
+				native,
+				" (",
+				game ? "no or another table" : "Windows error " + String::num_int64(GetLastError()),
+				")"
+			);
+			return false;
+		}
+		// argv[0] is the library: the game changes to its folder and finds its data there
+		std::thread(
+			[table, size, utf8 = std::string(dll.utf8().get_data())]() mutable
+			{
+				char * argv[] = {utf8.data(), nullptr};
+				table->pcMain(1, argv, size.x, size.y);
+			}
+		).detach(); // shortcut: the game thread is not joined; the process ends with Godot
+		return true;
+	}
+
+	/// the game window's last frame, or null while there is none (the PC only)
+	Ref<Image> pc_frame()
+	{
+		uint32_t width = 0;
+		uint32_t height = 0;
+		if(!api || !api->pcFrame)
+			return {};
+		api->pcFrame(nullptr, 0, &width, &height);
+		if(width == 0)
+			return {};
+		pcPixels.resize(width * height * 4);
+		if(!api->pcFrame(pcPixels.ptrw(), pcPixels.size(), &width, &height) || pcPixels.size() != int64_t(width) * height * 4)
+			return {}; // none yet, or the window changed size between the two calls: the next frame
+		return Image::create_from_data(width, height, false, Image::FORMAT_RGBA8, pcPixels);
+	}
+
+	/// the PC only, as VcmiBridge.pointerMove / pointerButton / key on Android
+	void pc_mouse(float x, float y, int button, bool pressed)
+	{
+		if(api && api->pcMouse)
+			api->pcMouse(x, y, button, pressed);
+	}
+
+	void pc_key(int keycode, bool pressed)
+	{
+		if(api && api->pcKey)
+			api->pcKey(keycode, pressed);
+	}
+
+	PackedByteArray pcPixels;
+#endif
+
 	/// true once the game's table is found and its lifecycle task started; call again until then
 	bool connect_bridge()
 	{
@@ -255,11 +353,9 @@ public:
 			return true;
 		if(refused)
 			return false;
-		// RTLD_NOLOAD: only a library the game activity already loaded; the handle is kept, as the library is
-		void * game = dlopen("libvcmiclient_arm64-v8a.so", RTLD_NOW | RTLD_NOLOAD);
-		if(!game)
+		const VcmiBridgeApi * table = nullptr;
+		if(!game_table(table))
 			return false;
-		const auto * table = static_cast<const VcmiBridgeApi *>(dlsym(game, "vcmi_bridge_api"));
 		if(!table || table->version != VCMI_BRIDGE_VERSION)
 		{
 			refused = true;

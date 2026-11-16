@@ -1,3 +1,5 @@
 .godot/
 # downloaded by quest/tools/export-xr.sh
 addons/godotopenxrvendors/
+# the PC build of the extension, quest/tools/make-pc.sh
+bin/
