@@ -41,18 +41,18 @@ every app).
     APK), loads that library and runs the client's `wmain` on a thread (`pc_start`).
   - The game draws with SDL's offscreen video driver and software renderer; the bridge's PC part
     (`quest/bridge/PcHost.cpp`) resizes its window to the headset's 2560x1440 (the offscreen desktop is 1024x768),
-    copies each frame on the game thread, and pushes the pointer and the keys as SDL events.
+    copies each frame on the game thread, pushes the pointer and the keys as SDL events, and drives an SDL virtual
+    gamepad for the controllers' buttons and right stick (as `QuestGamepad` on Android).
   - `pc_bridge.gd` has the same methods as the Android plugin: its frames fill a viewport that `main.gd` puts on the
     screen's cylinder layer, and the table gets the game's data from the bridge as on the headset.
   - VCMI's settings, logs and saves go to `~/vcmi-build/win/userdata` (`dirs.json` next to the Godot executable, as
     VCMI looks for it beside the process's executable), not to Documents.
-  - Not on the PC yet: the gamepad (A / B / X / Y, the right stick; `pc_bridge.gd` shortcut); Ctrl, Shift and Alt as
-    modifiers and typing text (pushed key events change neither SDL's keyboard state nor its text input; `PcHost.cpp`
-    shortcut). Quitting the game from its menu ends the host, as the app ends on the headset.
+  - Not on the PC yet: Ctrl, Shift and Alt as modifiers and typing text (pushed key events change neither SDL's
+    keyboard state nor its text input; `PcHost.cpp` shortcut). Quitting the game from its menu ends the host, as the app ends on the headset.
 - **Scripted tests**: a script lists test commands with times (the same commands `quest.sh test` sends to the
   headset), plus `shot <name>`, `tap <x> <y>` (a click at a game pixel) and `quit`. `xrsim-smoke.txt` runs the
-  host's modes, `xrsim-game.txt` goes from the main menu into a scenario and onto the table. The run fails on a script
-  error, on not reaching `quit`, or when a shot differs from the script's baseline (`BASELINE=1 quest/tools/xrsim.sh
+  host's modes, `xrsim-game.txt` goes from the main menu into a scenario and onto the table, then uses the gamepad
+  (`pad`, `stick`). The run fails on a script error, on not reaching `quit`, or when a shot differs from the script's baseline (`BASELINE=1 quest/tools/xrsim.sh
   [script]` keeps one in `quest/out/xrsim-baseline/<script>`).
 - **Screenshots**: the host renders each one itself, from the headset's pose into a 1280x720 image
   (`pc_bridge.gd`), so nothing of the desktop is ever captured. Godot cannot read the XR eye images back (they render

@@ -114,6 +114,8 @@ protected:
 		ClassDB::bind_method(D_METHOD("pc_frame"), &VcmiData::pc_frame);
 		ClassDB::bind_method(D_METHOD("pc_mouse", "x", "y", "button", "pressed"), &VcmiData::pc_mouse);
 		ClassDB::bind_method(D_METHOD("pc_key", "keycode", "pressed"), &VcmiData::pc_key);
+		ClassDB::bind_method(D_METHOD("pc_button", "keycode", "pressed"), &VcmiData::pc_button);
+		ClassDB::bind_method(D_METHOD("pc_axis", "axis", "value"), &VcmiData::pc_axis);
 #endif
 	}
 
@@ -341,6 +343,19 @@ public:
 	{
 		if(api && api->pcKey)
 			api->pcKey(keycode, pressed);
+	}
+
+	/// the PC only, as VcmiBridge.gamepadButton / gamepadAxis on Android
+	void pc_button(int keycode, bool pressed)
+	{
+		if(api && api->pcButton)
+			api->pcButton(keycode, pressed);
+	}
+
+	void pc_axis(int axis, float value)
+	{
+		if(api && api->pcAxis)
+			api->pcAxis(axis, value);
 	}
 
 	PackedByteArray pcPixels;

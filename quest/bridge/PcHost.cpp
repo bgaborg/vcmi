@@ -28,6 +28,22 @@ uint32_t frameHeight = 0;
 std::atomic<bool> copyPending{false};
 // the game window's id, read on the game thread: the host's thread must not walk SDL's window list
 std::atomic<SDL_WindowID> windowId{0};
+// the controllers as one SDL gamepad (QuestGamepad on Android), attached and used on the game thread only
+SDL_Joystick * gamepad = nullptr;
+
+// game thread, once SDL runs: the game opens it on SDL_EVENT_GAMEPAD_ADDED and uses its controller bindings
+void attachGamepad()
+{
+	SDL_VirtualJoystickDesc desc;
+	SDL_INIT_INTERFACE(&desc);
+	desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+	desc.naxes = SDL_GAMEPAD_AXIS_COUNT;
+	desc.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
+	desc.name = "Meta Quest Touch";
+	gamepad = SDL_OpenJoystick(SDL_AttachVirtualJoystick(&desc));
+	if(!gamepad)
+		SDL_Log("VCMI PC host: no virtual gamepad: %s", SDL_GetError());
+}
 
 int pcMain(int argc, char ** argv, uint32_t width, uint32_t height)
 {
@@ -59,6 +75,7 @@ SDL_Window * gameWindow()
 void copyFrame()
 {
 	copyPending = false;
+	[[maybe_unused]] static const bool attached = (attachGamepad(), true);
 	SDL_Window * window = gameWindow();
 	windowId = window ? SDL_GetWindowID(window) : 0;
 	if(!window)
@@ -182,6 +199,60 @@ void pcKey(int32_t androidKeycode, uint8_t pressed)
 	event.key.scancode = SDL_GetScancodeFromKey(key, nullptr); // the game names its bindings by scan code
 	event.key.down = pressed;
 	SDL_PushEvent(&event);
+}
+
+// KeyEvent.KEYCODE_BUTTON_* as SDL gamepad buttons, those main.gd PAD_BUTTONS sends and the face buttons
+SDL_GamepadButton padButton(int32_t code)
+{
+	switch(code)
+	{
+		case 96:
+			return SDL_GAMEPAD_BUTTON_SOUTH; // A
+		case 97:
+			return SDL_GAMEPAD_BUTTON_EAST; // B
+		case 99:
+			return SDL_GAMEPAD_BUTTON_WEST; // X
+		case 100:
+			return SDL_GAMEPAD_BUTTON_NORTH; // Y
+		case 102:
+			return SDL_GAMEPAD_BUTTON_LEFT_SHOULDER;
+		case 103:
+			return SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER;
+		case 106:
+			return SDL_GAMEPAD_BUTTON_LEFT_STICK;
+		case 107:
+			return SDL_GAMEPAD_BUTTON_RIGHT_STICK;
+		case 108:
+			return SDL_GAMEPAD_BUTTON_START;
+		default:
+			return SDL_GAMEPAD_BUTTON_INVALID;
+	}
+}
+
+void pcButton(int32_t androidKeycode, uint8_t pressed)
+{
+	const SDL_GamepadButton button = padButton(androidKeycode);
+	if(ENGINE && button != SDL_GAMEPAD_BUTTON_INVALID)
+		ENGINE->dispatchMainThread(
+			[button, pressed]()
+			{
+				SDL_SetJoystickVirtualButton(gamepad, button, pressed);
+			}
+		);
+}
+
+void pcAxis(int32_t axis, float value)
+{
+	if(ENGINE && axis >= 0 && axis < SDL_GAMEPAD_AXIS_COUNT)
+	{
+		const auto position = static_cast<Sint16>(std::clamp(value, -1.0f, 1.0f) * SDL_JOYSTICK_AXIS_MAX);
+		ENGINE->dispatchMainThread(
+			[axis, position]()
+			{
+				SDL_SetJoystickVirtualAxis(gamepad, axis, position);
+			}
+		);
+	}
 }
 
 }

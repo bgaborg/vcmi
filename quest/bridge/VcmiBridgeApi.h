@@ -10,7 +10,7 @@
 #include <stdint.h>
 
 // raise on any change to the structs below; the extension refuses a table with another version
-#define VCMI_BRIDGE_VERSION 23
+#define VCMI_BRIDGE_VERSION 24
 
 typedef struct VcmiBridgeStats
 {
@@ -348,4 +348,8 @@ typedef struct VcmiBridgeApi
 	void (*pcMouse)(float x, float y, uint8_t button, uint8_t pressed);
 	// an Android key code (as VcmiBridge.key takes) pressed or released. Any thread
 	void (*pcKey)(int32_t androidKeycode, uint8_t pressed);
+	// the gamepad, as VcmiBridge.gamepadButton / gamepadAxis take it: a KeyEvent.KEYCODE_BUTTON_* code pressed or
+	// released; axis 0..3 (left x, left y, right x, right y) at -1..1, positive y down. Any thread
+	void (*pcButton)(int32_t androidKeycode, uint8_t pressed);
+	void (*pcAxis)(int32_t axis, float value);
 } VcmiBridgeApi;

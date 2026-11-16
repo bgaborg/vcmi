@@ -121,14 +121,14 @@ func key(code: int, pressed: bool) -> void:
 		_data.pc_key(code, pressed)
 
 
-# shortcut: no gamepad on the PC yet (A / B / X / Y, the right stick); the headset's QuestGamepad has them. An SDL
-# virtual gamepad in PcHost.cpp would add them
-func gamepadButton(_button: int, _pressed: bool) -> void:
-	pass
+func gamepadButton(button: int, pressed: bool) -> void:
+	if _data != null:
+		_data.pc_button(button, pressed)
 
 
-func gamepadAxis(_axis: int, _value: float) -> void:
-	pass
+func gamepadAxis(axis: int, value: float) -> void:
+	if _data != null:
+		_data.pc_axis(axis, value)
 
 
 func hapticFeedbackEnabled() -> bool:

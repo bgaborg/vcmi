@@ -1630,10 +1630,10 @@ static_assert(sizeof(VcmiPanelTown) == 56, "VcmiPanelTown is part of the bridge 
 #ifdef VCMI_WINDOWS
 #	include "PcHost.cpp"
 #	define BRIDGE_EXPORT __declspec(dllexport)
-#	define PC_HOST pcMain, pcFrame, pcMouse, pcKey
+#	define PC_HOST pcMain, pcFrame, pcMouse, pcKey, pcButton, pcAxis
 #else
 #	define BRIDGE_EXPORT __attribute__((visibility("default")))
-#	define PC_HOST nullptr, nullptr, nullptr, nullptr
+#	define PC_HOST nullptr, nullptr, nullptr, nullptr, nullptr, nullptr
 #endif
 
 extern "C" BRIDGE_EXPORT const VcmiBridgeApi vcmi_bridge_api = {
