@@ -15,6 +15,6 @@ This checkout is a fork of VCMI for a Meta Quest 3 build. The plan, with the cur
 
 ## Test on the Android build for Quest 3
 
-- The target is the Android APK on the headset. Do not substitute a Windows or other desktop build of VCMI.
+- The target is the Android APK on the headset; check each milestone there before calling it done. For daily testing on the PC use only Meta XR Simulator with the Godot host (`quest/tools/xrsim.sh`; the Windows build of the game inside the host once it exists), never a desktop VCMI on its own and never a 2D emulator (Meta SpatialSim, Android AVD): [`quest/EMULATORS.md`](../quest/EMULATORS.md).
 - Work without the user: build (`quest/tools/make-apk.sh` in WSL), install, launch and drive the headset over adb with `quest/tools/quest.sh` (`awake` first, `start-xr`, `test <cmd>`, `screenshot`). How, with the lessons learned: `quest/PHASE2.md`, "Working on the headset". Ask the user only for one-time steps (a cable, wireless debugging, a system dialog).
 - Save every screenshot under `quest/out/` with a descriptive name and send it to the user as the work progresses, together with what it shows.

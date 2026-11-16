@@ -11,11 +11,17 @@ Goal: the most immersive way to play Heroes 3 on Quest 3, with no motion sicknes
 | [`DATA_BRIDGE.md`](DATA_BRIDGE.md) | game data from VCMI to Godot: design, budgets, milestones and their measurements |
 | [`XR_PERFORMANCE.md`](XR_PERFORMANCE.md) | GPU cost of the 3D scene: measurements, rules, what to try next |
 | [`PHASE1.md`](PHASE1.md) | build settings, phase 1 test checklist, SoD_SP gap analysis |
+| [`PHASE5.md`](PHASE5.md) | the battle diorama: design and milestones 5a-5f |
+| [`VISUALS.md`](VISUALS.md) | the look and layout of the table and its panels |
+| [`MILESTONE_3B.md`](MILESTONE_3B.md) | the map's objects as sprites: atlas, HD mod art, local renders |
+| [`HEADSET_CHECKLIST.md`](HEADSET_CHECKLIST.md) | what to check on the headset before the release, and the known limits |
+| [`EMULATORS.md`](EMULATORS.md) | testing on the PC: Meta XR Simulator only; 2D emulators are forbidden |
+| [`RELEASE.md`](RELEASE.md), [`README.md`](README.md) | release steps and licences; the player guide |
 | [`xr/assets/room/LICENSES.md`](xr/assets/room/LICENSES.md) | sources and licences of the war room assets |
 
 ## 0. Status and next steps
 
-As of 2026-11-14.
+As of 2026-11-16.
 
 ### Done
 
@@ -56,6 +62,7 @@ Not closed yet:
    7. **Map fades (phase 4):** built ([`PHASE4.md`, "Fades"](PHASE4.md)): an alpha per object id in a small texture the sprite shader reads; the extension reports appearing and vanishing objects and keeps a vanished one's sprites until its fade ends. Shown on the PC; in play only on the headset.
 3. **Phase 6 parts done on the PC:** in passthrough the map and its panels show without the room, on the player's real table: on the scanned room's table (Meta scene API, `table_anchor.gd`, built), else at the wrist panel's height; a grip on the hourglass turned over ends the turn. In a table battle the sounds come from the stacks on the table (`battle_sounds.gd`: the creatures' and the spells' own sounds, the game's muted meanwhile, the 2D battle at its fastest speed). Left: table snapping to a scanned surface, the town screen as a diorama, shared anchors.
 4. **Everything written since 2026-11-12 is untested on the headset.** [`HEADSET_CHECKLIST.md`](HEADSET_CHECKLIST.md) lists what to check, in order, before the release.
+5. **The game on the PC in Meta XR Simulator** (decided 2026-11-16, section 8): today `quest/tools/xrsim.sh` runs only the Godot host there (room, table, controllers; `pc_bridge.gd` stands in for the game, [`EMULATORS.md`](EMULATORS.md)). Next: a Windows build of the game as a library the host loads in its own process, as on Android, behind the same two interfaces (the bridge's C table and the host's `bridge` object), so room, table and game run together on the PC and over Quest Link. The APK on the headset stays the target and the release check.
 
 Each milestone records its numbers in `DATA_BRIDGE.md` and is optimised before the next one starts.
 
@@ -311,3 +318,5 @@ Decided:
   - **Co-located multiplayer with shared anchors: after the release.** It needs two headsets to build and test; VCMI's own network multiplayer already works with each player on their own table.
   - **Card metadata from mods** stays the APK's `cards.json` (`shortcut:` in [`PHASE4.md`](PHASE4.md)) until a mod needs it.
   - **Release: sideload first** ([`RELEASE.md`](RELEASE.md)).
+- 2026-11-15: no 2D emulators (Meta SpatialSim, Android AVDs): they cannot run the immersive part ([`EMULATORS.md`](EMULATORS.md)).
+- 2026-11-16: daily testing on the PC with a Windows build of the game inside the Godot host, in Meta XR Simulator or over Quest Link; the APK on the headset for milestones and the release.

@@ -28,7 +28,7 @@ Local build and device work: [`PHASE2.md`](PHASE2.md#working-on-the-headset). Ch
 Open phase 1 work, all on the headset:
 
 - [ ] Mod preset: install `hota` and `vcmi-extras` from the launcher (checklist 1.5, 4.1, 4.2), then the rest (4.3-4.8). The 128 HotA maps in `Maps/` fail to load until `hota` is installed.
-- [ ] Data import through the system file picker (checklist 1.3); data was copied with adb so far. On the Android emulator (API 35, 2026-11-15) it passes: files in `Download/H3`, the launcher's "Copy existing data", the picker's "Use this folder" and "Allow", then the mods step. Pressing Play there starts `VcmiXrActivity` and Godot, which then aborts in the emulator's ARM translation (no AES on the emulated CPU): the VR part runs only on the headset.
+- [ ] Data import through the system file picker (checklist 1.3); data was copied with adb so far. It passed once in a 2D Android emulator (2026-11-15: "Copy existing data", the picker's "Use this folder" and "Allow", then the mods step); 2D emulators are forbidden since ([`EMULATORS.md`](EMULATORS.md)), so the check left is on the headset.
 - [ ] SoD_SP gap analysis: play through the "verify" rows.
 - [ ] A full game, start to end (exit criterion; in VR this is the phase 3 exit).
 

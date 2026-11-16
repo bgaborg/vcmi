@@ -15,6 +15,8 @@ boot_splash/bg_color=Color(0, 0, 0, 1)
 [rendering]
 
 renderer/rendering_method="mobile"
+; black behind the loading text, as the launch splash (main.gd sets the room's own background after)
+environment/defaults/default_clear_color=Color(0, 0, 0, 1)
 textures/vram_compression/import_etc2_astc=true
 ; the war room (room.gd): dithering against banding in its dark gradients, finer lightmap texels on its walls
 anti_aliasing/quality/use_debanding=true

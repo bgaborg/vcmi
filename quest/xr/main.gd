@@ -160,6 +160,10 @@ func _ready() -> void:
 	get_viewport().vrs_mode = Viewport.VRS_XR # the foveation of project.godot, on the Mobile renderer
 	xr.pose_recentered.connect(func(): screen_placed = false)
 	xr.session_begun.connect(func(): surface_pending = true)
+	# the PC (Meta XR Simulator): the runtime asks the app to end, as its session replay does; the headset's own
+	# lifecycle ends the app there
+	if not OS.has_feature("android"):
+		xr.session_stopping.connect(get_tree().quit)
 	# the stick and the menu button may not report their release while the system menu has focus
 	xr.session_visible.connect(func():
 		_on_stick("primary", Vector2.ZERO, 0)
@@ -255,7 +259,9 @@ void fragment() {
 	add_child(world)
 
 	layer = OpenXRCompositionLayerCylinder.new()
-	bridge = Engine.get_singleton("VcmiBridge")
+	# the game's plugin on the headset; a stand-in on the PC (Meta XR Simulator, quest/tools/xrsim.sh)
+	bridge = (Engine.get_singleton("VcmiBridge") if OS.has_feature("android")
+			else preload("res://pc_bridge.gd").new())
 	layer.use_android_surface = true
 	layer.android_surface_size = SURFACE_SIZE
 	bridge.connect("test_command", _on_test_command)
