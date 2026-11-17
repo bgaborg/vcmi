@@ -2,7 +2,7 @@
 
 Everything below was written between 2026-11-12 and 2026-11-14, checked on the PC only (local tests, PC renders, an Android build). None of it has run on the headset. Check it in this order before a release: the earlier steps are needed by the later ones. Each step names what to look for and where the code is, so a failure can be found fast.
 
-Build and install: `quest/tools/make-apk.sh` (WSL), then `quest/tools/quest.sh install <apk>`. Tools: [`PHASE2.md`, "Working on the headset"](PHASE2.md).
+The session that works through it: [`HEADSET_SESSION.md`](HEADSET_SESSION.md). Build and install: `quest/tools/make-apk.sh` (WSL), then `quest/tools/quest.sh install <apk>`. Tools: [`PHASE2.md`, "Working on the headset"](PHASE2.md).
 
 ## 1. Start
 

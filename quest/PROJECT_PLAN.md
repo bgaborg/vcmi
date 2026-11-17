@@ -15,6 +15,7 @@ Goal: the most immersive way to play Heroes 3 on Quest 3, with no motion sicknes
 | [`VISUALS.md`](VISUALS.md) | the look and layout of the table and its panels |
 | [`MILESTONE_3B.md`](MILESTONE_3B.md) | the map's objects as sprites: atlas, HD mod art, local renders |
 | [`HEADSET_CHECKLIST.md`](HEADSET_CHECKLIST.md) | what to check on the headset before the release, and the known limits |
+| [`HEADSET_SESSION.md`](HEADSET_SESSION.md) | the plan of the headset session for v0.1: preparation on the PC, the unattended run, the hour in the headset, the release |
 | [`EMULATORS.md`](EMULATORS.md) | testing on the PC: Meta XR Simulator only; 2D emulators are forbidden |
 | [`META_TOOLS.md`](META_TOOLS.md) | Meta's tools for staying on the PC: XR Operator (real input, full screenshots, agent control), what still needs the headset, next steps |
 | [`RELEASE.md`](RELEASE.md), [`README.md`](README.md) | release steps and licences; the player guide |
