@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "metavr": {
+      "command": "${USERPROFILE}/.metavr/bin/metavr.exe",
+      "args": ["mcp", "server"]
+    }
+  }
+}

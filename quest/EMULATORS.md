@@ -59,10 +59,19 @@ every app).
   into the runtime's swapchain), and a copy of the host's window goes stale while another window covers it (tried
   2026-11-15/16 with PrintWindow). The game screen, a composition layer, is not in them: each shot also saves the
   game's own frame as `<name>-game.png`.
+- **Meta XR Operator** (`metavr tools install xroperator`, v207.0.1, [`META_TOOLS.md`](META_TOOLS.md)): `xrsim.sh` loads it as an
+  OpenXR API layer for its run when installed (`XR_API_LAYER_PATH`, no system setting). It injects real OpenXR input
+  (controller poses, buttons, trigger, sticks, the head pose) and captures the compositor's image, the room and the
+  game screen layer together. `quest/tools/xrop.py` drives it from scripts (`aim`, `click`, `press`, `shot`); an agent
+  uses it through `metavr mcp server` (`.mcp.json`). `XRSIM_TIMEOUT=960 quest/tools/xrsim.sh
+  quest/tools/xrsim-live.txt` keeps the host open for that. The simulator's and the Operator's controllers are
+  Touch Plus (`/interaction_profiles/meta/touch_controller_plus`): the action map lists that profile, without it they
+  give no input.
+- Each scripted run starts from the host's default settings (`xrsim.sh` removes Godot's `screen.cfg`).
 - The simulator's window shows "XR Simulator runtime disabled" and no view while it is not the system runtime; that
   is expected with the per-process setup.
 - `metavr xrsim record` (the compositor to MP4) fails against v207.1: "its build doesn't include the recording
-  service".
+  service" (checked again 2026-11-17). `metavr xrsim runtime fps` reads the frame rate (72 Hz).
 - Meta's record-and-replay: record in the simulator's window ("Record session"), replay automatically with a
   `session_capture` block in `%APPDATA%\MetaXR\MetaXrSimulator\persistent_data.json` (remove it afterwards, or every
   launch replays), compare frames with the simulator's `scripts\vrs_pixmatch.py`. The host quits when the runtime

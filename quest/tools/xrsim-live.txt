@@ -1,0 +1,3 @@
+# Keeps the host and the game open for 15 minutes, to drive them live with Meta XR Operator (quest/EMULATORS.md):
+# XRSIM_TIMEOUT=960 quest/tools/xrsim.sh quest/tools/xrsim-live.txt, in the background.
+900 quit
