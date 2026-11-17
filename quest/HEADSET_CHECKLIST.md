@@ -32,6 +32,7 @@ Build and install: `quest/tools/make-apk.sh` (WSL), then `quest/tools/quest.sh i
 | 1.0a | Press Play in the launcher | the VCMI shield and "Loading..." (Horizon's splash), then the gold "Loading..." with a bar filling as the war room is built, no Godot logo, no half-built room | `vr_splash.png`, `project.godot` `boot_splash`, `main.gd` (`LOADING_BAR`), `room.gd` `staged` |
 | 2.12 | With a room scanned (a desk marked as a table), choose passthrough from a chair at the desk | one system dialog asks to share the room; allowed, the map lies on the desk's top, its near edge on your side; log line "a real table" | `table_anchor.gd`, `TableMath.on_real_table` |
 | 2.12a | Passthrough without a scanned room, or the permission denied | the map at the wrist panel's height, as before | `table_anchor.gd` |
+| 2.14 | Point at the game screen's buttons, then at the table's tiles and the wrist panel | the pointer dot is small everywhere (0.6 degrees, about a mouse cursor on the screen) and easy to find; it hides no button or tile. The real controllers give input (Touch Plus profile, added 2026-11-17) | `main.gd` `POINTER_SIZE`; `openxr_action_map.tres` |
 
 ## 3. The battle (phase 5)
 

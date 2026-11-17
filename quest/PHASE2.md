@@ -8,7 +8,7 @@ Godot project `quest/xr/` (`main.gd` host, `room.gd` war room), Android side in 
 
 | Part | How |
 |---|---|
-| Pointer | trigger = left click, grip = right click (hold popups). The game's cursor is not drawn into the display: Godot draws a dot where the ray hits. Once the gamepad is used, the game also shows its own cursor |
+| Pointer | trigger = left click, grip = right click (hold popups). The game's cursor is not drawn into the display: Godot draws a dot where the ray hits, 0.6 degrees across at any distance (`POINTER_SIZE`). Once the gamepad is used, the game also shows its own cursor |
 | Gamepad | the controllers are one SDL gamepad (`QuestGamepad`, SDL's Android joystick entry points): right A / B = accept / cancel, left X / Y = next hero / town, left menu (short press) = options, stick clicks = map level / grid, right thumbstick = map scroll. Bound by the game in `config/keyBindingsConfig.json` ("joystickButtons", "joystickAxes"). Registered on the first pointer move: SDL sends buttons of an unopened gamepad as keyboard keys |
 | Wrist panel | above the left controller (or the right: its "Settings" page, [`VISUALS.md`](VISUALS.md)) when it is turned to the eyes; the other hand's ray and trigger press end turn, spells, kingdom, quests, sleep, dig, quick save, quick load as the game's own keys. Godot does not know the open screen, so labels name the key (in battle D is defend) |
 | Screen | left thumbstick: distance up / down (1-4 m; the screen is a cylinder around the head, so nearer curves more), width left / right (1-4 m, at most 115 deg of arc). Saved in `user://screen.cfg`. Recenter follows the runtime event and puts the screen at the current eye height (so no seated / standing mode) |

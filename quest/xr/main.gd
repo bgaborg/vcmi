@@ -58,6 +58,10 @@ const PAD_BUTTONS := {
 }
 ## holding the left menu button this long switches the environment instead of opening the game options
 const MENU_HOLD_MS := 600
+## the pointer dot's radius per metre from the eye: 0.3 degrees, a dot 0.6 degrees across (2.1 cm on the screen at
+## 2 m, about 22 game pixels; 6 mm on the table). It was 4 cm wide at any distance: as wide as a button on the
+## screen and several tiles on the table
+const POINTER_SIZE := 0.00524
 ## the right thumbstick is the gamepad right stick: the game scrolls the map with it ("mouseSwipe")
 const PAD_RIGHT_X := 2
 const PAD_RIGHT_Y := 3
@@ -354,8 +358,9 @@ void fragment() {
 	# the game's own cursor is not drawn into the virtual display; a dot marks the pointer instead of changing VCMI
 	pointer_dot = Node3D.new()
 	pointer_dot.visible = false
+	pointer_dot.scale = Vector3.ONE * 2.0 * POINTER_SIZE # as on the screen, until a head pose sizes it
 	add_child(pointer_dot)
-	for part in [[0.02, Color(0.05, 0.05, 0.05), 0], [0.013, Color.WHITE, 1]]:
+	for part in [[1.0, Color(0.05, 0.05, 0.05), 0], [0.6, Color.WHITE, 1]]: # radii in POINTER_SIZE
 		var sphere := SphereMesh.new()
 		sphere.radius = part[0]
 		sphere.height = part[0] * 2.0
@@ -609,6 +614,15 @@ func _process(delta: float) -> void:
 		if changed & 4 == 0 and not layer.visible: # out of the game (main menu, loading): always the screen
 			layer.visible = true
 
+	_update_pointer()
+	if pointer_dot.visible and tracked != null:
+		# the same size to the eye wherever it is: on the screen, the table or the wrist panel
+		var eye := (origin.transform * (tracked as Transform3D)).origin
+		pointer_dot.scale = Vector3.ONE * eye.distance_to(pointer_dot.global_position) * POINTER_SIZE
+
+
+## The rays and the pointer dot, on whatever the active ray hits first
+func _update_pointer() -> void:
 	for ray in rays:
 		ray.visible = false
 	_update_hotkey_panel()
