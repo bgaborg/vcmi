@@ -7,7 +7,8 @@ extends RefCounted
 ## the game (VCMI_PC_GAME, default the build in ~/vcmi-build) the room runs alone and the screen stays empty.
 ## With VCMI_XR_SCRIPT (a file of lines `<seconds> <command> [a] [b] [c]`, `#` comments), it plays the test commands
 ## the headset gets over adb (main.gd _on_test_command) at those times after start, plus `shot <name>`, `tap <x> <y>`
-## (a left click at a game pixel) and `quit`.
+## (a left click at a game pixel), `type <text>` (typed into the focused field: the chat after `key 61`, Tab, takes
+## cheat codes), `key <android key code>` (pressed and released: 66 Enter) and `quit`.
 ## A shot renders the scene once from the headset's pose into $VCMI_XR_SHOTS/<name>.png: the eyes render into the
 ## runtime's swapchain, which Godot cannot read back, and the window's own image goes stale while it is covered.
 ## Composition layers are not in it, so the game's own frame goes into <name>-game.png beside it.
@@ -33,7 +34,7 @@ func _init() -> void:
 		var numbers := [0.0, 0.0, 0.0]
 		for i in mini(words.size() - 2, 3):
 			numbers[i] = float(words[i + 2])
-		var shot := words[2] if words.size() > 2 else ""
+		var shot := " ".join(words.slice(2)) # a shot's name, or the text to type
 		tree.create_timer(float(words[0])).timeout.connect(_play.bind(words[1], numbers, shot))
 
 
@@ -45,6 +46,13 @@ func _play(command: String, numbers: Array, shot: String) -> void:
 			_shot(tree, shot)
 		"quit":
 			tree.quit()
+		"type":
+			if _data != null:
+				_data.pc_text(shot)
+		"key":
+			key(int(numbers[0]), true)
+			await tree.create_timer(0.1).timeout
+			key(int(numbers[0]), false)
 		"tap": # a left click at game pixel a, b, through the methods main.gd calls
 			pointerMove(numbers[0], numbers[1])
 			pointerButton(1, true)

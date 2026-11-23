@@ -116,6 +116,7 @@ protected:
 		ClassDB::bind_method(D_METHOD("pc_key", "keycode", "pressed"), &VcmiData::pc_key);
 		ClassDB::bind_method(D_METHOD("pc_button", "keycode", "pressed"), &VcmiData::pc_button);
 		ClassDB::bind_method(D_METHOD("pc_axis", "axis", "value"), &VcmiData::pc_axis);
+		ClassDB::bind_method(D_METHOD("pc_text", "text"), &VcmiData::pc_text);
 #endif
 	}
 
@@ -356,6 +357,12 @@ public:
 	{
 		if(api && api->pcAxis)
 			api->pcAxis(axis, value);
+	}
+
+	void pc_text(const String & text)
+	{
+		if(api && api->pcText)
+			api->pcText(text.utf8().get_data());
 	}
 
 	PackedByteArray pcPixels;

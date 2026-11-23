@@ -1,7 +1,8 @@
 # The game in Meta XR Simulator (quest/tools/xrsim.sh quest/tools/xrsim-game.txt, after quest/tools/make-pc.sh): from
 # the main menu into the first scenario (All for One), its map on the table. Each shot also saves the game's frame
 # (<name>-game.png, 2560x1440), then the gamepad: B closes the scenario's intro pages, start opens the game's
-# options, B closes them, the right stick scrolls the map. Taps are game pixels.
+# options, B closes them, the right stick scrolls the map; last a cheat typed into the chat (vcmieagles reveals the
+# map). Taps are game pixels.
 12 shot menu
 13 tap 1766 270
 15 tap 1773 256
@@ -22,4 +23,8 @@
 58 stick 1 0
 59 stick 0 0
 61 shot scrolled
-62 quit
+62 key 61
+63 type vcmieagles
+64 key 66
+66 shot revealed
+67 quit

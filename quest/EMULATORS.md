@@ -47,8 +47,10 @@ every app).
     screen's cylinder layer, and the table gets the game's data from the bridge as on the headset.
   - VCMI's settings, logs and saves go to `~/vcmi-build/win/userdata` (`dirs.json` next to the Godot executable, as
     VCMI looks for it beside the process's executable), not to Documents.
-  - Not on the PC yet: Ctrl, Shift and Alt as modifiers and typing text (pushed key events change neither SDL's
-    keyboard state nor its text input; `PcHost.cpp` shortcut). Quitting the game from its menu ends the host, as the app ends on the headset.
+  - Text: the scripts' `type <text>` types into the focused field (`pcText`, an SDL text event), so cheat codes go
+    in through the chat (`key 61`, `type vcmieagles`, `key 66`). Not on the PC yet: Ctrl, Shift and Alt as modifiers
+    (pushed key events do not change SDL's keyboard state; `PcHost.cpp` shortcut). Quitting the game from its menu
+    ends the host, as the app ends on the headset.
 - **Scripted tests**: a script lists test commands with times (the same commands `quest.sh test` sends to the
   headset), plus `shot <name>`, `tap <x> <y>` (a click at a game pixel) and `quit`. `xrsim-smoke.txt` runs the
   host's modes, `xrsim-game.txt` goes from the main menu into a scenario and onto the table, then uses the gamepad

@@ -146,8 +146,8 @@ void pcMouse(float x, float y, uint8_t button, uint8_t pressed)
 }
 
 // the Android key codes the host sends (KeyEvent.KEYCODE_*) as SDL key codes. shortcut: pushed key events do not change
-// SDL's keyboard state, from which the game reads Ctrl, Shift and Alt, and make no text input; SDL's virtual keyboard
-// would, when the PC needs modifiers or typing
+// SDL's keyboard state, from which the game reads Ctrl, Shift and Alt; SDL's virtual keyboard would, when the PC needs
+// modifiers. Text goes in through pcText
 SDL_Keycode sdlKey(int32_t code)
 {
 	if(code >= 29 && code <= 54) // A..Z
@@ -198,6 +198,18 @@ void pcKey(int32_t androidKeycode, uint8_t pressed)
 	event.key.key = key;
 	event.key.scancode = SDL_GetScancodeFromKey(key, nullptr); // the game names its bindings by scan code
 	event.key.down = pressed;
+	SDL_PushEvent(&event);
+}
+
+void pcText(const char * utf8)
+{
+	if(!windowId || !utf8 || !*utf8)
+		return;
+	SDL_Event event{};
+	event.type = SDL_EVENT_TEXT_INPUT;
+	event.text.windowID = windowId;
+	// shortcut: never freed (SDL copies the event, not its text), a few bytes per typed line; fine for tests
+	event.text.text = SDL_strdup(utf8);
 	SDL_PushEvent(&event);
 }
 

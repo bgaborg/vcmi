@@ -10,7 +10,7 @@
 #include <stdint.h>
 
 // raise on any change to the structs below; the extension refuses a table with another version
-#define VCMI_BRIDGE_VERSION 24
+#define VCMI_BRIDGE_VERSION 25
 
 typedef struct VcmiBridgeStats
 {
@@ -352,4 +352,6 @@ typedef struct VcmiBridgeApi
 	// released; axis 0..3 (left x, left y, right x, right y) at -1..1, positive y down. Any thread
 	void (*pcButton)(int32_t androidKeycode, uint8_t pressed);
 	void (*pcAxis)(int32_t axis, float value);
+	// UTF-8 text typed into the focused text field (chat, cheats, save names), as an IME would. Any thread
+	void (*pcText)(const char * utf8);
 } VcmiBridgeApi;
