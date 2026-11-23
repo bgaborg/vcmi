@@ -51,6 +51,10 @@ every app).
     in through the chat (`key 61`, `type vcmieagles`, `key 66`). Not on the PC yet: Ctrl, Shift and Alt as modifiers
     (pushed key events do not change SDL's keyboard state; `PcHost.cpp` shortcut). Quitting the game from its menu
     ends the host, as the app ends on the headset.
+- **Live commands**: while `xrsim.sh` runs (`XRSIM_TIMEOUT=1800 quest/tools/xrsim.sh quest/tools/xrsim-live.txt` keeps it
+  open), `quest/tools/xrsim-cmd.sh <command> [args]` sends one command and prints the host's reply, as `quest.sh test`
+  does on the headset: the same test commands plus `tap`, `type`, `key`, `shot`. With the cheat codes (`type
+  vcmiainur`, `vcmimove`, `vcmieagles`, `vcmiteleport x y`) a battle or any map situation is a minute away.
 - **Scripted tests**: a script lists test commands with times (the same commands `quest.sh test` sends to the
   headset), plus `shot <name>`, `tap <x> <y>` (a click at a game pixel) and `quit`. `xrsim-smoke.txt` runs the
   host's modes, `xrsim-game.txt` goes from the main menu into a scenario and onto the table, then uses the gamepad

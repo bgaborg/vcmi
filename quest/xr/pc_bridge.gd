@@ -23,19 +23,36 @@ var _pointer := Vector2.ZERO
 
 func _init() -> void:
 	viewport.add_child(_frame)
-	var script := OS.get_environment("VCMI_XR_SCRIPT")
-	if script == "" or not FileAccess.file_exists(script):
-		return
 	var tree := Engine.get_main_loop() as SceneTree
-	for line in FileAccess.get_file_as_string(script).split(String.chr(10)):
-		var words := line.strip_edges().split(" ", false)
-		if words.size() < 2 or words[0].begins_with("#"):
-			continue
-		var numbers := [0.0, 0.0, 0.0]
-		for i in mini(words.size() - 2, 3):
-			numbers[i] = float(words[i + 2])
-		var shot := " ".join(words.slice(2)) # a shot's name, or the text to type
-		tree.create_timer(float(words[0])).timeout.connect(_play.bind(words[1], numbers, shot))
+	var script := OS.get_environment("VCMI_XR_SCRIPT")
+	if script != "" and FileAccess.file_exists(script):
+		for line in FileAccess.get_file_as_string(script).split(String.chr(10)):
+			var words := line.strip_edges().split(" ", false)
+			if words.size() >= 2 and not words[0].begins_with("#"):
+				tree.create_timer(float(words[0])).timeout.connect(_command.bind(words.slice(1)))
+	if OS.get_environment("VCMI_XR_INBOX") != "":
+		_read_inbox(tree, OS.get_environment("VCMI_XR_INBOX"))
+
+
+## `words` as a script line has them after its time: the command, then numbers or a shot's name or the text to type
+func _command(words: PackedStringArray) -> void:
+	var numbers := [0.0, 0.0, 0.0]
+	for i in mini(words.size() - 1, 3):
+		numbers[i] = float(words[i + 1])
+	_play(words[0], numbers, " ".join(words.slice(1)))
+
+
+## the PC's `quest.sh test`: runs the lines appended to `path` while the host runs (quest/tools/xrsim-cmd.sh)
+func _read_inbox(tree: SceneTree, path: String) -> void:
+	var done := 0
+	while true:
+		await tree.create_timer(0.3).timeout
+		var lines := FileAccess.get_file_as_string(path).split(String.chr(10))
+		for i in range(done, lines.size() - 1): # the last part is unfinished until its newline
+			var words := lines[i].strip_edges().split(" ", false)
+			if not words.is_empty():
+				_command(words)
+		done = maxi(done, lines.size() - 1)
 
 
 func _play(command: String, numbers: Array, shot: String) -> void:

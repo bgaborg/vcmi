@@ -37,6 +37,7 @@ trap 'mv "$KEEP" "$REPO/quest/xr/project.godot"' EXIT
 trap 'exit 1' INT TERM
 
 rm -f "$OUT/run.log"
+: > "$OUT/inbox.txt" # live commands while it runs: quest/tools/xrsim-cmd.sh
 # each run starts from the host's defaults: an environment or screen place saved by an earlier run would change the shots
 rm -f "$APPDATA/Godot/app_userdata/VCMI XR/screen.cfg"
 if [ -f "$XROPERATOR/XrApiLayer_METAX_operator.json" ]; then
@@ -47,7 +48,7 @@ fi
 # registers new extensions (vcmi_xr_pc.gdextension) in .godot/extension_list.cfg, which a plain run only reads
 timeout 120 "$GODOT" --headless --path "$REPO/quest/xr" --import > "$OUT/import.log" 2>&1 || true
 XR_RUNTIME_JSON="$(cygpath -w "$XRSIM/meta_openxr_simulator.json")" VCMI_XR_SCRIPT="$(cygpath -w "$SCRIPT")" \
-	VCMI_XR_SHOTS="$(cygpath -w "$OUT")" timeout "$TIMEOUT" "$GODOT" --path "$REPO/quest/xr" > "$OUT/run.log" 2>&1 || true
+	VCMI_XR_SHOTS="$(cygpath -w "$OUT")" VCMI_XR_INBOX="$(cygpath -w "$OUT/inbox.txt")" timeout "$TIMEOUT" "$GODOT" --path "$REPO/quest/xr" > "$OUT/run.log" 2>&1 || true
 grep -v "^\[Meta XR Simulator\]" "$OUT/run.log" | grep -E "OpenXR: Running|VCMI XR|SCRIPT ERROR" || true
 ls "$OUT"/*.png 2>/dev/null || true
 if grep -q "SCRIPT ERROR" "$OUT/run.log"; then
