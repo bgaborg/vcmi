@@ -23,8 +23,8 @@ into a situation (a battle, a boat, a siege).
    - the battle: 3.1–3.13.
 
    A failure here gets fixed before the session.
-2. **Saves for each situation**, made on the PC with VCMI's cheat codes and loaded on the headset with `adb push` (the
-   same commit on both, so the saves load):
+2. **Each situation set up with VCMI's cheat codes** (`docs/players/Cheat_Codes.md`: armies, spells, `vcmimove`,
+   `vcmiteleport x y`), found first in the simulator, then typed on the headset by the session script:
    - a hero next to a wandering monster with seven stacks a side (3.2–3.11, 3.14);
    - a hero with a boat (2.7);
    - a monolith (2.8);
@@ -32,11 +32,27 @@ into a situation (a battle, a boat, a siege).
    - a resource and a weak monster (2.10b);
    - a siege of a town with towers (3.12, 3.12b);
    - a mass spell, Armageddon, a ray shooter and chain lightning in the books and armies (3.6b, 3.9, 3.9a, 3.9b).
-3. **`quest/tools/xr-session.sh`**: one script for part 1. It installs the APK, pushes the saves, runs the steps
+3. **`quest/tools/xr-session.sh`**: one script for part 1. It installs the APK, sets up each situation with the cheats, runs the steps
    below in order, and writes a report of pass or fail per row with screenshots to `quest/out/session-<date>/`.
 4. **The APK** from the final commit, and the release notes drafted: what works, the known limits, the install steps.
 5. **The import test's data**: the Heroes 3 files pushed to `/sdcard/Download/H3` on the headset at the start of
    part 1, for part 2's import test.
+
+### Done so far (2026-11-23)
+
+- **Typing on the PC** (`type <text>` in the scripts): cheat codes work in the simulator. `xrsim-game.txt` checks
+  `vcmieagles`.
+- **Live commands on the PC**: `quest/tools/xrsim-cmd.sh`, the PC's `quest.sh test`. A real battle is about a
+  minute away: `type vcmiainur`, `vcmimove`, then two taps on a wandering monster.
+- **Shown in the simulator, a real battle on the table:**
+  - 3.2: the field replaces the map;
+  - 3.3: the creatures stand on their hexes;
+  - 3.4: reach and obstacles;
+  - 3.5: a move made in 2D slides on the table (`out/pc-live-battle-table.png`, `out/pc-battle-moved-table.png`).
+
+  Not yet checked there: a move started from the table, shots, spells, sieges, the battle's end.
+- **Saves are not needed:** the cheats set up each situation on the headset too (`adb shell input text`, as
+  `xr-minimap.sh` does), so there is no doubt about PC saves loading on Android.
 
 ## 0. Setup (you, 10 minutes)
 
@@ -56,11 +72,11 @@ Failures are noted and the run goes on.
 | The minimap and the fog | (DATA_BRIDGE) | `xr-minimap.sh` |
 | A whole turn without the 2D side panel | 2.2 | `xr-panel.sh` |
 | Tabletop mode, the wrist panel's settings, a click on the tilted board, a pan over a revealed map | 2.1, 2.3, 2.5, 2.6 | `quest.sh test` (`aim`, `click`, `wrist`, `stick`), screenshots |
-| Fades, by command and in play | 2.10a, 2.10b | `test fade`, the resource save |
-| Boat, monolith, enemy hero | 2.7, 2.8, 2.9 | the saves |
+| Fades, by command and in play | 2.10a, 2.10b | `test fade`, a resource picked up |
+| Boat, monolith, enemy hero | 2.7, 2.8, 2.9 | `vcmiteleport` next to each |
 | The room's light and haze, at 72 Hz, with and without the flicker | 2.13 | `test gfx 9 0/1`, `quest.sh sample` |
-| The sample battle, then a real one: placement, reach, a move, a shot, melee, the wrist's battle page, the heroes, two-hex creatures, the end | 3.1–3.8a, 3.10, 3.11 | `test battle 1`, the battle save, `hex` clicks |
-| Spells, mass spells, Armageddon, a ray shooter, a siege with towers, quick combat | 3.6b, 3.9–3.9b, 3.12, 3.12b, 3.13 (quick combat) | the saves |
+| The sample battle, then a real one: placement, reach, a move, a shot, melee, the wrist's battle page, the heroes, two-hex creatures, the end | 3.1–3.8a, 3.10, 3.11 | `test battle 1`, a cheated army against a monster, `hex` clicks |
+| Spells, mass spells, Armageddon, a ray shooter, a siege with towers, quick combat | 3.6b, 3.9–3.9b, 3.12, 3.12b, 3.13 (quick combat) | `vcmiistari`, `vcmiarmy`, `vcmiteleport` |
 | Performance: the heaviest map, a battle with seven stacks a side | 3.14, RELEASE step 2 | `xr-perf.sh`, `quest.sh sample` |
 | Heat: 30 minutes in play on the table, sampled | RELEASE step 2 | `quest.sh sample` |
 
